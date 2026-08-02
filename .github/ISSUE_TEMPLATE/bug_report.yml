@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in the template behaves differently than it says it does
+labels: [bug]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Before filing: `pnpm install && pnpm dev` should boot a seeded app offline in under two
+              minutes, and `pnpm verify` should be green on a fresh clone. If either is false for you,
+              that is itself the bug and worth reporting even if you cannot narrow it further.
+    - type: textarea
+      id: what
+      attributes:
+          label: What happened
+          description: What you did, what happened, what you expected instead.
+      validations:
+          required: true
+    - type: textarea
+      id: repro
+      attributes:
+          label: How to reproduce
+          description: |
+              Commands, ideally from a fresh clone. A failing test is worth more than a description.
+          render: shell
+      validations:
+          required: true
+    - type: input
+      id: where
+      attributes:
+          label: Where
+          description: |
+              Which part — the framework (`packages/keel`), an example app, the adoption command
+              (`pnpm init-app`), the static demo, CI, or the docs.
+      validations:
+          required: true
+    - type: textarea
+      id: env
+      attributes:
+          label: Environment
+          description: |
+              Output of `node -v`, `pnpm -v`, `git rev-parse --short HEAD`, and your OS. The commit
+              matters more here than it usually would: this template is not versioned and has no
+              changelog, so it is the only way to say which keel you are running.
+          render: shell
+      validations:
+          required: true
+    - type: checkboxes
+      id: gate
+      attributes:
+          label: Gate
+          options:
+              - label: I ran `pnpm verify` and included the relevant output
+              - label: This reproduces on a fresh clone (not only in my adopted fork)

@@ -1,0 +1,13 @@
+{
+    "appNotifications": {
+        "titleDocketFlagged": "Docket flagged",
+        "bodyDocketFlagged": "{org} flagged the docket “{label}”.",
+        "smsDocketFlagged": "{org} flagged “{label}”.",
+        "subjectDocketFlagged": "Docket flagged: {label}"
+    },
+    "fixture": {
+        "title": "Keel test fixture",
+        "docketsHeading": "Dockets",
+        "docketOpenedBy": "Opened by {name}"
+    }
+}

@@ -1,0 +1,50 @@
+{
+    "name": "showcase",
+    "version": "0.1.0",
+    "private": true,
+    "license": "MIT",
+    "description": "The showcase app: the demo product that exercises every keel capability (ADR-0007).",
+    "scripts": {
+        "dev": "NEXT_TELEMETRY_DISABLED=1 APP_MODE=simulated next dev --port \"$(node ../../scripts/print-port.mjs showcase)\"",
+        "dev:real": "APP_MODE=real tsx ../../scripts/check-real-env.ts && NEXT_TELEMETRY_DISABLED=1 APP_MODE=real next dev --port \"$(node ../../scripts/print-port.mjs showcase)\"",
+        "llm:record": "tsx scripts/llm-record.ts",
+        "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+        "start": "next start --port \"$(node ../../scripts/print-port.mjs showcase)\"",
+        "panda:codegen": "panda codegen",
+        "typecheck": "next typegen && tsc --noEmit",
+        "test:e2e": "NEXT_TELEMETRY_DISABLED=1 playwright test --project=chromium && NEXT_TELEMETRY_DISABLED=1 playwright test --project=destructive --workers=1 --no-deps",
+        "ladle": "PANDA_LOG_LEVEL=silent ladle serve --port \"$(node ../../scripts/print-port.mjs ladle)\"",
+        "build:e2e": "NEXT_TELEMETRY_DISABLED=1 E2E_BUILD=1 APP_MODE=simulated next build",
+        "start:e2e": "E2E_BUILD=1 APP_MODE=simulated node ../../scripts/serve-standalone.mjs",
+        "build:demo": "NEXT_TELEMETRY_DISABLED=1 DEMO_MODE=1 APP_MODE=simulated next build",
+        "start:demo": "DEMO_MODE=1 APP_MODE=simulated node ../../scripts/serve-standalone.mjs",
+        "build:demo-static": "vite build --config vite.demo.config.ts",
+        "check:demo-size": "node ../../scripts/check-demo-size.mjs",
+        "e2e:demo-static": "playwright test --config playwright.demo.config.ts"
+    },
+    "dependencies": {
+        "@app/seed": "workspace:*",
+        "@mantine/core": "^9.5.0",
+        "@mantine/form": "^9.5.0",
+        "@sentry/nextjs": "^10.68.0",
+        "keel": "workspace:*",
+        "kysely": "^0.29.4",
+        "next": "^16.2.12",
+        "next-intl": "^4.13.4",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8"
+    },
+    "devDependencies": {
+        "@axe-core/playwright": "^4.12.1",
+        "@ladle/react": "^5.1.1",
+        "@pandacss/dev": "^1.11.5",
+        "@playwright/test": "^1.62.0",
+        "@vitejs/plugin-react": "^6.0.4",
+        "embedded-postgres": "18.4.0-beta.17",
+        "pg": "^8.22.0",
+        "postcss": "^8.5.23",
+        "vite": "^8.1.5",
+        "vite-plugin-singlefile": "^2.3.3",
+        "vitest": "^4.1.10"
+    }
+}

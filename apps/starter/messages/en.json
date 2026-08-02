@@ -1,0 +1,20 @@
+{
+    "welcome": {
+        "appName": "Starter",
+        "title": "Starter",
+        "subtitle": "The smallest app this template can grow: one entity, one card, and everything else switched off.",
+        "dashboardLink": "Go to the dashboard"
+    },
+    "dashboard": {
+        "title": "Dashboard",
+        "signedInAs": "Signed in as {name} ({role})."
+    },
+    "items": {
+        "title": "Items",
+        "hint": "Items belong to the team you're working in — and never leave your tenant.",
+        "empty": "No items in this team yet.",
+        "addLabel": "New item",
+        "addButton": "Add item",
+        "readOnlyHint": "You have read-only access to items in this team."
+    }
+}

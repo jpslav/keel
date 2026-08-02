@@ -1,0 +1,13 @@
+{
+    "appNotifications": {
+        "titleDocketFlagged": "Expediente marcado",
+        "bodyDocketFlagged": "{org} marcó el expediente «{label}».",
+        "smsDocketFlagged": "{org} marcó «{label}».",
+        "subjectDocketFlagged": "Expediente marcado: {label}"
+    },
+    "fixture": {
+        "title": "Fixture de pruebas de keel",
+        "docketsHeading": "Expedientes",
+        "docketOpenedBy": "Abierto por {name}"
+    }
+}

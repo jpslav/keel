@@ -1,0 +1,280 @@
+# Hermetic checks — no cloud credentials, everything runs on fakes.
+#
+# pull_request validates every PR (against the merge commit, and for forks); push covers
+# post-merge validation on main. Feature branches without a PR rely on the local `pnpm verify`
+# gate (see /pre-pr) — this avoids running the whole suite twice on same-repo PRs.
+name: checks
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+concurrency:
+    group: checks-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    lint-typecheck-unit:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v4
+            - uses: actions/setup-node@v7
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm lint
+            - run: pnpm typecheck
+            - run: pnpm test:coverage
+            - name: coverage summary
+              run: node -e "const s=require('./coverage/coverage-summary.json').total; console.log('| metric | % |\n|---|---|', ...Object.entries(s).map(([k,v])=>'\n| '+k+' | '+v.pct+' |'))" >> "$GITHUB_STEP_SUMMARY"
+            - run: pnpm knip
+            - run: pnpm jscpd
+            # infra/ and spikes/ sit outside the root TS program, knip and jscpd, so ESLint was the
+            # only gate reaching either — and each one STATES a verification bar that nothing ran.
+            # infra/README.md calls `synth` its bar, and infra/ is the one tree whose paths have
+            # already rotted unnoticed once; docs/provenance.md cites the spike as the harness that
+            # de-risked ADR-0004 before anything was built on it, which makes it doc-load-bearing
+            # with no guard. Both are fast and fully offline.
+            - run: pnpm --filter infra synth
+            - run: pnpm --filter spike-kysely-pglite test
+
+    # The anti-drift job: the SAME migrations + RLS proof suite that unit tests run on pglite,
+    # against real Postgres (locally that's embedded-postgres; here a service container).
+    contract:
+        runs-on: ubuntu-latest
+        services:
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_PASSWORD: postgres
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s
+                    --health-retries 10
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v4
+            - uses: actions/setup-node@v7
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm test:contract
+              env:
+                  CONTRACT_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+    # The matrix below is DISCOVERED from apps/*, not hand-listed, because `pnpm init-app` renames or
+    # deletes app directories (docs/adopting.md) and never touches this file — a hard-coded shard list
+    # would name apps that no longer exist the moment an adopter ejects the showcase. This job needs no
+    # dependencies, so it runs before `pnpm install` even starts on the shards below.
+    e2e-shards:
+        runs-on: ubuntu-latest
+        outputs:
+            matrix: ${{ steps.discover.outputs.matrix }}
+        steps:
+            - uses: actions/checkout@v7
+            - name: discover e2e shards from apps/*
+              id: discover
+              # One shard per app running its own `test:e2e` script — UNLESS the app declares a
+              # Playwright project literally named `destructive`, in which case it splits into two
+              # shards instead of one (see the `e2e` job comment for why). Detected from the tree so a
+              # renamed or newly added app needs no edit here, same promise `init-app` makes everywhere
+              # else it repoints.
+              run: |
+                  shards=()
+                  for dir in apps/*/; do
+                      app="${dir%/}"
+                      app="${app#apps/}"
+                      config="apps/$app/playwright.config.ts"
+                      [ -f "$config" ] || continue
+                      if grep -q "name: 'destructive'" "$config"; then
+                          shards+=("{\"name\":\"$app\",\"run\":\"pnpm --filter $app exec playwright test --project=chromium\"}")
+                          shards+=("{\"name\":\"$app-destructive\",\"run\":\"pnpm --filter $app exec playwright test --project=destructive --workers=1 --no-deps\"}")
+                      else
+                          shards+=("{\"name\":\"$app\",\"run\":\"pnpm --filter $app test:e2e\"}")
+                      fi
+                  done
+                  matrix=$(printf '%s\n' "${shards[@]}" | jq -s -c '.')
+                  echo "computed matrix: $matrix"
+                  echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+    # SHARDED, because parallelism is only safe where the worlds are separate.
+    #
+    # Every Playwright worker inside one shard drives one dev server holding one `.data`, so specs
+    # mutate each other — measured, the flake rate rises monotonically with `workers`
+    # (.claude/future-tasks/e2e-shared-world-blocks-parallelism.md), which is why the configs pin
+    # `workers: 1` and why simply raising it here would trade CI time for CI flakes. Separate RUNNERS
+    # have separate worlds, so splitting the suite across jobs buys the parallelism safely: wall clock
+    # becomes the slowest shard instead of their sum. (The matrix is discovered, so the shard COUNT is
+    # whatever apps/* holds — two today for the showcase, one for the starter.)
+    #
+    # The destructive project keeps `--workers=1 --no-deps`: its nine specs still share one world with
+    # EACH OTHER. `--no-deps` is what lets it run without the chromium project, which the old
+    # single-job ordering used to provide.
+    e2e:
+        name: e2e (${{ matrix.shard.name }})
+        needs: e2e-shards
+        runs-on: ubuntu-latest
+        strategy:
+            # One red shard should not hide the others — a flake in destructive still leaves the
+            # chromium result on the PR.
+            fail-fast: false
+            matrix:
+                shard: ${{ fromJson(needs.e2e-shards.outputs.matrix) }}
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v4
+            - uses: actions/setup-node@v7
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            # Browsers are ~150MB and were re-downloaded on every run. Keyed on the lockfile because
+            # that is what pins the Playwright version the browser build must match.
+            - uses: actions/cache@v4
+              id: playwright-cache
+              with:
+                  path: ~/.cache/ms-playwright
+                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+            - run: pnpm exec playwright install --with-deps chromium
+              if: steps.playwright-cache.outputs.cache-hit != 'true'
+            # A cache hit restores the browsers but not the OS packages they link against.
+            - run: pnpm exec playwright install-deps chromium
+              if: steps.playwright-cache.outputs.cache-hit == 'true'
+            - run: ${{ matrix.shard.run }}
+              env:
+                  NEXT_TELEMETRY_DISABLED: '1'
+                  # Run against a PRODUCTION build rather than `next dev`. CI is cold every time, so it
+                  # pays a full on-demand compile for every route it touches — measured at ~3x local.
+                  # Building once up front removes that: locally the destructive project went 132s → 57s
+                  # on the same 14 tests. It also means CI finally exercises `next build`, which nothing
+                  # else here does. `packages/keel/src/adapters/index.ts` fails closed unless this is
+                  # set explicitly; `production-guard.test.ts` proves it still closes without it.
+                  E2E_BUILD: '1'
+            - uses: actions/upload-artifact@v7
+              if: failure()
+              with:
+                  # Per shard, or every shard races for one artifact name and only one survives.
+                  name: playwright-report-${{ matrix.shard.name }}
+                  path: apps/*/playwright-report/
+                  retention-days: 7
+
+    # Its own job: these specs drive the built shell straight from file:// with no server at all, so
+    # they need the vite build and nothing else — they used to queue behind the whole server suite.
+    demo-static:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v4
+            - uses: actions/setup-node@v7
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - uses: actions/cache@v4
+              id: playwright-cache
+              with:
+                  path: ~/.cache/ms-playwright
+                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+            - run: pnpm exec playwright install --with-deps chromium
+              if: steps.playwright-cache.outputs.cache-hit != 'true'
+            - run: pnpm exec playwright install-deps chromium
+              if: steps.playwright-cache.outputs.cache-hit == 'true'
+            - run: pnpm build:demo-static
+            - run: pnpm check:demo-size
+            - run: pnpm e2e:demo-static
+            - uses: actions/upload-artifact@v7
+              if: failure()
+              with:
+                  name: playwright-report-demo-static
+                  path: apps/*/playwright-report/
+                  retention-days: 7
+            # Every app's artifact — the glob must not name one app, or adding an app silently drops
+            # it from CI's evidence.
+            - uses: actions/upload-artifact@v7
+              with:
+                  name: static-demo
+                  path: apps/*/dist-demo/index.html
+                  retention-days: 14
+
+    # Adoption is advertised as one command (docs/adopting.md) and had no automated coverage at all —
+    # this proves `pnpm init-app` actually works, end to end, on the harshest path it supports
+    # (renaming AND ejecting the showcase in one call).
+    #
+    # The copy lives OUTSIDE /tmp on purpose, to match the documented local reproduction exactly
+    # (.claude/future-tasks/resolved/adoption-probe-not-under-tmp.md): on macOS, /tmp is a symlink to
+    # /private/tmp, so a workspace package's module graph resolves under both spellings and the request
+    # handler ends up holding a different `next/headers` instance than the fake auth adapter, which
+    # breaks `cookies()`. `runner.temp` is never under /tmp on either GitHub-hosted OS, so this specific
+    # bug cannot bite Linux CI today — but probing this way keeps the job correct if it is ever run on a
+    # macOS runner, rather than quietly relying on a Linux-only accident.
+    adoption-probe:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v4
+            - uses: actions/setup-node@v7
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+            # PROBE_DIR is exported here rather than declared in a job-level `env:`, because the
+            # `runner` context is NOT available at that level (only github/needs/strategy/matrix/
+            # vars/secrets/inputs are) and referencing it there fails the whole workflow at STARTUP —
+            # zero jobs, no checks on the PR, and a YAML parser reports nothing wrong.
+            - name: copy the checkout to a scratch dir outside /tmp
+              run: |
+                  echo "PROBE_DIR=$RUNNER_TEMP/adoption-probe" >> "$GITHUB_ENV"
+                  cp -R "$GITHUB_WORKSPACE" "$RUNNER_TEMP/adoption-probe"
+            - name: pnpm install
+              run: pnpm install
+              working-directory: ${{ env.PROBE_DIR }}
+            # Same cache the e2e/demo-static jobs use — `pnpm verify` below runs the full e2e suite.
+            - uses: actions/cache@v4
+              id: playwright-cache
+              with:
+                  path: ~/.cache/ms-playwright
+                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+            - run: pnpm exec playwright install --with-deps chromium
+              working-directory: ${{ env.PROBE_DIR }}
+              if: steps.playwright-cache.outputs.cache-hit != 'true'
+            - run: pnpm exec playwright install-deps chromium
+              working-directory: ${{ env.PROBE_DIR }}
+              if: steps.playwright-cache.outputs.cache-hit == 'true'
+            - name: pnpm init-app acme --eject-showcase --yes
+              run: pnpm init-app acme --eject-showcase --yes
+              working-directory: ${{ env.PROBE_DIR }}
+            # --no-frozen-lockfile is REQUIRED here and is not a workaround. `init-app` renames one
+            # app and deletes two packages, so the lockfile legitimately no longer matches the
+            # workspace — and pnpm defaults frozen-lockfile to TRUE whenever CI is set, which is why
+            # this step passes on a laptop and fails here. An adopter hits the benign version of this:
+            # they run init-app locally, pnpm rewrites the lockfile, and they commit it.
+            - name: pnpm install (the workspace changed)
+              run: pnpm install --no-frozen-lockfile
+              working-directory: ${{ env.PROBE_DIR }}
+            - name: pnpm verify
+              run: pnpm verify
+              working-directory: ${{ env.PROBE_DIR }}
+              env:
+                  NEXT_TELEMETRY_DISABLED: '1'
+                  E2E_BUILD: '1'
+            - uses: actions/upload-artifact@v7
+              if: failure()
+              with:
+                  name: playwright-report-adoption-probe
+                  path: ${{ env.PROBE_DIR }}/apps/*/playwright-report/
+                  retention-days: 7
+
+    secret-scan:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0 # full history — a secret committed then deleted is still leaked
+            - name: gitleaks (pinned binary; gitleaks-action requires a license key for org repos)
+              run: |
+                  curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+                  ./gitleaks git --redact --config .gitleaks.toml

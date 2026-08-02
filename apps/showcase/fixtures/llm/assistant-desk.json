@@ -1,0 +1,108 @@
+{
+    "purpose": "assistant-desk",
+    "entries": [
+        {
+            "name": "default",
+            "request": null,
+            "response": "This is the scaffold's deterministic assistant. In demo and dev builds I replay versioned fixtures — the same question always gets the same answer, so walkthroughs never surprise anyone. Once an Anthropic API key is configured, `pnpm llm:record` replaces this text with a real model response."
+        },
+        {
+            "name": "list-tickets",
+            "note": "HAND-AUTHORED pending `pnpm llm:record`. The `conversation` below is the recorded MODEL output, turn by turn: turn 1 asks for the list_my_tickets tool, turn 2 is the closing utterance. The tool RESULT is NOT stored here — the app's execute() runs it live against the real queue, so replay stays honest (canned utterances, live tool effects). `response` is null because this entry is tool-loop-only (complete()/stream() skip it).",
+            "request": {
+                "system": "You are the assistant for a support desk. You can look up the tickets in the caller's own team with the list_my_tickets tool, and search them by keyword with the search_tickets tool. Only discuss this team's tickets.",
+                "messages": [{ "role": "user", "content": "What tickets are open?" }],
+                "tools": [
+                    {
+                        "name": "list_my_tickets",
+                        "description": "List the tickets in the caller's active team, newest first. Call this to answer questions about the current queue (for example \"what tickets are open?\").",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "search_tickets",
+                        "description": "Search the caller's active team for tickets whose subject or description contains a keyword. Call this when the question is about a specific problem rather than the queue as a whole (for example \"has anyone reported the scanner dropping out?\").",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string", "description": "The keyword or phrase to look for." }
+                            },
+                            "required": ["query"]
+                        }
+                    }
+                ]
+            },
+            "response": null,
+            "conversation": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_demo_list_my_tickets",
+                            "name": "list_my_tickets",
+                            "input": {}
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "I read your team's queue with the list_my_tickets tool. Every ticket it returned is listed beside this answer."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "search-tickets",
+            "note": "HAND-AUTHORED pending `pnpm llm:record`. The second tool, and the only one the model supplies input to: the recorded turn asks for search_tickets with a keyword, and the app's execute() validates that keyword before it reaches a query.",
+            "request": {
+                "system": "You are the assistant for a support desk. You can look up the tickets in the caller's own team with the list_my_tickets tool, and search them by keyword with the search_tickets tool. Only discuss this team's tickets.",
+                "messages": [{ "role": "user", "content": "Has anyone reported the scanner dropping out?" }],
+                "tools": [
+                    {
+                        "name": "list_my_tickets",
+                        "description": "List the tickets in the caller's active team, newest first. Call this to answer questions about the current queue (for example \"what tickets are open?\").",
+                        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+                    },
+                    {
+                        "name": "search_tickets",
+                        "description": "Search the caller's active team for tickets whose subject or description contains a keyword. Call this when the question is about a specific problem rather than the queue as a whole (for example \"has anyone reported the scanner dropping out?\").",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string", "description": "The keyword or phrase to look for." }
+                            },
+                            "required": ["query"]
+                        }
+                    }
+                ]
+            },
+            "response": null,
+            "conversation": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_demo_search_tickets",
+                            "name": "search_tickets",
+                            "input": { "query": "scanner" }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "I searched your team's tickets for \"scanner\" with the search_tickets tool. Anything it matched is listed beside this answer."
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

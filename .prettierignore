@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+pnpm-lock.yaml
+**/src/styles/generated/
+LICENSE
+.data/
+**/next-env.d.ts
+**/.ladle/dist/
+
+infra/cdk.out/
+dist-demo/
+
+# linked git worktrees from agent sessions — not this checkout's content
+.claude/worktrees/

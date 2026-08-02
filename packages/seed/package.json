@@ -1,0 +1,14 @@
+{
+    "name": "@app/seed",
+    "version": "0.1.0",
+    "private": true,
+    "license": "MIT",
+    "type": "module",
+    "description": "Seed data and loaders: tenants, people, placeholder corpus. Consumed by the app and by browser fakes.",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "keel": "workspace:*"
+    }
+}

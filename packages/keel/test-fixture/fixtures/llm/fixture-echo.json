@@ -1,0 +1,11 @@
+{
+    "purpose": "fixture-echo",
+    "entries": [
+        {
+            "name": "default",
+            "note": "Hand-authored, never recorded: the fixture world has no real model behind it. The fake LLM adapter falls back to the entry whose `request` is null, which is what keel/src/adapters/fake/fake-adapters.test.ts replays.",
+            "request": null,
+            "response": "This reply is replayed from a committed fixture, so it is deterministic every single time."
+        }
+    ]
+}

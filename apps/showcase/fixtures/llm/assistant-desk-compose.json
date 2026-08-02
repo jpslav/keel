@@ -1,0 +1,11 @@
+{
+    "purpose": "assistant-desk-compose",
+    "entries": [
+        {
+            "name": "default",
+            "note": "DEFAULT ONLY, on purpose. This purpose is the assistant's second (streaming) pass, and its prompt necessarily carries LIVE ticket facts gathered by the tools — so it can never hash-match a recorded entry and always resolves here. That is the fixture mechanism working as designed: the prose is identical on every run (a walkthrough is never surprised), while the tickets shown beside it come from the real query the tools just ran.",
+            "request": null,
+            "response": "Here is what I found in your team's queue — the tickets I read are listed beside this answer, newest first, with anything past the desk's SLA flagged. Ask me about a specific reference and I'll look it up, or give me a keyword and I'll search the whole queue for it. (This wording is replayed from a committed fixture so demos stay predictable; once an Anthropic API key is configured, `pnpm llm:record` replaces it with a real summary of exactly these tickets.)"
+        }
+    ]
+}

@@ -1,0 +1,13 @@
+# Every change gets the maintainer's review by default.
+*                       @jpslav
+
+# The pieces where a wrong change is expensive and quiet: tenancy, authorization, the
+# framework/app seam, and the gates that keep the rest honest.
+/packages/keel/src/db/           @jpslav
+/packages/keel/src/authz/        @jpslav
+/packages/keel/src/adapters/     @jpslav
+/packages/keel/test-fixture/     @jpslav
+/scripts/init-app.ts             @jpslav
+/tests/docs/                     @jpslav
+/.github/workflows/              @jpslav
+/docs/adr/                       @jpslav

@@ -1,0 +1,49 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": ["dom", "dom.iterable", "esnext"],
+        "allowJs": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "noEmit": true,
+        "esModuleInterop": true,
+        "module": "esnext",
+        "moduleResolution": "bundler",
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "jsx": "react-jsx",
+        "incremental": true,
+        "plugins": [
+            {
+                "name": "next"
+            }
+        ],
+        // THE ROOT PROGRAM compiles the repo's shared code — tests/, scripts/, the configs, and the
+        // WHOLE of packages/keel (its sources AND its colocated tests). So whatever `@app-config/*`
+        // resolves to here is the seam keel's own suite is typechecked against, and pointing it at a
+        // host app welds the framework's tests to that app: ejecting the demo used to leave `tsc`
+        // red. It points at packages/keel/test-fixture instead — keel's own conforming seam, which no
+        // adoption step can delete. Each app's tsconfig still points `@app-config/*` at its own
+        // src/app-config, which is what makes apps/starter the framework's falsifier.
+        // There is deliberately NO `@/*` here. It is an app's own alias, the ADR-0012 fence bans it
+        // inside packages/keel, and nothing else the root program compiles may use it — so mapping it
+        // could only ever point this program at a directory that `--eject-showcase` deletes. Leaving
+        // it out is also one fewer file adoption has to rewrite: no path below names an app.
+        "paths": {
+            "@app-config/*": ["./packages/keel/test-fixture/app-config/*"],
+            "keel/*": ["./packages/keel/src/*"]
+        }
+    },
+    "include": [
+        "tests/**/*.ts",
+        "scripts/**/*.ts",
+        "*.ts",
+        "*.mjs",
+        "packages/seed/src/**/*.ts",
+        "packages/keel/src/**/*.ts",
+        "packages/keel/src/**/*.tsx",
+        "packages/keel/test-fixture/**/*.ts",
+        "packages/keel/test-fixture/**/*.tsx"
+    ],
+    "exclude": ["node_modules", "apps", "spikes", "infra"]
+}

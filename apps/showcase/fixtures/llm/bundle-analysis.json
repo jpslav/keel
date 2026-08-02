@@ -1,0 +1,11 @@
+{
+    "purpose": "bundle-analysis",
+    "entries": [
+        {
+            "name": "default",
+            "note": "DEFAULT ONLY, on purpose. The analyze-bundle job's prompt carries the LIVE bytes of whichever bundle was uploaded, so it can never hash-match a recorded entry and always resolves here — deterministic output over a genuinely live read. Recording a per-bundle entry would mean committing a customer's log file to the repo, which is exactly what a support product should not do.",
+            "request": null,
+            "response": "**What failed.** The bundle records a worker process being terminated part-way through its run, with resident memory sitting just under the configured ceiling immediately beforehand. That is the signature of an out-of-memory kill rather than an application error: the work stops mid-batch, and nothing downstream reports a fault of its own.\n\n**Suggested next step.** Raise the worker's memory ceiling, or process the input in smaller batches so peak usage stays well clear of it. This is a platform-side change; there is nothing for the desk to reconfigure on the customer's account.\n\n_(Replayed from a committed fixture. Once an Anthropic API key is configured, `pnpm llm:record` replaces this with a real reading of the bundle above.)_"
+        }
+    ]
+}

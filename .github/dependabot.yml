@@ -1,0 +1,18 @@
+version: 2
+updates:
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+          interval: weekly
+      # the same supply-chain cooldown pnpm-workspace.yaml applies at install time
+      # (minimumReleaseAge: 2880 min = 2 days), rounded up by a day here
+      cooldown:
+          default-days: 3
+      groups:
+          minor-and-patch:
+              update-types: ['minor', 'patch']
+      open-pull-requests-limit: 5
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly

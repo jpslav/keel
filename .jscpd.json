@@ -1,0 +1,9 @@
+{
+    "pattern": "{apps/*/src,packages/*/src,packages/keel/test-fixture}/**/*.{ts,tsx}",
+    "ignore": ["**/*.test.{ts,tsx}", "**/*.stories.tsx", "**/src/styles/generated/**", "spikes/**"],
+    "minTokens": 70,
+    "minLines": 8,
+    "threshold": 2,
+    "reporters": ["consoleFull"],
+    "gitignore": true
+}

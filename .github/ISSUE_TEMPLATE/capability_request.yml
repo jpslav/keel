@@ -1,0 +1,51 @@
+name: Capability request
+description: Propose something the template should ship, or explain why it should not
+labels: [capability]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              This template deliberately ships less than it could. Before proposing, read
+              **"What the template ships"** in `docs/development-approach.md` — it defines the tests a
+              capability must pass, and `docs/recipes/` is where things that fail them go instead.
+
+              A well-argued "this should stay a recipe" is as useful as a well-argued "this should ship".
+    - type: textarea
+      id: capability
+      attributes:
+          label: The capability
+          description: What an app built on this template would be able to do that it cannot today.
+      validations:
+          required: true
+    - type: dropdown
+      id: test
+      attributes:
+          label: Which test does it pass?
+          description: |
+              The first two govern vendor code and are stated in "What the template ships" in
+              `docs/development-approach.md`. A vendor adapter must pass at least one.
+          options:
+              - Universality — will every instance built on this use it?
+              - New class — does it demonstrate integration mechanics the template does not already teach?
+              - Framework invariant (UI) — does the component encode a rule, or is it generic presentation?
+              - None of these — I think it belongs in docs/recipes/ instead
+      validations:
+          required: true
+    - type: textarea
+      id: argument
+      attributes:
+          label: Why that test applies
+          description: |
+              The argument, not the assertion. If it is the universality test, name the apps that
+              would not need it and say why they are the exception.
+      validations:
+          required: true
+    - type: textarea
+      id: fake
+      attributes:
+          label: What its fake looks like
+          description: |
+              Every capability here has to run hermetically — no docker, no credentials, no network.
+              If you cannot describe the fake, that is usually the real objection.
+      validations:
+          required: true

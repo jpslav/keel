@@ -1,0 +1,20 @@
+{
+    "welcome": {
+        "appName": "Starter",
+        "title": "Starter",
+        "subtitle": "La aplicación más pequeña que esta plantilla puede hacer crecer: una entidad, una tarjeta y todo lo demás apagado.",
+        "dashboardLink": "Ir al panel"
+    },
+    "dashboard": {
+        "title": "Panel",
+        "signedInAs": "Sesión iniciada como {name} ({role})."
+    },
+    "items": {
+        "title": "Elementos",
+        "hint": "Los elementos pertenecen al equipo en el que trabajas y nunca salen de tu organización.",
+        "empty": "Aún no hay elementos en este equipo.",
+        "addLabel": "Nuevo elemento",
+        "addButton": "Añadir elemento",
+        "readOnlyHint": "Tienes acceso de solo lectura a los elementos de este equipo."
+    }
+}

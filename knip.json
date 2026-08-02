@@ -1,0 +1,35 @@
+{
+    "$schema": "https://unpkg.com/knip@6/schema.json",
+    "workspaces": {
+        ".": {
+            "entry": ["scripts/*.{ts,mjs}"],
+            "project": ["scripts/**", "tests/**"]
+        },
+        "apps/showcase": {
+            "entry": ["src/demo-static/**/*.{ts,tsx}", "src/app-config/**/*.ts", "scripts/*.ts"],
+            "project": ["src/**", "scripts/**"],
+            "ignore": ["src/styles/generated/**"]
+        },
+        "apps/starter": {
+            "entry": ["src/demo-static/**/*.{ts,tsx}", "src/app-config/**/*.ts", "src/seed/*.ts"],
+            "project": ["src/**"]
+        },
+        "packages/seed": {},
+        "packages/keel": {
+            "ladle": {
+                "entry": ["src/**/*.stories.tsx"]
+            },
+            "project": ["src/**", "test-fixture/**"],
+            "includeEntryExports": true,
+            "ignoreExportsUsedInFile": {
+                "interface": true,
+                "type": true
+            },
+            "ignore": ["src/db/migrations/0*.ts", "test-fixture/api/**", "test-fixture/app-config/db/migrations/*.ts"]
+        },
+        "infra": {
+            "entry": ["app.ts"]
+        }
+    },
+    "ignore": ["spikes/**"]
+}

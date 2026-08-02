@@ -1,0 +1,31 @@
+packages:
+    - apps/*
+    - packages/*
+    - infra
+    - spikes/*
+
+# pnpm >=10 blocks dependency postinstall scripts by default; allow only what we trust.
+# (Pinned deliberately: see docs/build-notes.md for why each allowBuild entry is here.)
+allowBuilds:
+    # Every platform embedded-postgres ships, not just the two this repo was built and CI'd on.
+    # pnpm >=10 blocks a dependency's postinstall by default, and the block is SILENT — an adopter on
+    # an Intel Mac, ARM Linux or Windows would get `pnpm test:contract` failing with an error that
+    # never mentions allowBuilds. The anti-drift RLS gate is the last thing that should break on a
+    # platform nobody happened to try.
+    '@embedded-postgres/darwin-arm64': true
+    '@embedded-postgres/darwin-x64': true
+    '@embedded-postgres/linux-arm': true
+    '@embedded-postgres/linux-arm64': true
+    '@embedded-postgres/linux-ia32': true
+    '@embedded-postgres/linux-ppc64': true
+    '@embedded-postgres/linux-x64': true
+    '@embedded-postgres/windows-x64': true
+    '@parcel/watcher': true
+    '@sentry/cli': true
+    '@swc/core': false
+    esbuild: true
+    msw: false
+    sharp: true
+
+# Supply-chain guard (house pattern): only install package versions published >= 2 days ago.
+minimumReleaseAge: 2880

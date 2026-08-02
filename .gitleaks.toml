@@ -1,0 +1,20 @@
+# Extends the built-in default ruleset. Add allowlist entries only with justification.
+[extend]
+useDefault = true
+
+# Test fixture, not a real credential: webhook.test.ts asserts the real-mode WEBHOOK_SECRET branch
+# of verifyWebhookCaller, which needs a literal env secret in the test body. The value is an obvious
+# placeholder ("env-secret-…"). Scoped to that one file AND that one string so any genuine leak — in
+# this file or elsewhere — is still caught. History-safe: the allowlist applies to every scanned
+# commit, including the one that first introduced the literal.
+[[allowlists]]
+description = "webhook.test.ts real-mode WEBHOOK_SECRET fixture"
+paths = ['''packages/keel/src/service-auth/webhook\.test\.ts''']
+regexes = ['''env-secret-abcdef0123456789''']
+regexTarget = "line"
+
+# Not a credential: a base64url cursor carrying a SQL-injection payload, used by the keyset proofs to
+# show a crafted cursor cannot widen a scope. Kept OUT of this allowlist on purpose — the proofs now
+# BUILD the envelope from its readable payload instead of pasting the blob, because a high-entropy
+# literal in source is indistinguishable from a committed secret to any scanner, and to most readers.
+# If a future proof needs a fixed opaque value, build it; do not add it here.
