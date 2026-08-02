@@ -26,7 +26,7 @@
         "@app/seed": "workspace:*",
         "@mantine/core": "^9.5.0",
         "@mantine/form": "^9.5.0",
-        "@sentry/nextjs": "^10.68.0",
+        "@sentry/nextjs": "^10.69.0",
         "keel": "workspace:*",
         "kysely": "^0.29.4",
         "next": "^16.2.12",
@@ -37,13 +37,13 @@
     "devDependencies": {
         "@axe-core/playwright": "^4.12.1",
         "@ladle/react": "^5.1.1",
-        "@pandacss/dev": "^1.11.5",
-        "@playwright/test": "^1.62.0",
-        "@vitejs/plugin-react": "^6.0.4",
+        "@pandacss/dev": "^1.12.0",
+        "@playwright/test": "^1.62.1",
+        "@vitejs/plugin-react": "^6.0.5",
         "embedded-postgres": "18.4.0-beta.17",
         "pg": "^8.22.0",
-        "postcss": "^8.5.23",
-        "vite": "^8.1.5",
+        "postcss": "^8.5.25",
+        "vite": "^8.2.0",
         "vite-plugin-singlefile": "^2.3.3",
         "vitest": "^4.1.10"
     }
