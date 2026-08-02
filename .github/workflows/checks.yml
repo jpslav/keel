@@ -135,7 +135,7 @@ jobs:
             - run: pnpm install --frozen-lockfile
             # Browsers are ~150MB and were re-downloaded on every run. Keyed on the lockfile because
             # that is what pins the Playwright version the browser build must match.
-            - uses: actions/cache@v4
+            - uses: actions/cache@v6
               id: playwright-cache
               with:
                   path: ~/.cache/ms-playwright
@@ -175,7 +175,7 @@ jobs:
                   node-version-file: .nvmrc
                   cache: pnpm
             - run: pnpm install --frozen-lockfile
-            - uses: actions/cache@v4
+            - uses: actions/cache@v6
               id: playwright-cache
               with:
                   path: ~/.cache/ms-playwright
@@ -233,7 +233,7 @@ jobs:
               run: pnpm install
               working-directory: ${{ env.PROBE_DIR }}
             # Same cache the e2e/demo-static jobs use — `pnpm verify` below runs the full e2e suite.
-            - uses: actions/cache@v4
+            - uses: actions/cache@v6
               id: playwright-cache
               with:
                   path: ~/.cache/ms-playwright
