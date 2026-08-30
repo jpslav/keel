@@ -1,5 +1,6 @@
-# Every change gets the maintainer's review by default.
-*                       @jpslav
+# No catch-all owner. On a single-maintainer repo `*  @jpslav` added nothing the
+# path entries below don't already cover, and it made Dependabot request a review
+# on every dependency bump.
 
 # The pieces where a wrong change is expensive and quiet: tenancy, authorization, the
 # framework/app seam, and the gates that keep the rest honest.
