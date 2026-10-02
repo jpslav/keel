@@ -82,6 +82,7 @@ const ANY_EMAIL_ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
 const IDENTITY_FILES = ['CODEOWNERS', 'SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
 
 let probeDir: string
+let initAppOutput: string
 
 beforeAll(() => {
     probeDir = mkdtempSync(path.join(tmpdir(), 'keel-adopter-identity-'))
@@ -99,6 +100,7 @@ beforeAll(() => {
                 `--- stdout ---\n${initApp.stdout}\n--- stderr ---\n${initApp.stderr}`,
         )
     }
+    initAppOutput = initApp.stdout
 }, 120_000)
 
 afterAll(() => {
@@ -157,5 +159,32 @@ describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inhe
 
     it("docs/adr approver lines keep the maintainer's name — honest provenance for keel's own decisions", () => {
         expect(readProbe('docs/adr/0012-framework-app-line-and-registration.md')).toContain('Approver: JP Slavinsky')
+    })
+})
+
+/**
+ * The other thing a rename leaves behind is CONTENT: the starter's seed world, welcome copy, Items
+ * slice and static-demo wiring are all still on screen afterwards, and no gate can call leftover
+ * content an error. The closing output is the only place an adopter is told, so it is pinned — every
+ * path it names must exist in the tree `init-app` just produced, or the list is sending people to
+ * files that are not there.
+ */
+describe('`pnpm init-app` tells the adopter which starter content is still on screen', () => {
+    it('prints the section', () => {
+        expect(initAppOutput).toContain('STARTER CONTENT STILL WIRED INTO YOUR UI')
+    })
+
+    it.each([
+        'apps/acme/src/seed/',
+        'apps/acme/src/app-config/abilities.ts',
+        'apps/acme/messages/{en,es}.json',
+        'apps/acme/src/demo-static/app.tsx',
+    ])('names %s, and it exists', (cited) => {
+        expect(initAppOutput).toContain(cited)
+        for (const relative of cited.includes('{en,es}')
+            ? ['en', 'es'].map((locale) => cited.replace('{en,es}', locale))
+            : [cited]) {
+            expect(() => readProbe(relative.replace(/\/$/, '/index.ts'))).not.toThrow()
+        }
     })
 })

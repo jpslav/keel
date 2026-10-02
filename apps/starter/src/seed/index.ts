@@ -14,6 +14,10 @@ import type { SeedAgreement, SeedJobSchedule, SeedOrg, SeedPerson, SeedTenant } 
  * observable), one team each, and the roles the framework's own screens need to stay interesting —
  * an admin who can invite, a plain member, and a restricted member whose authoring surface is
  * reduced. `preAcceptedByAllInTenant` is unused because the starter seeds no agreements.
+ *
+ * ADOPTING? This content is the starter's, and every sign-in picker lists all of it. Replace it with
+ * your own world rather than adding yours beside it — docs/adopting.md, "The starter's content is
+ * still wired into your UI".
  */
 
 export type {

@@ -672,6 +672,13 @@ WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone
     reason: it is your repo's only private inbound channel once you have one.`)
 }
 
+/**
+ * The starter's own content gets a section of its own, for the reason `reportNeedsYourDetails` does:
+ * it used to be two bullets here ("Your seed world", "Your domain") that named a directory and said
+ * nothing about what a visitor SEES. An adopter built a product world beside the starter's and
+ * shipped a static demo that opened on the starter's tenants and Items card. Nothing failed, because
+ * leftover content is not an error any gate can name — so the list has to.
+ */
 function reportUntouched(survivor: string, hasParams: boolean): void {
     const params = hasParams
         ? `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
@@ -680,13 +687,27 @@ function reportUntouched(survivor: string, hasParams: boolean): void {
 WHAT THIS DID NOT TOUCH — the parts that need judgement, not a rename:
 
   • Deployment parameters — ${params}
-  • Your seed world — apps/${survivor}/src/seed/. Tenant names, org slugs, people. Note that
-    staffOrgSlug in apps/${survivor}/src/app-config/abilities.ts must name a real seed org.
   • The cutover checklist — docs/cutover-checklist.md is yours: owners, dates, and the proof each
     row owes. Nothing here closed a row.
-  • Your domain — the entity, its copy, its abilities and its tests are still the starter's.
   • The licence — this template is MIT; your product's licence is still yours to choose.
   • Git remotes, CI secrets, and infra account IDs.
+
+STARTER CONTENT STILL WIRED INTO YOUR UI — renamed around, not removed. No gate fails on any of
+it, so it stays on screen until you replace it (skip whatever you already have):
+
+  • The seed world — apps/${survivor}/src/seed/. Its tenants, teams and people are on EVERY sign-in
+    picker: the app's, the static demo's, the Simulator's. Replace them; a product world added
+    beside them shows both. staffOrgSlug in apps/${survivor}/src/app-config/abilities.ts must name
+    a real seed org, and the app's two specs sign in by the starter's person ids.
+  • The welcome subtitle — welcome.subtitle in apps/${survivor}/messages/{en,es}.json. Only the
+    title and appName were rewritten. It is on the root page and the static demo's first screen.
+  • The Items slice — the card, its API route, its table, migration, ability and RLS proof, and
+    the "items" catalog namespace. It is every signed-in person's dashboard. Copy its RLS pattern
+    into your first real slice, then delete it.
+  • The static demo's wiring — apps/${survivor}/src/demo-static/app.tsx. A shell or home screen
+    you build reaches the demo only through the nav, welcome and dashboard props passed there.
+
+  docs/adopting.md, "The starter's content is still wired into your UI", has the full sweep.
 
 NEXT: \`pnpm install\` (the workspace changed), then \`pnpm verify\`.
 

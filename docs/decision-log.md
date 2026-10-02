@@ -1294,3 +1294,32 @@ AppJobKind`, `isJobKind` composed. Because the fence bans framework files from i
   header-only no-team case. keel's test now asserts only the framework's half.
 - **No `FRAMEWORK_SUITE_APP` any more.** `vitest.config.ts` had to name one app to carry keel's suite;
   that choice is gone, and with it the reason `init-app` had to rewrite a second literal in that file.
+
+## The starter's leftover content is documented, not gated (2026-10-02, `claude/adopting-doc-starter-content-ff442f`)
+
+An adopter reported that their product's static demo opened on the starter's tenants and Items card
+four days after adoption. `docs/adopting.md` had told them to "keep the shape" of the seed world, they
+read that as "keep the fixtures", and built their own world beside the starter's.
+
+- **The fix is the sentence, plus an inventory.** `docs/adopting.md` gains "The starter's content is
+  still wired into your UI" — the seed world, `welcome.subtitle`, the Items slice and the static demo's
+  composition root, each with where it shows — and `scripts/init-app.ts` prints the same four as their
+  own closing section. The advice is to REPLACE the seed world: only the starter's own two specs and
+  `staffOrgSlug` read its names, and all three are the adopter's files.
+- **No residue check.** The report proposed a scan for UI code still importing the starter's fixtures.
+  There is no symbol to scan for: the seed is one world behind `@app-config/seed`, so starter content
+  is identifiable only by its VALUES. A check would need a manifest of those values, which drifts from
+  the seed, cannot run in `pnpm verify` (it is red on keel itself by definition), and goes meaningless
+  the first time an adopter renames a tenant.
+- **No "not offered at sign-in" flag on `SeedPerson`.** The adopter's local fix hid the starter's
+  people from the product pickers while leaving them reachable from the Simulator. Putting that in
+  `keel/seed/contracts` would make the framework support the arrangement the doc now tells adopters not
+  to build — two worlds in one seed — and would touch both apps, the fixture seam and the static demo
+  to do it.
+- **The printed section is pinned by a test, and the pin checks paths, not prose.**
+  `tests/docs/adopter-identity.test.ts` asserts the section is printed and that every path it names
+  exists in the ejected tree. Watched failing with the section removed.
+- **Removing the content by command is deferred**, not rejected:
+  `.claude/future-tasks/init-app-blank-option.md`. The seed cannot go to zero and the Items slice can,
+  but an app with no tables and no subjects has never been built here, and deleting Items deletes the
+  RLS example the scaffolds cite.
