@@ -1317,8 +1317,9 @@ read that as "keep the fixtures", and built their own world beside the starter's
   to build — two worlds in one seed — and would touch both apps, the fixture seam and the static demo
   to do it.
 - **The printed section is pinned by a test, and the pin checks paths, not prose.**
-  `tests/docs/adopter-identity.test.ts` asserts the section is printed and that every path it names
-  exists in the ejected tree. Watched failing with the section removed.
+  `tests/docs/adopter-identity.test.ts` asserts the section is printed and that the seed, seam,
+  catalog and demo paths it names exist in the ejected tree. Watched failing with the heading changed
+  and one path misspelled.
 - **Removing the content by command is deferred**, not rejected:
   `.claude/future-tasks/init-app-blank-option.md`. The seed cannot go to zero and the Items slice can,
   but an app with no tables and no subjects has never been built here, and deleting Items deletes the

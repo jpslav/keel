@@ -165,9 +165,10 @@ describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inhe
 /**
  * The other thing a rename leaves behind is CONTENT: the starter's seed world, welcome copy, Items
  * slice and static-demo wiring are all still on screen afterwards, and no gate can call leftover
- * content an error. The closing output is the only place an adopter is told, so it is pinned — every
- * path it names must exist in the tree `init-app` just produced, or the list is sending people to
- * files that are not there.
+ * content an error. The closing output is the only place an adopter is told, so it is pinned — the
+ * seed, seam, catalog and demo paths it names must exist in the tree `init-app` just produced, or the
+ * list is sending people to files that are not there. (The Items files are named in prose, not by
+ * path, so they are not checked.)
  */
 describe('`pnpm init-app` tells the adopter which starter content is still on screen', () => {
     it('prints the section', () => {

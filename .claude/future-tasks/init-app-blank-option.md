@@ -49,6 +49,9 @@ Rewrite to the empty registration:
 - `apps/starter/tests/demo-static/static-shell.spec.ts` — keep the sign-in and Simulator assertions,
   drop the item ones
 
+Then drop the imports the emptied files no longer use (`sql`, `runWithTenant`, `Generated`) — knip and
+lint fail the gate otherwise — and the "items route" comment in `apps/starter/playwright.config.ts`.
+
 ## Three things that make this more than a deletion script
 
 1. **Zero tables and zero subjects is unproven.** The starter and `packages/keel/test-fixture` each
@@ -62,9 +65,10 @@ Rewrite to the empty registration:
    and the gate must be seen to fail first: leave one Items reference behind, watch the leg go red.
    With zero app tables, `pnpm test:contract` runs only the framework half; say so rather than letting
    it look like coverage.
-3. **It deletes the worked RLS example.** `1001_items.ts` is what `/new-slice`, `/new-entity`,
-   `CLAUDE.md` and the adopting guide cite as the pattern a new tenant table copies. A blank app has
-   nothing to copy from once the showcase is ejected too. Either the reference moves into a recipe
+3. **It deletes the worked RLS example.** `1001_items.ts` is the only worked RLS migration
+   that survives `--eject-showcase`: the adopting guide cites it, while `/new-slice`, `/new-entity` and
+   `CLAUDE.md` cite the showcase's `1001_tickets.ts`, which an eject has already deleted. A blank app
+   has nothing to copy from. Either the reference moves into a recipe
    under `docs/recipes/`, or `--blank` leaves the migration behind as an unregistered template, or the
    scaffolds learn to cite `packages/keel/test-fixture`. Decide this first; it changes the other two.
 

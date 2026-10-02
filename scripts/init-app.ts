@@ -701,8 +701,8 @@ it, so it stays on screen until you replace it (skip whatever you already have):
     a real seed org, and the app's two specs sign in by the starter's person ids.
   • The welcome subtitle — welcome.subtitle in apps/${survivor}/messages/{en,es}.json. Only the
     title and appName were rewritten. It is on the root page and the static demo's first screen.
-  • The Items slice — the card, its API route, its table, migration, ability and RLS proof, and
-    the "items" catalog namespace. It is every signed-in person's dashboard. Copy its RLS pattern
+  • The Items slice — the card, its API route, its dashboard glue, its table, migration,
+    ability and RLS proof, and the "items" catalog namespace. It is every signed-in person's dashboard. Copy its RLS pattern
     into your first real slice, then delete it.
   • The static demo's wiring — apps/${survivor}/src/demo-static/app.tsx. A shell or home screen
     you build reaches the demo only through the nav, welcome and dashboard props passed there.
