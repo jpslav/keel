@@ -10,7 +10,7 @@ prints); this is the half that would make the sweep a command.
 
 `--eject-showcase` deletes the demo app. Nothing deletes what the app you KEEP shows: after
 `pnpm init-app acme` an adopter still has the Items slice on every dashboard and the starter's
-marketing line on the welcome screen, and removing them is a hand sweep over about fourteen files.
+marketing line on the welcome screen, and removing them is a hand sweep over about fifteen files.
 
 ## What can and cannot go
 

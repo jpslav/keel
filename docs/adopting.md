@@ -196,7 +196,7 @@ What does read them by literal id is yours to change in the same commit:
 
 What the seed must keep is its SHAPE, not its content: the exports the framework reads through
 `@app-config/seed` (`tenants`, `organizations`, `people`, `agreements`, `jobSchedules`, `findTenant`,
-`findOrg` — `keel/seed/contracts` types them), at least one person to sign in as, and two tenants for as long as you want tenant isolation to be
+`findOrg` — `keel/seed/contracts` types the data), at least one person to sign in as, and two tenants for as long as you want tenant isolation to be
 something a test can observe. WHERE it lives is yours.
 
 **The Items slice is a worked example, so take what it teaches before you delete it.**

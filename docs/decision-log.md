@@ -1304,7 +1304,8 @@ read that as "keep the fixtures", and built their own world beside the starter's
 - **The fix is the sentence, plus an inventory.** `docs/adopting.md` gains "The starter's content is
   still wired into your UI" — the seed world, `welcome.subtitle`, the Items slice and the static demo's
   composition root, each with where it shows — and `scripts/init-app.ts` prints the same four as their
-  own closing section. The advice is to REPLACE the seed world: only the starter's own two specs and
+  own closing section — only when the app being kept has the starter's layout, since `--app showcase`
+  keeps an app with neither that seed directory nor an Items slice. The advice is to REPLACE the seed world: only the starter's own two specs and
   `staffOrgSlug` read its names, and all three are the adopter's files.
 - **No residue check.** The report proposed a scan for UI code still importing the starter's fixtures.
   There is no symbol to scan for: the seed is one world behind `@app-config/seed`, so starter content
