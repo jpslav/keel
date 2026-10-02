@@ -672,7 +672,18 @@ WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone
     reason: it is your repo's only private inbound channel once you have one.`)
 }
 
-function reportUntouched(survivor: string, hasParams: boolean): void {
+/**
+ * The starter's own content gets a section of its own, for the reason `reportNeedsYourDetails` does:
+ * it used to be two bullets here ("Your seed world", "Your domain") that named a directory and said
+ * nothing about what a visitor SEES. An adopter built a product world beside the starter's and
+ * shipped a static demo that opened on the starter's tenants and Items card. Nothing failed, because
+ * leftover content is not an error any gate can name — so the list has to.
+ *
+ * Printed only when the app being kept has the starter's layout (`hasStarterContent`). `--app
+ * showcase` keeps an app whose seed lives in a workspace package and which has no Items slice, and
+ * for it every path and every instruction below would be false.
+ */
+function reportUntouched(survivor: string, hasParams: boolean, hasStarterContent: boolean): void {
     const params = hasParams
         ? `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
         : `apps/${survivor} ships no config/params.ts yet. You get one when you eject the\n    showcase, or write it when you reach your first cloud cutover row.`
@@ -680,14 +691,30 @@ function reportUntouched(survivor: string, hasParams: boolean): void {
 WHAT THIS DID NOT TOUCH — the parts that need judgement, not a rename:
 
   • Deployment parameters — ${params}
-  • Your seed world — apps/${survivor}/src/seed/. Tenant names, org slugs, people. Note that
-    staffOrgSlug in apps/${survivor}/src/app-config/abilities.ts must name a real seed org.
   • The cutover checklist — docs/cutover-checklist.md is yours: owners, dates, and the proof each
     row owes. Nothing here closed a row.
-  • Your domain — the entity, its copy, its abilities and its tests are still the starter's.
   • The licence — this template is MIT; your product's licence is still yours to choose.
-  • Git remotes, CI secrets, and infra account IDs.
+  • Git remotes, CI secrets, and infra account IDs.`)
+    if (hasStarterContent) {
+        console.log(`
+STARTER CONTENT STILL WIRED INTO YOUR UI — renamed around, not removed. No gate fails on any of
+it, so it stays on screen until you replace it (skip whatever you already have):
 
+  • The seed world — apps/${survivor}/src/seed/. Its tenants, teams and people are on EVERY sign-in
+    picker: the app's, the static demo's, the Simulator's. Replace them; a product world added
+    beside them shows both. staffOrgSlug in apps/${survivor}/src/app-config/abilities.ts must name
+    a real seed org, and the app's two specs sign in by the starter's person ids.
+  • The welcome subtitle — welcome.subtitle in apps/${survivor}/messages/{en,es}.json. Only the
+    title and appName were rewritten. It is on the root page and the static demo's first screen.
+  • The Items slice — the card, its API route, its dashboard glue, its table, migration,
+    ability and RLS proof, and the "items" catalog namespace. It is every signed-in person's
+    dashboard. Copy its RLS pattern into your first real slice, then delete it.
+  • The static demo's wiring — apps/${survivor}/src/demo-static/app.tsx. A shell or home screen
+    you build reaches the demo only through the nav, welcome and dashboard props passed there.
+
+  docs/adopting.md, "The starter's content is still wired into your UI", has the full sweep.`)
+    }
+    console.log(`
 NEXT: \`pnpm install\` (the workspace changed), then \`pnpm verify\`.
 
 COMMIT \`pnpm-lock.yaml\` along with everything else. Renaming an app and dropping packages
@@ -796,7 +823,11 @@ async function main(): Promise<void> {
     // `survivor` is the name AFTER the rename; on disk that directory only exists if the rename
     // actually ran, so a dry run still has to look under the old name (the ejectShowcase convention).
     const survivorOnDisk = dryRun ? targetDir : survivor
-    reportUntouched(survivor, options.ejectShowcase || existsSync(abs(`apps/${survivorOnDisk}/config/params.ts`)))
+    reportUntouched(
+        survivor,
+        options.ejectShowcase || existsSync(abs(`apps/${survivorOnDisk}/config/params.ts`)),
+        existsSync(abs(`apps/${survivorOnDisk}/src/seed`)),
+    )
 }
 
 // Not top-level await: the root package is CJS, so tsx transforms this file to CommonJS.

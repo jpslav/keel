@@ -155,19 +155,63 @@ It prints this list when it finishes, because these are the parts that take judg
 
 - **Deployment parameters** — `apps/<app>/config/params.ts` (you get one when you eject the showcase).
   Every `PLACEHOLDER_` value, and `sentry.org`. Each maps to a cutover row.
-- **Your seed world** — `apps/<app>/src/seed/`: tenant names, org slugs, people. Keep the shape (the
-  fake auth person picker, theming and e2e helpers all read it); WHERE it lives is yours. Note that
-  `staffOrgSlug` in `apps/<app>/src/app-config/abilities.ts` is load-bearing app config and must name a
-  real seed org.
+- **The starter's content** — its seed world, its welcome copy, its one entity and its static-demo
+  wiring are all still there and all still on screen. `init-app` renamed the app around them. The next
+  section lists each one and what to do about it.
 - **The cutover checklist** — [cutover-checklist.md](cutover-checklist.md) is yours: owners, dates, and
   the proof each row owes.
-- **Your domain** — the entity, its copy, its abilities and its tests are still the starter's.
 - **The licence** — this template is MIT, which means the product you build on it is yours with no
   copyleft obligation. Your own product's licence is still a decision you make; nothing here makes it
   for you.
 - **Prose.** `init-app` repoints path citations so the doc gate stays green, but the sentences around
   them still describe a template with two example apps. It prints the list of files to reread; README
   and `CLAUDE.md` are the two that matter, and `CLAUDE.md` is what teaches agent sessions your rules.
+
+### The starter's content is still wired into your UI
+
+A rename changes what the app is called, not what it shows. After `init-app`, four pieces of the
+starter are still reachable by anyone who opens your app or your static demo:
+
+| What survives                                    | Where it lives                                                                                                                                                                                                                                                                                                                                            | Where it shows                                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| The seed world: two tenants, two teams, 3 people | `apps/<app>/src/seed/index.ts`                                                                                                                                                                                                                                                                                                                            | every sign-in picker (the app's, the static demo's, the Simulator's People tab); tenant themes |
+| The welcome subtitle                             | `welcome.subtitle` in `apps/<app>/messages/en.json` + `es.json`                                                                                                                                                                                                                                                                                           | the app's root page AND the static demo's first screen — they share one component              |
+| The Items slice                                  | `apps/<app>/src/components/items-card.tsx`, `apps/<app>/src/app/api/items/route.ts`, the dashboard route's `page.tsx` and `dashboard-glue.tsx` under `apps/<app>/src/app/`, the `Item` case in `apps/<app>/src/app-config/abilities.ts`, the table, migration and RLS proof under `apps/<app>/src/app-config/db/`, the `items` namespace in both catalogs | every signed-in person's dashboard                                                             |
+| The static demo's composition root               | `apps/<app>/src/demo-static/app.tsx`                                                                                                                                                                                                                                                                                                                      | the whole `file://` demo: it passes `nav={null}`, the starter's welcome screen and Items card  |
+
+None of it fails a gate, which is why it is listed here: a real adopter shipped a product demo that
+opened on the starter's tenants and its Items card, four days after adopting. The team had been
+looking at the product signed in as its own people, and nothing they used showed them the rest.
+
+**Replace it; do not build beside it.** The seed world is one world, and the framework's pickers list
+all of it — `keel/seed/contracts` has no notion of a person who exists but is not offered. A product
+world added NEXT TO `northwind` and `westgate` therefore puts both on every sign-in screen. Nothing in
+`packages/keel` needs the starter's names: keel's own tests run against `packages/keel/test-fixture`.
+What does read them by literal id is yours to change in the same commit:
+
+- `apps/<app>/tests/e2e/items.spec.ts` signs in as `person-owner` and `person-other-tenant` and asserts
+  the tenant names; `apps/<app>/tests/demo-static/static-shell.spec.ts` signs in as `person-owner` and
+  `person-teammate` and asserts their names.
+- `staffOrgSlug` in `apps/<app>/src/app-config/abilities.ts` must name a real seed org.
+
+What the seed must keep is its SHAPE, not its content: the exports the framework reads through
+`@app-config/seed` (`tenants`, `organizations`, `people`, `agreements`, `jobSchedules`, `findTenant`,
+`findOrg` — `keel/seed/contracts` types the data), at least one person to sign in as, and two tenants for as long as you want tenant isolation to be
+something a test can observe. WHERE it lives is yours.
+
+**The Items slice is a worked example, so take what it teaches before you delete it.**
+`apps/<app>/src/app-config/db/migrations/1001_items.ts` is a worked RLS migration — after an eject, the only one left — and its
+section of `apps/<app>/src/app-config/db/rls-proofs.ts` is the proof that goes with it. Build your first real slice
+from them (`/new-slice`), then remove Items the way "To remove a demo slice" below describes. There is
+no flag that does this for you yet; `.claude/future-tasks/init-app-blank-option.md` carries the design.
+
+**Wire the static demo last, and look at it.** A shell or a home screen you build in
+`apps/<app>/src/components` reaches the real app through its route files and reaches the static demo
+ONLY through `apps/<app>/src/demo-static/app.tsx` — the `nav`, `welcome` and `dashboard` props it hands
+`DemoShell`. Being router-agnostic makes a component ABLE to run in the twin; it does not put it there.
+When the sweep is done, run `pnpm build:demo-static`, open `apps/<app>/dist-demo/index.html`, and sign in as each seeded person.
+That one look is the check: the picker, the first screen and the dashboard are exactly the three places
+the starter survives.
 
 ### What ejecting the showcase costs, and what it rescues
 
@@ -286,7 +330,10 @@ walking end-to-end. You only write your DOMAIN half — `apps/<app>/src/demo-sta
 composition root that adds your rows and cards to the framework world `keel/demo-static` already
 simulates (people, mail, jobs, schedules, webhooks, notifications, agreements, audit, snapshots). For one
 table that is 74 lines; the showcase's, with three entities plus actors and the assistant, is 669.
-Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget).
+Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget). The same file is
+the ONLY door for your shell, too: the `nav`, `welcome` and `dashboard` it passes `DemoShell` are what
+the demo shows, so a navigation you build for the real app is absent from the twin until you pass it
+there.
 
 **How a second app keeps the seam honest**: `apps/starter/tsconfig.json` includes the whole of
 `packages/keel/src` (minus tests and stories), so `pnpm typecheck` compiles the ENTIRE framework
