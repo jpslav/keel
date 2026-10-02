@@ -1295,7 +1295,7 @@ AppJobKind`, `isJobKind` composed. Because the fence bans framework files from i
 - **No `FRAMEWORK_SUITE_APP` any more.** `vitest.config.ts` had to name one app to carry keel's suite;
   that choice is gone, and with it the reason `init-app` had to rewrite a second literal in that file.
 
-## The starter's leftover content is documented, not gated (2026-10-02, `claude/adopting-doc-starter-content-ff442f`)
+## The starter's leftover content is documented, not gated (2026-10-02, `docs/adopting-starter-content`)
 
 An adopter reported that their product's static demo opened on the starter's tenants and Items card
 four days after adoption. `docs/adopting.md` had told them to "keep the shape" of the seed world, they
