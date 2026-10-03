@@ -1,5 +1,5 @@
 import { isSimulated } from 'keel/adapters/index'
-import { KNOWN_FLAGS, setFlag } from 'keel/adapters/fake/analytics'
+import { KNOWN_FLAGS, readFlags, setFlag } from 'keel/adapters/fake/analytics'
 import { withPortErrors } from '../../respond'
 
 /**
@@ -8,6 +8,15 @@ import { withPortErrors } from '../../respond'
  * role — and not even a session: the knobs stay reachable signed-out, like reset). Formerly
  * /api/dev/flags; see docs/decision-log.md.
  */
+/** The current value of every known flag — what an actor frame asks before each autonomous tick. */
+export async function GET(): Promise<Response> {
+    if (!isSimulated) return new Response(null, { status: 404 })
+    return withPortErrors(async () => {
+        const stored = readFlags()
+        return Response.json({ flags: Object.fromEntries(KNOWN_FLAGS.map((flag) => [flag, stored[flag] ?? false])) })
+    })
+}
+
 export async function POST(request: Request): Promise<Response> {
     if (!isSimulated) return new Response(null, { status: 404 })
     return withPortErrors(async () => {

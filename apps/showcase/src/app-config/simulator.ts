@@ -35,6 +35,9 @@ interface AppSimulatorFlag {
     labelKey: string
 }
 
+/** The flag id the actor hosts (server glue + static twin) consult before every autonomous tick. */
+export const actorsHeldFlag = 'actors-held'
+
 /**
  * App feature flags for the Snapshots tab, composed into KNOWN_FLAGS
  * (packages/keel/src/adapters/fake/analytics.ts); snapshots-app.tsx resolves a registered flag's `labelKey`
@@ -44,5 +47,12 @@ interface AppSimulatorFlag {
  * knob (highlight tickets past their SLA) that no framework flag could reasonably own, flipped from the
  * same Snapshots tab as the framework's own two. It is read by the tickets card, so flipping it changes
  * the product, not just the panel.
+ *
+ * `actors-held` is the world's hold on its counterparties. The actors run from page load, like the real
+ * services they stand in for; while this is on, each one keeps its schedule but does nothing on its own
+ * (a manual Step still works). Specs that drive held jobs by hand turn it on so no actor races them.
  */
-export const flags: AppSimulatorFlag[] = [{ id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' }]
+export const flags: AppSimulatorFlag[] = [
+    { id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' },
+    { id: actorsHeldFlag, labelKey: 'actors.heldFlagLabel' },
+]
