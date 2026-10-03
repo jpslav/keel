@@ -298,8 +298,8 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 | `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
 | `actors.ts`                                   | your simulated counterparties for dev/demo                                                         | `actors = []`, `type ActorId = never`      |
 | `simulator.ts`                                | your extra Simulator tabs + feature flags                                                          | `flags = []`                               |
-| `presets.ts`                                  | demo presets: named starting worlds every host can load, and your own operation kinds' definitions | `presets = []`, `appPresetOperations = []` |
-| `preset-operations.ts`                        | server halves of your own preset operation kinds                                                   | `{}`                                       |
+| `presets.ts`                                  | demo presets (`/new-preset`): starting worlds every host can load, and your own kinds' definitions | `presets = []`, `appPresetOperations = []` |
+| `preset-operations.ts`                        | server halves of your own preset operation kinds (`/new-preset-operation`)                         | `{}`                                       |
 | `tours.ts`                                    | scripted Simulator walkthroughs of your product                                                    | `tours = []` (no Tours tab)                |
 | `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                                                            | `[] as const` / `never`                    |
 | `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers                                                          | `{}`                                       |
@@ -314,7 +314,7 @@ therefore declares an empty one and suppresses `@typescript-eslint/no-empty-obje
 `apps/starter` shows the suppression and why.
 
 **To add a feature slice**: run `/new-slice` (and the per-capability scaffolds `/new-entity`,
-`/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`, `/new-preset-operation`). Each walks the house way:
+`/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`, `/new-preset`, `/new-preset-operation`). Each walks the house way:
 screen in your app's `apps/<app>/src/components` (yours) or `packages/keel/src/components` (framework-generic),
 thin route, seam registrations, an RLS migration copied from the reference
 (`apps/starter/src/app-config/db/migrations/1001_items.ts`), colocated tests, e2e, then `pnpm verify` +

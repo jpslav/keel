@@ -146,7 +146,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
 - Commands: `/verify`, `/new-port`, `/new-slice`, `/record-fixtures`, `/pre-pr`, `/branch-review`,
   `/sub-review`, `/repo-health`, `/a11y-review`, `/design-review`; capability scaffolds `/new-entity`,
   `/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`,
-  `/new-preset-operation`.
+  `/new-preset`, `/new-preset-operation`.
 - Record important lessons in `docs/build-notes.md`; unplanned decisions in `docs/decision-log.md`;
   designed-but-unbuilt work in `.claude/future-tasks/` (one file per item, listed in its `index.md`).
   Amend an ADR by appending a dated addendum — never by editing what its body said.
