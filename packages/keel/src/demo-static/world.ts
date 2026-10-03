@@ -45,7 +45,14 @@ import {
     notificationCopy,
     resolveEnabledChannels,
 } from '../core/notifications'
-import { expandPreset, type FlagArgs, type InboundArgs, type InviteArgs, type PresetOperation } from '../core/presets'
+import {
+    expandPreset,
+    type ActorHoldArgs,
+    type FlagArgs,
+    type InboundArgs,
+    type InviteArgs,
+    type PresetOperation,
+} from '../core/presets'
 import { canManageOrg } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
@@ -235,6 +242,9 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     // Simulator Events tab beneath the analytics events (full parity: audit is just rows).
     const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
     const [flags, setFlags] = useState<Record<string, boolean>>(INITIAL_FLAGS)
+    // Twin of .data/simulator/actor-holds.json: the actors the world has individually held, by actor id.
+    // Only a demo preset's `actor.hold` writes it (the world-wide hold is the app's own flag, above).
+    const [actorHolds, setActorHolds] = useState<Record<string, boolean>>({})
     const [jobs, setJobs] = useState<DemoJob[]>([])
     // Twin of the inbound_emails table — the world's received mail, drives the Simulator Mail-tab
     // inbound list. Filed by composeInbound below (the twin of intakeInboundEmail).
@@ -1086,6 +1096,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         setEvents([])
         setAuditEntries([])
         setFlags(INITIAL_FLAGS)
+        setActorHolds({})
         setJobs([])
         setInbound([])
         setEndpoints([])
@@ -1169,6 +1180,12 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             setFlags((prev) => ({ ...prev, [args.flag]: args.enabled }))
             return {}
         }) satisfies StaticPresetOperationHandler<FlagArgs>,
+        // Like the server half, no registry check: the world has no actor list to ask, and the seam
+        // gate has already held every registered preset to the app's registered actors.
+        'actor.hold': ((args) => {
+            setActorHolds((prev) => ({ ...prev, [args.actor]: args.held }))
+            return {}
+        }) satisfies StaticPresetOperationHandler<ActorHoldArgs>,
     }
 
     /**
@@ -1392,6 +1409,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             const delivered = runDueDeliveries(mountedAtMs + clockOffsetMs)
             pushNotice(tSimulator('noticeHooksDelivered', { count: delivered }))
         },
+        actorHolds,
         featureFlags: Object.keys(INITIAL_FLAGS).map((flag) => ({ flag, enabled: flags[flag] ?? false })),
         setFeatureFlag: (flag, enabled) => setFlags((prev) => ({ ...prev, [flag]: enabled })),
         demoBannerOn: flags['demo-banner'] ?? false,

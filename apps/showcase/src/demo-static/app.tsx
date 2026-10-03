@@ -288,7 +288,8 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
         (log: ActorLog) => builderTick(builderDriver([analyzerOrgSlug], log), log, tSimulator),
         [builderDriver, tSimulator],
     )
-    // The world's hold on its counterparties — the same `actors-held` flag the server host reads.
+    // The world's hold on its counterparties: the `actors-held` flag (all of them) or a preset's per-actor
+    // hold (`actor.hold`, one) — the same two things the server host's `held` route answers from.
     const actorsHeld = world.featureFlags.find((f) => f.flag === actorsHeldFlag)?.enabled ?? false
     const actorSlots: ActorSlot[] = actors.map(({ id, titleKey, descriptionKey }) => ({
         id,
@@ -300,7 +301,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
                 actor={id}
                 inline
                 startPaused={false}
-                held={() => actorsHeld}
+                held={() => actorsHeld || (world.actorHolds[id] ?? false)}
                 tick={id === 'bundle-analyzer' ? serviceTickFn : builderTickFn}
             />
         ),

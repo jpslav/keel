@@ -105,8 +105,9 @@ test('snapshots: save, mutate, restore, then reset returns to the seed baseline'
 test('presets: loading one replays it on the server, signs this browser in, and reserves its name', async ({
     page,
 }) => {
-    // Two world resets (each lazily re-migrates + re-seeds pglite) plus the replays — same room as above.
-    test.setTimeout(120_000)
+    // Three world resets (each lazily re-migrates + re-seeds pglite) plus the replays, and the actor frames'
+    // first tick after the last one — more room than the test above.
+    test.setTimeout(180_000)
 
     // Start signed in as someone ELSE: the preset's viewpoint, not the previous session, decides who
     // this browser is afterwards.
@@ -137,6 +138,21 @@ test('presets: loading one replays it on the server, signs this browser in, and 
     await expect(page.getByTestId('snapshot-name-error')).toBeVisible()
     const refused = await page.request.post('/api/simulator/snapshots', { data: { name: 'mid-demo' } })
     expect(refused.status()).toBe(403)
+
+    // multi-tenant, which EXTENDS mid-demo, also holds ONE actor (`actor.hold`): the partner desk, not the
+    // bundle analyzer. The actor frames are iframes mounted from page load, and a frame reports `held` only
+    // once its first autonomous tick has asked the server, so wait for that rather than sleeping.
+    await page.getByTestId('preset-load-multi-tenant').click()
+    await page.waitForURL('**/en/dashboard')
+    await expect(page.getByTestId('signed-in-as')).toContainText('Gale Bennett', { timeout: 20_000 })
+    const partnerDesk = page.frameLocator('[data-testid="actor-frame-partner-desk"]').getByTestId('actor-status')
+    const analyzer = page.frameLocator('[data-testid="actor-frame-bundle-analyzer"]').getByTestId('actor-status')
+    await expect(partnerDesk, 'the preset holds the partner desk').toHaveAttribute('data-state', 'held', {
+        timeout: 45_000,
+    })
+    // Checked after the desk reported: the analyzer ticks on the same schedule, so a hold wrongly applied
+    // to it would show by now, and "not held" cannot pass merely because nothing has asked yet.
+    await expect(analyzer, 'the bundle analyzer keeps running').not.toHaveAttribute('data-state', 'held')
 
     // Leave the seed baseline behind for the rest of the destructive project.
     const reset = await page.request.post('/api/simulator/reset')

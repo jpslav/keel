@@ -266,6 +266,10 @@ export interface DemoWorld {
     failingEndpointIds: string[]
     toggleEndpointFailure: (endpointId: string, failing: boolean) => void
     runDueDeliveriesNow: () => void
+    /** The actors a demo preset has individually held (`actor.hold`), by actor id; `true` = held. An actor
+     *  host answers its shell's `held()` with this OR the app's world-wide hold flag — the twin of the
+     *  server's per-actor `held` route. Cleared on reset. */
+    actorHolds: Record<string, boolean>
     featureFlags: FeatureFlag[]
     setFeatureFlag: (flag: string, enabled: boolean) => void
     demoBannerOn: boolean

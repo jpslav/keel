@@ -69,7 +69,7 @@ describe('applyDemoPreset (server host)', () => {
         const { fakeAuth } = await import('../adapters/fake/auth')
         const { listCaughtEmails } = await import('../adapters/fake/email')
         const { readFlags } = await import('../adapters/fake/analytics')
-        const { readViewpointCookie } = await import('../adapters/fake/simulator')
+        const { readActorHolds, readViewpointCookie } = await import('../adapters/fake/simulator')
 
         const result = await applyDemoPreset('busy-harbor', { baseUrl: BASE_URL })
 
@@ -84,9 +84,25 @@ describe('applyDemoPreset (server host)', () => {
         expect(await depotDocketLabels()).toContain('Crane four is stuck')
         // flag
         expect(readFlags()['jobs-held']).toBe(true)
+        // actor.hold: the fixture's one actor is held, in the file the actor host's `held` route reads
+        expect(readActorHolds()).toEqual({ 'fixture-tug': true })
         // viewpoint: THIS browser now sits at fixture-hand's desk
         expect((await fakeAuth.getCurrentUser())?.id).toBe('fixture-hand')
         expect(await readViewpointCookie()).toBe('person:fixture-hand')
+    })
+
+    test('an actor hold lasts until the world is reset: the next load starts from none, a reset leaves none', async () => {
+        const { applyDemoPreset } = await import('./demo-presets')
+        const { readActorHolds, setActorHold } = await import('../adapters/fake/simulator')
+        const { resetWorld } = await import('../adapters/fake/simulator-admin')
+
+        // a hold the preset does not make must not survive the load (replaying resets the world first)
+        setActorHold('fixture-barge', true)
+        await applyDemoPreset('busy-harbor', { baseUrl: BASE_URL })
+        expect(readActorHolds()).toEqual({ 'fixture-tug': true })
+
+        await resetWorld()
+        expect(readActorHolds()).toEqual({})
     })
 
     test('a named result flows: the docket the inbound handler opened is the one the app kind flags', async () => {

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { type ActorLog, builderTick, type ServiceMemory, serviceTick } from 'keel/components/simulator/actor-runtime'
 import { ActorShell } from 'keel/components/simulator/actor-shell'
 import type { ActorId } from '@app-config/actors'
-import { actorsHeldFlag } from '@app-config/simulator'
 import { createBuilderDriver, createServiceDriver } from './drivers'
 
 /**
@@ -39,14 +38,15 @@ export function ActorHost({ actor }: { actor: ActorId }) {
         [actor, t],
     )
 
-    // The world's hold on its counterparties (the `actors-held` Snapshots flag), asked before every
-    // autonomous tick — the frame is its own document, so it reads the persisted flag, not panel state.
+    // The world's hold on THIS actor (the `actors-held` Snapshots flag, or a preset's per-actor hold),
+    // asked before every autonomous tick — the frame is its own document, so it asks the server, which
+    // answers exactly this question.
     const held = useCallback(async () => {
-        const res = await fetch('/api/simulator/flags')
-        if (!res.ok) throw new Error(`flags → ${res.status}`)
-        const { flags } = (await res.json()) as { flags: Record<string, boolean> }
-        return flags[actorsHeldFlag] ?? false
-    }, [])
+        const res = await fetch(`/api/simulator/actors/held?actor=${encodeURIComponent(actor)}`)
+        if (!res.ok) throw new Error(`held → ${res.status}`)
+        const { held: isHeld } = (await res.json()) as { held: boolean }
+        return isHeld
+    }, [actor])
 
     const [mounted, setMounted] = useState(false)
     const [startPaused, setStartPaused] = useState(false)

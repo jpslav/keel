@@ -42,6 +42,7 @@ const busyHarbor: DemoPreset = {
         },
         { op: 'docket.flag', by: 'fixture-lead', org: 'depot', docket: 'crane' },
         { op: 'flag', flag: 'jobs-held', enabled: true },
+        { op: 'actor.hold', actor: 'fixture-tug', held: true },
     ],
 }
 

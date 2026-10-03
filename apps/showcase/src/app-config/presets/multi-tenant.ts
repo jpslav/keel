@@ -46,5 +46,7 @@ export const multiTenant: DemoPreset = {
             body: 'I would like to reopen the ticket about my reservation from last month.',
         },
         { op: 'flag', flag: 'sla-breach-banner', enabled: true },
+        // The outsourced desk has gone quiet; the bundle analyzer keeps running — one counterparty held, not both.
+        { op: 'actor.hold', actor: 'partner-desk', held: true },
     ],
 }

@@ -69,6 +69,22 @@ describe('simulator-admin snapshots', () => {
         expect(existsSync(path.join(emailsDir, 'leftover.json'))).toBe(false)
     })
 
+    test('reset clears per-actor holds, and a snapshot saves and restores them', async () => {
+        const { readActorHolds, setActorHold } = await import('./simulator')
+        const { resetWorld, saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
+
+        setActorHold('fixture-tug', true)
+        await saveSnapshot('holds-checkpoint')
+        setActorHold('fixture-tug', false)
+        setActorHold('fixture-barge', true)
+
+        await restoreSnapshot('holds-checkpoint')
+        expect(readActorHolds()).toEqual({ 'fixture-tug': true })
+
+        await resetWorld()
+        expect(readActorHolds()).toEqual({})
+    })
+
     test('snapshot name validation rejects path traversal and uppercase', async () => {
         const { saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
 
