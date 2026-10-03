@@ -89,7 +89,14 @@ describe('presetProblems', () => {
             summaryKey: 'k',
             viewpoint: 'nobody',
             operations: [
-                { op: 'inbound', org: 'no-such-org', handler: 'refunds', from: 'a@example.test', subject: '', body: '' },
+                {
+                    op: 'inbound',
+                    org: 'no-such-org',
+                    handler: 'refunds',
+                    from: 'a@example.test',
+                    subject: '',
+                    body: '',
+                },
                 { op: 'flag', flag: 'no-such-flag', enabled: true },
             ],
         }

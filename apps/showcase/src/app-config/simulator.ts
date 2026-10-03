@@ -92,7 +92,12 @@ export const presets: DemoPreset[] = [
         summaryKey: 'presets.midDemoSummary',
         viewpoint: 'person-admin',
         operations: [
-            ...MORNING_INBOUND.map((mail) => ({ op: 'inbound' as const, org: 'frontline', handler: 'support', ...mail })),
+            ...MORNING_INBOUND.map((mail) => ({
+                op: 'inbound' as const,
+                org: 'frontline',
+                handler: 'support',
+                ...mail,
+            })),
             { op: 'invite', by: 'person-admin', org: 'frontline', email: 'jordan.ellis@example.test', role: 'member' },
         ],
     },
@@ -105,7 +110,12 @@ export const presets: DemoPreset[] = [
         summaryKey: 'presets.multiTenantSummary',
         viewpoint: 'person-guest',
         operations: [
-            ...MORNING_INBOUND.map((mail) => ({ op: 'inbound' as const, org: 'frontline', handler: 'support', ...mail })),
+            ...MORNING_INBOUND.map((mail) => ({
+                op: 'inbound' as const,
+                org: 'frontline',
+                handler: 'support',
+                ...mail,
+            })),
             {
                 op: 'inbound',
                 org: 'platform',

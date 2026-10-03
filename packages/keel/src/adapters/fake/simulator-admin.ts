@@ -1,5 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
+import { presets } from '@app-config/simulator'
+import { isReservedWorldStartName, WORLD_START_NAME_PATTERN } from '../../core/presets'
 import { ForbiddenError, NotFoundError } from '../../ports/errors'
 import { writeFileAtomicSync, writeJsonAtomicSync } from './atomic-write'
 import { dataDir } from './data-dir'
@@ -23,7 +25,6 @@ import { closeFakeDb } from './db'
  */
 
 const LIVE_DIRS = ['auth', 'emails', 'analytics', 'pglite', 'storage', 'simulator', 'webhooks', 'sms']
-const SNAPSHOT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/
 const DEV_SECRET_FILE = 'dev-secret'
 
 function root(): string {
@@ -43,7 +44,16 @@ function snapshotPath(name: string): string {
 }
 
 function assertValidSnapshotName(name: string): void {
-    if (!SNAPSHOT_NAME_PATTERN.test(name)) throw new ForbiddenError(`invalid snapshot name: ${name}`)
+    if (!WORLD_START_NAME_PATTERN.test(name)) throw new ForbiddenError(`invalid snapshot name: ${name}`)
+}
+
+/** A saved snapshot may not shadow `'reset'` or a registered demo preset: all three share the namespace a
+ *  tour's `snapshot` resolves in (keel/core/presets.ts `resolveWorldStart`), so a collision would make a
+ *  tour start from a different world on the server than in the static demo. Checked on SAVE only —
+ *  restoring or deleting a snapshot saved before a preset took its name must still work. */
+function assertSavableSnapshotName(name: string): void {
+    assertValidSnapshotName(name)
+    if (isReservedWorldStartName(name, presets)) throw new ForbiddenError(`reserved snapshot name: ${name}`)
 }
 
 function devSecretPath(): string {
@@ -118,7 +128,7 @@ export function listSnapshots(): { name: string; at: string }[] {
 /** Saves (or overwrites) a named snapshot: closes pglite, then copies every LIVE_DIR that
  *  currently exists into `.data/snapshots/<name>/`, plus a small `meta.json` recording when. */
 export async function saveSnapshot(name: string): Promise<void> {
-    assertValidSnapshotName(name)
+    assertSavableSnapshotName(name)
     return serialize(async () => {
         await closeFakeDb()
         const dest = snapshotPath(name)
