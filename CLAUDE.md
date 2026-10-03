@@ -34,7 +34,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   explicitly — the ESLint fence and the ports/hermetic bans, `.jscpd.json`, `knip.json`'s `project`,
   and the root `tsconfig.json`. It sat outside the fence once, which made it the one directory in
   `packages/keel` where importing an app's `@/*` or `@app/seed` was legal; a location is not a
-  boundary. It is a conforming 17-module registration with its own seed
+  boundary. It is a conforming 18-module registration with its own seed
   world, table + migration, job/webhook/notification kinds, inbound handler, catalog and route tree,
   and the ROOT `tsconfig.json` resolves `@app-config/*` there. Its vocabulary
   (`harbor`/`lakeside`, `depot`/`annex`/`steward`/`wharf`, `fixture-*`, `dockets`) is deliberately

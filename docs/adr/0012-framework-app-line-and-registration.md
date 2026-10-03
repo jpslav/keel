@@ -327,3 +327,23 @@ never borrows an app's world. A registered preset is seam-conformance-tested und
 
 The public surface grows by three subpaths, `core/presets`, `server-lib/demo-presets` and `server-lib/invite`,
 to **129**. The internal count is unchanged at 34.
+
+## Addendum (2026-10-03, later): presets get their own seam module
+
+`presets` moves out of `@app-config/simulator` into **`@app-config/presets`**, a new seam module and a new
+entry on the enumerated value-import list above: the static world, the Snapshots tab, `saveSnapshot`'s
+reserved-name check and the server replay all read it as a value. This supersedes the same-day addendum
+above, which kept presets on `simulator` because that module was already on the list. `simulator` goes back
+to the panel's extra tabs and feature flags (`flags`, `tabs`, `actorsHeldFlag`).
+
+The reason is that a preset registry is its own subject. It is expected to grow to dozens of entries, one
+file per preset, and it now carries composition: `DemoPreset.extends` names one other preset (single
+inheritance) that is replayed first, and `expandPreset` in `keel/core/presets.ts` flattens the chain for
+both hosts. Sharing a file with the panel's tabs and flags no longer described either. The empty form is
+unchanged in meaning (`presets = []`, no presets section), and `presetProblems` validates the expanded
+script, so an unknown base, a cycle, or a duplicate invite split across a chain fails the seam-conformance
+test under every app.
+
+The fixture's seam is now **18** modules (`presets.ts` added). It registers `busy-harbor` and a child,
+`busy-harbor-lead`, which extends it, so keel's replay test proves inheritance in keel's own vocabulary.
+The public surface and internal counts are unchanged.
