@@ -1357,3 +1357,18 @@ read that as "keep the fixtures", and built their own world beside the starter's
   shows only when the rows span more than one tenant, and the org name only when they span more than
   one org (`people-dimensions.ts`); role always shows. A second tenant or team makes the chip appear on
   its own.
+
+## Per-person cloud workspaces: a recipe, not a port (2026-10-03, `upstream-mechanical-bundle`)
+
+A future task proposed a `workspace` port generic over the backend, with its adapter selection gated
+independently of `APP_MODE`. It is resolved the other way, as `docs/recipes/workspace-coder.md`.
+
+- **Fails both vendor-code tests.** Almost no instance provisions per-person dev environments
+  (universality), and an authenticated REST vendor behind a polled long-running operation is a class
+  the LLM, email and webhook-dispatch adapters already teach (new-class).
+- **The implementation it was drawn from broke doctrine twice**: it chose its adapter from the
+  backend's own env vars rather than `APP_MODE`, and it let product vocabulary into the adapter
+  registry. Writing the plan down, rather than lifting the code, is what keeps both out.
+- **The one legitimate need survives as an explicit override.** A real backend inside an otherwise
+  simulated demo is allowed only as a named, fail-closed switch with its costs stated in the recipe —
+  never an adapter that turns itself on because its env vars happen to be present.
