@@ -44,7 +44,7 @@ import {
     notificationCopy,
     resolveEnabledChannels,
 } from '../core/notifications'
-import { canManageOrg } from '../core/roles'
+import { canManageOrg, isAssignableRole } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
     backoffDelayMs,
@@ -820,6 +820,14 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      *  land its email in the catch-store, and notify the team's OTHER admins. */
     async function sendInvite({ email, role }: { email: string; role: string }) {
         setInviteError(null)
+        // The same allowlist the real invite route enforces. The org screen only offers assignable
+        // roles, so no click reaches this — but a tour script or other non-UI caller can pass 'admin'
+        // straight in. The error is set before throwing because the org screen swallows the rejection
+        // and shows only `inviteError`.
+        if (!isAssignableRole(role)) {
+            setInviteError(tOrg('inviteFailed'))
+            throw new Error('role not assignable')
+        }
         const taken = [...allPeople.map((p) => p.email), ...invites.map((i) => i.email)]
         if (taken.some((existing) => existing.toLowerCase() === email.toLowerCase())) {
             setInviteError(tOrg('inviteDuplicate'))

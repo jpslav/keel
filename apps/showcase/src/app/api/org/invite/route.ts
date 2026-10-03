@@ -2,7 +2,7 @@ import { getTranslations } from 'next-intl/server'
 import { analytics, auth, db, email } from 'keel/adapters/index'
 import { authorize } from 'keel/authz/authorize'
 import { recordAuditEvent } from 'keel/db/audit'
-import { ORG_ASSIGNABLE_ROLES, isRole, type Role } from 'keel/core/roles'
+import { isAssignableRole } from 'keel/core/roles'
 import { findOrg } from '@app/seed'
 import { InviteEmail } from 'keel/email/templates/invite-email'
 import { sendTemplate } from 'keel/email/send'
@@ -26,7 +26,7 @@ export async function POST(request: Request): Promise<Response> {
         const { tenantId, orgId } = resolved
         const body = (await request.json()) as { email: string; role: string }
         // Server-side allowlist, independent of what the UI offers: managers may never grant admin.
-        if (!isRole(body.role) || !ORG_ASSIGNABLE_ROLES.includes(body.role as Role)) {
+        if (!isAssignableRole(body.role)) {
             return Response.json({ error: 'role not assignable' }, { status: 400 })
         }
         // Same shape check the form runs — the API must not trust the UI (mirrors the role
