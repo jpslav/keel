@@ -326,8 +326,8 @@ someone and let them press Start.
 
 **Presets: starting points every host can load ✅.** A saved snapshot is a binary copy of `.data/`, so it
 restores only where there is a server to copy it into. A **demo preset** is the other representation —
-the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag
-and whatever kinds the app adds, each naming its actor and team) and an optional viewpoint — which each host replays its own way: the
+the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag, holding one
+Simulator actor, and whatever kinds the app adds, each naming its actor and team) and an optional viewpoint — which each host replays its own way: the
 server through the same code the product runs (`keel/server-lib/demo-presets.ts`, sharing
 `sendOrgInvite` with the org route and the intake with the inbound webhook), the `file://` twin through
 its in-memory world, one step per commit so each step sees the world its predecessor left. So a preset
