@@ -297,7 +297,7 @@ a vendor the app calls _out_ to (Clerk, S3, Mailgun, Anthropic) — a world buil
 has nothing that calls back _in_, so an async workflow just sits at `queued` with nobody to advance it.
 Simulator's **Actors** tab closes that gap: simulated counterparties (a bundle analyzer, a partner desk)
 run as independent client-side processes, in same-origin iframes, autonomous by default with pause/step
-(and, once the Actors tab has been opened, kept running hidden through tab switches and panel collapse),
+(mounted from page load and kept running whatever the panel shows — the world's `actors-held` flag pauses them),
 and they talk to the app only over the surfaces a genuine counterparty would use — `/api/service/*` polls
 and `/api/webhooks/*` POSTs, real inbound requests, never an in-process shortcut. A handful of mode-gated
 `/api/simulator/actors/*` routes give them a god's-eye work queue and produce the artifact a completion

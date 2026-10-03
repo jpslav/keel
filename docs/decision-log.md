@@ -1340,3 +1340,20 @@ read that as "keep the fixtures", and built their own world beside the starter's
 - **Actors off the page stay undecided.** Running an actor with no page open contradicts the stated
   "client-side processes, in same-origin iframes" design and can never work on the `file://` host; it
   stays open in `.claude/future-tasks/actors-as-independent-systems.md`.
+
+## Simulator actors run from page load, held by a world flag; People chips show only what distinguishes (2026-10-03, `feat/actors-always-on`)
+
+- **Actors are always on.** Replaced: the same day's "`keepMounted` is lazy, then sticky". A real
+  counterparty doesn't wait for someone to open a Simulator tab, so the Actors tab now mounts from page
+  load. Lazy mounting existed only to keep specs and tours quiet; that job moves to an explicit world
+  switch, the showcase's `actors-held` Snapshots flag. `ActorShell` asks its host's `held()` before
+  every autonomous tick, keeps its schedule while held, and shows a `held` state; a manual Step ignores
+  the hold, because stepping is an explicit operator act. Specs that drive held jobs by hand turn it on.
+- **The flag is the app's, not the framework's.** Actors are app content (`@app-config/actors`), so the
+  switch that holds them is registered on the same seam (`@app-config/simulator` flags). The framework
+  supplies only the `held` hook, so an app with no actors — the starter — shows no such toggle.
+- **People chips derive from the rows, not from configuration.** Every keel app HAS a tenant and an org
+  for every person (the auth port requires both), but many only ever run one of each. The tenant chip
+  shows only when the rows span more than one tenant, and the org name only when they span more than
+  one org (`people-dimensions.ts`); role always shows. A second tenant or team makes the chip appear on
+  its own.
