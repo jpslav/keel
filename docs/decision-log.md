@@ -1375,7 +1375,8 @@ read that as "keep the fixtures", and built their own world beside the starter's
   pointed at a person the reset removed, they land on sign-in, as after any reset. Viewpoint capture
   for directory snapshots was not added: it would raise the same question with no good answer.
 - **One resolution order for a world-start name: `'reset'` → preset → saved snapshot**
-  (`resolveWorldStart`), used by both hosts' tour starts and by nothing else. Saving a snapshot under
+  (`resolveWorldStart`), shared by both hosts' tour starts (and the showcase test that checks every tour's
+  start). Saving a snapshot under
   `reset` or a preset id is refused, in the UI and with a 403 from `saveSnapshot`, so a tour's
   `snapshot` can never name two worlds. Restore and delete stay permitted, so a snapshot saved before a
   preset took its name is not orphaned.

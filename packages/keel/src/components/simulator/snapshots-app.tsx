@@ -99,6 +99,9 @@ export function SnapshotsApp({
     // starting world by that one string, and it must mean the same world on every host.
     const nameReserved = isReservedWorldStartName(name, appPresets)
     const nameValid = WORLD_START_NAME_PATTERN.test(name) && !nameReserved
+    // Reset, restore and a preset load each rewrite the whole world, so one in flight disables the others:
+    // a second one starting mid-replay would wipe the world underneath the first.
+    const worldBusy = Boolean(busy) || busySnapshot != null || busyPreset != null
 
     // Known flags get a friendly label; anything new falls back to its raw key instead of silently
     // borrowing another flag's label. Framework flags (demo-banner, jobs-held) are labelled here, from
@@ -164,6 +167,7 @@ export function SnapshotsApp({
                         color="red.4"
                         variant="outline"
                         size="xs"
+                        disabled={worldBusy}
                         data-testid="snapshots-reset"
                         onClick={() => setConfirmingReset(true)}
                     >
@@ -205,7 +209,7 @@ export function SnapshotsApp({
                                 </Stack>
                                 <UnstyledButton
                                     data-testid={`preset-load-${preset.id}`}
-                                    disabled={busyPreset != null}
+                                    disabled={worldBusy}
                                     onClick={() => onLoadPreset(preset.id)}
                                     style={snapshotActionStyle}
                                 >
@@ -366,7 +370,7 @@ export function SnapshotsApp({
                                         <Group gap={6} wrap="nowrap">
                                             <UnstyledButton
                                                 data-testid={`snapshots-restore-${snapshot.name}`}
-                                                disabled={rowBusy}
+                                                disabled={worldBusy}
                                                 onClick={() => onRestore?.(snapshot.name)}
                                                 style={snapshotActionStyle}
                                             >

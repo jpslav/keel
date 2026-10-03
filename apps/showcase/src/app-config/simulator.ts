@@ -11,7 +11,7 @@
  * content, so the panel stays router-/data-blind (ADR-0006).
  */
 
-import type { DemoPreset } from 'keel/core/presets'
+import type { DemoPreset, PresetOperation } from 'keel/core/presets'
 
 /** One app-registered Simulator tab. The host translates `labelKey` and supplies the tab's content. */
 interface AppSimulatorTab {
@@ -49,20 +49,26 @@ interface AppSimulatorFlag {
  */
 export const flags: AppSimulatorFlag[] = [{ id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' }]
 
-/** The weekday-morning emails both busy presets open with. Simulated content, so one language — like the
- *  seed corpus and the tour's typed email (see tours.ts). */
-const MORNING_INBOUND = [
+/** The weekday-morning emails both busy presets open with, sent to the Frontline Desk's front door.
+ *  Simulated content, so one language — like the seed corpus and the tour's typed email (see tours.ts). */
+const MORNING_TICKETS: PresetOperation[] = [
     {
+        op: 'inbound',
+        org: 'frontline',
+        handler: 'support',
         from: 'marisol.vega@example.test',
         subject: 'Refund stuck in pending for three days',
         body: 'A customer was promised a refund on Monday and it still shows as pending. Can someone on the desk check whether it was ever sent?',
     },
     {
+        op: 'inbound',
+        org: 'frontline',
+        handler: 'support',
         from: 'sam.rivera@example.test',
         subject: 'Checkout times out for shoppers in the EU',
         body: 'Several EU customers report the payment step spinning until it times out. US checkouts look fine.',
     },
-] as const
+]
 
 /**
  * DEMO PRESETS (keel/core/presets.ts): named starting points every host can restore — the Snapshots
@@ -92,12 +98,7 @@ export const presets: DemoPreset[] = [
         summaryKey: 'presets.midDemoSummary',
         viewpoint: 'person-admin',
         operations: [
-            ...MORNING_INBOUND.map((mail) => ({
-                op: 'inbound' as const,
-                org: 'frontline',
-                handler: 'support',
-                ...mail,
-            })),
+            ...MORNING_TICKETS,
             { op: 'invite', by: 'person-admin', org: 'frontline', email: 'jordan.ellis@example.test', role: 'member' },
         ],
     },
@@ -110,12 +111,7 @@ export const presets: DemoPreset[] = [
         summaryKey: 'presets.multiTenantSummary',
         viewpoint: 'person-guest',
         operations: [
-            ...MORNING_INBOUND.map((mail) => ({
-                op: 'inbound' as const,
-                org: 'frontline',
-                handler: 'support',
-                ...mail,
-            })),
+            ...MORNING_TICKETS,
             {
                 op: 'inbound',
                 org: 'platform',

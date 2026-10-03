@@ -222,6 +222,7 @@ export interface DemoWorld {
     demoBannerOn: boolean
     resetWorld: () => void
     /** Load a registered demo preset (keel/core/presets.ts): reset, replay its operations, sit down as its
-     *  viewpoint. Resolves once the world is ready — false when no preset has that id. */
+     *  viewpoint. Resolves true once the world is ready; false when no preset has that id, or when the
+     *  replay was abandoned (a reset or another load mid-replay) or hit a step it could not perform. */
     applyPreset: (id: string) => Promise<boolean>
 }

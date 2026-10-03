@@ -142,8 +142,16 @@ export function presetProblems(presets: readonly DemoPreset[], world: PresetWorl
                 }
                 invited.add(address)
             }
-            if (operation.op === 'inbound' && !world.handlers.includes(operation.handler)) {
-                problems.push(`${at}: no inbound handler "${operation.handler}"`)
+            if (operation.op === 'inbound') {
+                if (!world.handlers.includes(operation.handler)) {
+                    problems.push(`${at}: no inbound handler "${operation.handler}"`)
+                }
+                // A seed person, so a typo cannot quietly turn an intended ticket into an 'unmatched'
+                // filing. Whether that person may author into the team stays the HANDLER's call — a
+                // refused email is a legitimate thing for a preset to show.
+                if (!emails.has(operation.from.toLowerCase())) {
+                    problems.push(`${at}: sender "${operation.from}" is not a seed person`)
+                }
             }
             if (operation.op === 'flag' && !world.flags.includes(operation.flag)) {
                 problems.push(`${at}: unknown flag "${operation.flag}"`)

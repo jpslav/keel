@@ -262,7 +262,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     // The demo-preset replay queue (see applyPreset): the steps still to run, drained one per render.
     const [replay, setReplay] = useState<ReplayStep[] | null>(null)
     // Resolves the promise applyPreset handed out, once the queue drains.
-    const replayDone = useRef<(() => void) | null>(null)
+    const replayDone = useRef<((completed: boolean) => void) | null>(null)
     // Always-current mirror of `jobs` for the actor drivers: refs may not be written during render
     // (react-hooks/refs), so an effect keeps it in sync instead — the drivers read through the ref
     // rather than a stale closure, so they never need rebuilding when a tick fires.
@@ -829,12 +829,15 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      * Twin of `sendOrgInvite` (keel/server-lib/invite.ts) — what happens once an invite is allowed: mint
      * it, land its email in the catch-store, audit it, and notify the team's OTHER admins. The inviter and
      * the team are explicit because the demo-preset replay names both; the org screen passes whoever is
-     * signed in. Answers false for the duplicate the real API refuses with a 409.
+     * signed in. Answers false for a team the seed does not have, or for the duplicate the real API
+     * refuses with a 409.
      */
     function inviteInto(inviter: SeedPerson, orgSlug: string, email: string, role: string): boolean {
+        const target = findOrg(orgSlug)
+        // Never fall back to the ambient team: an invite always names the one it is for.
+        if (!target) return false
         const taken = [...allPeople.map((p) => p.email), ...invites.map((i) => i.email)]
         if (taken.some((existing) => existing.toLowerCase() === email.toLowerCase())) return false
-        const target = findOrg(orgSlug) ?? org
         // crypto.randomUUID keeps twin ids collision-free (and symmetric with the fake adapter) — a
         // length-based id could be reused after an accept shrinks the list, making a stale email link
         // accept the WRONG invite.
@@ -1077,9 +1080,10 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         setMailScope('person')
         setMailSeenAt({})
         continuityMap.current.clear()
-        // A reset abandons any preset replay still in flight (and settles whoever was waiting on it).
+        // A reset abandons any preset replay still in flight, and settles whoever was waiting on it with
+        // false: that world was never finished, so a tour must not start in it as if it had been.
         setReplay(null)
-        replayDone.current?.()
+        replayDone.current?.(false)
         replayDone.current = null
         onReset?.()
         setNotices([])
@@ -1091,7 +1095,8 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      * Twin of the server's demo-preset replay (keel/server-lib/demo-presets.ts): reset to the seed, then
      * replay the preset's operations through this world's own twins — the invite core, compose-inbound
      * (and so the app's inbound handler twins), the flag store — and finally sit down as the preset's
-     * viewpoint. Resolves once the world is ready; answers false for an id no preset has.
+     * viewpoint. Resolves true once the world is ready; false for an id no preset has, or when the replay
+     * is abandoned (a reset mid-replay) or reaches a step this world cannot perform.
      *
      * The steps run ONE PER RENDER, from the effect below, rather than in a loop here. Every twin reads
      * the world through this render's closure (the duplicate check reads `invites`, the inbound twin
@@ -1108,18 +1113,20 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         steps.push({ op: 'loaded', title: tRoot(preset.titleKey) })
         setReplay(steps)
         return new Promise((resolve) => {
-            replayDone.current = () => resolve(true)
+            replayDone.current = resolve
         })
     }
 
-    function performReplayStep(step: ReplayStep) {
+    /** Runs one replay step; false when the world cannot perform it — the twin of the server replay
+     *  throwing. Only a preset that bypassed the conformance gate can get here. */
+    function performReplayStep(step: ReplayStep): boolean {
         switch (step.op) {
             case 'invite': {
                 const inviter = allPeople.find((p) => p.id === step.by)
-                if (inviter) inviteInto(inviter, step.org, step.email, step.role)
-                return
+                return inviter !== undefined && inviteInto(inviter, step.org, step.email, step.role)
             }
             case 'inbound':
+                if (!findOrg(step.org)) return false
                 composeInbound({
                     from: step.from,
                     orgSlug: step.org,
@@ -1127,18 +1134,20 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
                     subject: step.subject,
                     body: step.body,
                 })
-                return
+                return true
             case 'flag':
+                if (!(step.flag in INITIAL_FLAGS)) return false
                 setFlags((prev) => ({ ...prev, [step.flag]: step.enabled }))
-                return
+                return true
             case 'viewpoint':
+                if (!allPeople.some((p) => p.id === step.personId)) return false
                 selectPerson(`person:${step.personId}`)
-                return
+                return true
             case 'loaded':
                 // The steps' own notices (new mail, inbound filed…) would bury the one that matters.
                 setNotices([])
                 pushNotice(tSimulator('noticePresetLoaded', { name: step.title }))
-                return
+                return true
         }
     }
 
@@ -1149,10 +1158,12 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         // never fires a stale step.
         const id = setTimeout(() => {
             const [step, ...rest] = replay
-            if (step) performReplayStep(step)
-            setReplay(rest.length > 0 ? rest : null)
-            if (rest.length === 0) {
-                replayDone.current?.()
+            const performed = step === undefined || performReplayStep(step)
+            // A step the world cannot perform abandons the rest, like the server replay's throw.
+            const done = !performed || rest.length === 0
+            setReplay(done ? null : rest)
+            if (done) {
+                replayDone.current?.(performed)
                 replayDone.current = null
             }
         }, 0)
