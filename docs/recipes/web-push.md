@@ -99,7 +99,7 @@ catch-store entry.
 ## 4. The static-demo caveat — a real physics degrade
 
 `docs/development-approach.md` is explicit that the static demo degrades _only_ where physics forbid (no
-server means no real HTTP or byte downloads, no filesystem means Snapshots is reset-only), and every such
+server means no real HTTP or byte downloads, no filesystem means Snapshots can reset and replay presets but not save), and every such
 degrade gets noted where it happens. Web-push is squarely in that category on `file://`:
 
 - No server means no origin to register a Service Worker scope against in the way a deployed app has.

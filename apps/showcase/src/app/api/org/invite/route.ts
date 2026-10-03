@@ -1,14 +1,8 @@
-import { getTranslations } from 'next-intl/server'
-import { analytics, auth, db, email } from 'keel/adapters/index'
+import { auth } from 'keel/adapters/index'
 import { authorize } from 'keel/authz/authorize'
-import { recordAuditEvent } from 'keel/db/audit'
 import { isAssignableRole } from 'keel/core/roles'
 import { findOrg } from '@app/seed'
-import { InviteEmail } from 'keel/email/templates/invite-email'
-import { sendTemplate } from 'keel/email/send'
-import { deferAfterResponse } from 'keel/server-lib/defer'
-import { notifyAdmins } from 'keel/server-lib/notify'
-import { makeNotifyDeps } from 'keel/server-lib/notify-deps'
+import { sendOrgInvite } from 'keel/server-lib/invite'
 import { resolveOrgContext } from '../../org-context'
 import { withPortErrors } from '../../respond'
 
@@ -42,59 +36,18 @@ export async function POST(request: Request): Promise<Response> {
             return Response.json({ error: 'duplicate' }, { status: 409 })
         }
 
-        const membership = await auth.createInvite({
+        // Everything after the decision to invite is the framework's, shared with the demo-preset replay.
+        const membership = await sendOrgInvite({
+            inviter: user,
+            tenantSlug: user.tenantSlug,
+            tenantId,
+            orgId,
+            orgSlug: user.orgSlug,
+            orgName: findOrg(user.orgSlug)?.name ?? user.orgSlug,
             email: inviteEmail,
             role: body.role,
-            orgSlug: user.orgSlug,
-        })
-
-        // Audit trail: the invite is the audited mutation — a Membership was created.
-        await recordAuditEvent(db, {
-            tenantId,
-            orgId,
-            actorUserId: user.id,
-            action: 'membership.invited',
-            subjectType: 'Membership',
-            subjectId: membership.id,
-        })
-
-        const orgName = findOrg(user.orgSlug)?.name ?? user.orgSlug
-        const acceptUrl = new URL(`/${user.locale}/accept-invite?invite=${membership.id}`, request.url).toString()
-        // The invitee has no account (and so no locale) yet — the inviter's locale is the best
-        // available signal for the email copy (ADR-0008).
-        const t = await getTranslations({ locale: user.locale, namespace: 'email' })
-        // Deferred: the notification email is a post-response side effect — a
-        // slow mail provider must never add latency to the invite request. Simulated mode runs it inline
-        // (deterministic + visible in Simulator events); real mode sends it via Next's after().
-        await deferAfterResponse('invite-email', () =>
-            sendTemplate(email, {
-                to: inviteEmail,
-                subject: t('inviteSubject', { org: orgName }),
-                template: InviteEmail({
-                    labels: {
-                        preview: t('invitePreview', { org: orgName }),
-                        heading: t('inviteHeading', { org: orgName }),
-                        body: t('inviteBody', { inviter: user.name, org: orgName, role: body.role }),
-                        button: t('inviteButton'),
-                        linkFallback: t('inviteLinkFallback'),
-                    },
-                    acceptUrl,
-                }),
-            }),
-        )
-        await analytics.capture('org_invite_sent', { tenant: user.tenantSlug, org: user.orgSlug, role: body.role })
-
-        // Notification fan-out: tell the inviting team's OTHER admins that an invite went out.
-        // The invitee has no account yet, so they can't hold an in-app row — the admins are the demoable
-        // recipients (see the decision log). Reuses the members already fetched for the dup check; the
-        // inviter is excluded so they aren't notified of their own action. After-commit, like the audit.
-        await notifyAdmins(await makeNotifyDeps(), {
             members: existing,
-            tenantId,
-            orgId,
-            kind: 'org.invited',
-            payload: { email: inviteEmail, role: body.role, orgName },
-            excludeUserId: user.id,
+            baseUrl: request.url,
         })
 
         return Response.json({ membership })

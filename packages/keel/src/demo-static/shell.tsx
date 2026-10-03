@@ -1,7 +1,8 @@
 import { findOrg, findTenant, type SeedPerson } from '@app-config/seed'
+import { presets } from '@app-config/presets'
 import { Badge, Group } from '@mantine/core'
 import { useTranslations } from 'next-intl'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import { AcceptancesSection } from '../components/agreements/acceptances-section'
 import { AgreementAdvisoryBanner } from '../components/agreements/agreement-advisory-banner'
 import { AgreementGate } from '../components/agreements/agreement-gate'
@@ -22,6 +23,7 @@ import { ProfileScreen } from '../components/profile-screen'
 import { WebhookEndpointsCard } from '../components/webhook-endpoints-card'
 import { type Locale, LOCALES } from '../core/locale'
 import { unreadCount } from '../core/notifications'
+import { resolveWorldStart } from '../core/presets'
 import { canManageOrg, isAssignableRole, ROLES } from '../core/roles'
 import { WEBHOOK_EVENT_KINDS } from '../core/webhook-events'
 import { scrubEvent } from '../observability/scrub'
@@ -91,12 +93,32 @@ export function DemoShell({
     const t = useTranslations('shell')
     const { person, tenant, org, activeOrgSlug, name, route } = world
     // Scripted walkthroughs. The engine reads the app's registered tours off the seam itself, so an
-    // app gets the Tours tab (and the ghost cursor) by registering a tour and nothing else. `'reset'`
-    // is the one snapshot this host has — restoring it here is in-memory and instant, so unlike the
-    // server host the tour never has to survive a reload to start.
+    // app gets the Tours tab (and the ghost cursor) by registering a tour and nothing else. This host
+    // can start a tour from `'reset'` or from any registered demo preset — both are in-memory and
+    // instant, so unlike the server host the tour never has to survive a reload to start. A SAVED
+    // snapshot lives in a server's `.data/`, which this host does not have: answering false records the
+    // tour's start as a miss, so a tour that only works on a server fails the `file://` walkthrough gate.
+    // The preset a load is replaying for. Static replays run one step per commit, so a load takes several
+    // renders; while it does, the Snapshots tab disables the other world rewrites, as the server host does.
+    const [busyPreset, setBusyPreset] = useState<string | null>(null)
+    // Only the LATEST load may clear it: a second load (or a tour starting from a preset) resets the
+    // world, which settles the first load's promise — and that settle must not mark the world idle while
+    // the second one is still replaying.
+    const loadSeq = useRef(0)
+    function loadPreset(id: string): Promise<boolean> {
+        const mine = (loadSeq.current += 1)
+        setBusyPreset(id)
+        return world.applyPreset(id).finally(() => {
+            if (loadSeq.current === mine) setBusyPreset(null)
+        })
+    }
+
     const tours = useTours({
-        onSnapshot: (snapshot) => {
-            if (snapshot === 'reset') world.resetWorld()
+        onSnapshot: async (snapshot) => {
+            const start = resolveWorldStart(snapshot, presets)
+            if (start.kind === 'reset') world.resetWorld()
+            if (start.kind === 'preset') return loadPreset(start.preset.id)
+            return start.kind === 'reset'
         },
     })
 
@@ -407,6 +429,8 @@ export function DemoShell({
                     })),
                     onBumpAgreement: world.bumpAgreement,
                     busyAgreement: null,
+                    onLoadPreset: (id) => void loadPreset(id),
+                    busyPreset,
                 }}
                 tours={tours.tab}
             />

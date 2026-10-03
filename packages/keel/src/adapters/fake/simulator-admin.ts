@@ -1,5 +1,8 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
+import { presets } from '@app-config/presets'
+import { isReservedWorldStartName, WORLD_START_NAME_PATTERN } from '../../core/presets'
 import { ForbiddenError, NotFoundError } from '../../ports/errors'
 import { writeFileAtomicSync, writeJsonAtomicSync } from './atomic-write'
 import { dataDir } from './data-dir'
@@ -23,7 +26,6 @@ import { closeFakeDb } from './db'
  */
 
 const LIVE_DIRS = ['auth', 'emails', 'llm-requests', 'analytics', 'pglite', 'storage', 'simulator', 'webhooks', 'sms']
-const SNAPSHOT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/
 const DEV_SECRET_FILE = 'dev-secret'
 
 function root(): string {
@@ -43,7 +45,16 @@ function snapshotPath(name: string): string {
 }
 
 function assertValidSnapshotName(name: string): void {
-    if (!SNAPSHOT_NAME_PATTERN.test(name)) throw new ForbiddenError(`invalid snapshot name: ${name}`)
+    if (!WORLD_START_NAME_PATTERN.test(name)) throw new ForbiddenError(`invalid snapshot name: ${name}`)
+}
+
+/** A saved snapshot may not shadow `'reset'` or a registered demo preset: all three share the namespace a
+ *  tour's `snapshot` resolves in (keel/core/presets.ts `resolveWorldStart`), so a collision would make a
+ *  tour start from a different world on the server than in the static demo. Checked on SAVE only —
+ *  restoring or deleting a snapshot saved before a preset took its name must still work. */
+function assertSavableSnapshotName(name: string): void {
+    assertValidSnapshotName(name)
+    if (isReservedWorldStartName(name, presets)) throw new ForbiddenError(`reserved snapshot name: ${name}`)
 }
 
 function devSecretPath(): string {
@@ -76,8 +87,22 @@ function wipeLiveDirsPreservingDevSecret(): void {
 // `result`, which is a distinct promise from `tail`.
 let tail: Promise<void> = Promise.resolve()
 
+// Marks the async call chain of the turn that is running, so a rewrite requested from INSIDE it is
+// recognised. Such a call would chain onto the very turn it is waiting in and deadlock the queue for
+// good — every later reset, save and restore hanging until the server restarts. It is refused instead,
+// loudly. Async-context storage rather than a module flag: an unrelated request arriving mid-turn is not
+// re-entrant and must still simply queue.
+const insideTurn = new AsyncLocalStorage<true>()
+
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
-    const result = tail.then(fn)
+    if (insideTurn.getStore()) {
+        return Promise.reject(
+            new Error(
+                'simulator-admin: a world reset/save/restore was requested from inside another (it would deadlock)',
+            ),
+        )
+    }
+    const result = tail.then(() => insideTurn.run(true, fn))
     tail = result.then(
         () => undefined,
         () => undefined,
@@ -88,9 +113,25 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
 /** Wipes the simulated world back to the seed baseline: closes pglite first (nothing can touch
  *  `.data/pglite` while it's open), then clears every LIVE_DIR except the dev-secret. */
 export async function resetWorld(): Promise<void> {
+    return serialize(resetUnlocked)
+}
+
+async function resetUnlocked(): Promise<void> {
+    await closeFakeDb()
+    wipeLiveDirsPreservingDevSecret()
+}
+
+/**
+ * Resets the world and then runs `rebuild` INSIDE the same turn of the queue: nothing else that rewrites
+ * the world (another reset, a save, a restore, another rebuild) can interleave between the wipe and the
+ * last step. The demo-preset replay (keel/server-lib/demo-presets.ts) is the caller — a preset is a reset
+ * plus a script, and two browsers loading presets at once must each get a whole one. Ordinary requests
+ * are not serialized, as for every operation here (see the module comment).
+ */
+export async function resetWorldThen<T>(rebuild: () => Promise<T>): Promise<T> {
     return serialize(async () => {
-        await closeFakeDb()
-        wipeLiveDirsPreservingDevSecret()
+        await resetUnlocked()
+        return rebuild()
     })
 }
 
@@ -118,7 +159,7 @@ export function listSnapshots(): { name: string; at: string }[] {
 /** Saves (or overwrites) a named snapshot: closes pglite, then copies every LIVE_DIR that
  *  currently exists into `.data/snapshots/<name>/`, plus a small `meta.json` recording when. */
 export async function saveSnapshot(name: string): Promise<void> {
-    assertValidSnapshotName(name)
+    assertSavableSnapshotName(name)
     return serialize(async () => {
         await closeFakeDb()
         const dest = snapshotPath(name)

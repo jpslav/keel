@@ -233,8 +233,8 @@ want it.
 
 One gate is relaxed on the way out. keel's knip workspace carries `includeEntryExports: true`, which
 means "every symbol keel PUBLISHES must have a consumer" — an invariant the showcase made true by using
-nearly all of it. A one-entity app does not: `apps/starter` imports 30 of keel's 126 published subpaths,
-so the same setting would start demanding you delete the other 96 — capabilities you merely have not
+nearly all of it. A one-entity app does not: `apps/starter` imports 32 of keel's 130 published subpaths,
+so the same setting would start demanding you delete the other 98 — capabilities you merely have not
 reached yet, not dead code. `--eject-showcase` therefore turns it off. knip keeps reporting unused
 files, and the declared `exports` surface goes back to being what it is without a rich consumer: a
 declaration.
@@ -250,9 +250,9 @@ it. Nothing in that fixture is deletable by adoption, and its vocabulary is deli
 apps' — so a framework test that reacquires a dependency on YOUR world fails loudly instead of passing
 by coincidence. `pnpm verify` is green on a freshly ejected repo, end to end.
 
-The one thing that DOES stay app-shaped is the seam-conformance pair — the i18n partition/parity tests
-and the pglite RLS suite — which keep running under every app's own vitest project, against your
-catalog and your tables. That is what stops the fixture becoming the only world the framework is ever
+The one thing that DOES stay app-shaped is the seam-conformance set — the i18n partition/parity tests,
+the pglite RLS suite and the demo-presets check — which keep running under every app's own vitest
+project, against your catalog, your tables and your presets. That is what stops the fixture becoming the only world the framework is ever
 proved against.
 
 ## Layout
@@ -273,9 +273,9 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 ### What you may import from keel
 
-`packages/keel/package.json`'s `exports` map is the contract: it lists the 126 subpaths your app may
+`packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 34 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 37 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
@@ -293,22 +293,24 @@ The framework never imports your code directly; it imports the registration seam
 a lint fence enforces the direction. Each module there is the app-side half of one capability. The
 "empty" column is what `apps/starter` registers — read it as the off switch for that capability:
 
-| Seam module                                   | You register                                           | Empty looks like              |
-| --------------------------------------------- | ------------------------------------------------------ | ----------------------------- |
-| `abilities.ts`                                | your subject types + authorization rules + staff org   | (starter registers one)       |
-| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001 | (starter registers one)       |
-| `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables               | an empty async body           |
-| `jobs.ts`                                     | your background job kinds + handlers                   | `[] as const`, `{}`           |
-| `digest.ts`                                   | the rows the framework's scheduled digest summarizes   | `async () => []`              |
-| `actors.ts`                                   | your simulated counterparties for dev/demo             | `type ActorId = never`        |
-| `simulator.ts`                                | your extra Simulator tabs + feature flags              | `flags = []`                  |
-| `tours.ts`                                    | scripted Simulator walkthroughs of your product        | `tours = []` (no Tours tab)   |
-| `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                | `[] as const` / `never`       |
-| `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers              | `{}`                          |
-| `assistant.ts`                                | your LLM tools + system prompt                         | omit the module and its route |
-| `messages.ts`                                 | your i18n namespaces + catalog loader (partitioned)    | (every app registers some)    |
-| `identity.ts`                                 | `APP_SLUG`, re-exported from the app's app config      | (every app registers it)      |
-| `seed.ts`                                     | your seed data re-export                               | (every app registers it)      |
+| Seam module                                   | You register                                                                                       | Empty looks like                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `abilities.ts`                                | your subject types + authorization rules + staff org                                               | (starter registers one)                    |
+| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001                                             | (starter registers one)                    |
+| `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
+| `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
+| `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
+| `actors.ts`                                   | your simulated counterparties for dev/demo                                                         | `actors = []`, `type ActorId = never`      |
+| `simulator.ts`                                | your extra Simulator tabs + feature flags                                                          | `flags = []`                               |
+| `presets.ts`                                  | demo presets (`/new-preset`): starting worlds every host can load, and your own kinds' definitions | `presets = []`, `appPresetOperations = []` |
+| `preset-operations.ts`                        | server halves of your own preset operation kinds (`/new-preset-operation`)                         | `{}`                                       |
+| `tours.ts`                                    | scripted Simulator walkthroughs of your product                                                    | `tours = []` (no Tours tab)                |
+| `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                                                            | `[] as const` / `never`                    |
+| `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers                                                          | `{}`                                       |
+| `assistant.ts`                                | your LLM tools + system prompt                                                                     | omit the module and its route              |
+| `messages.ts`                                 | your i18n namespaces + catalog loader (partitioned)                                                | (every app registers some)                 |
+| `identity.ts`                                 | `APP_SLUG`, re-exported from the app's app config                                                  | (every app registers it)                   |
+| `seed.ts`                                     | your seed data re-export                                                                           | (every app registers it)                   |
 
 The one place an empty registration is not free: `AppSubjectFields` in `abilities.ts` must be an
 `interface` (the framework's `AbilitySubject` extends it), and an app with no extra subject fields
@@ -316,7 +318,7 @@ therefore declares an empty one and suppresses `@typescript-eslint/no-empty-obje
 `apps/starter` shows the suppression and why.
 
 **To add a feature slice**: run `/new-slice` (and the per-capability scaffolds `/new-entity`,
-`/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`). Each walks the house way:
+`/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`, `/new-preset`, `/new-preset-operation`). Each walks the house way:
 screen in your app's `apps/<app>/src/components` (yours) or `packages/keel/src/components` (framework-generic),
 thin route, seam registrations, an RLS migration copied from the reference
 (`apps/starter/src/app-config/db/migrations/1001_items.ts`), colocated tests, e2e, then `pnpm verify` +
@@ -343,8 +345,8 @@ there.
 `packages/keel/src` (minus tests and stories), so `pnpm typecheck` compiles the ENTIRE framework
 against the starter's registrations — a framework module that assumed the showcase's tables or
 vocabulary fails there and nowhere else. `vitest.config.ts` then runs keel's seam-conformance tests
-(the i18n partition/parity pair and the composed pglite RLS suite) a second time under the starter's
-aliases. Both were watched failing before being trusted.
+(the i18n partition/parity pair, the composed pglite RLS suite and the demo-presets check) a second
+time under the starter's aliases. Each was watched failing before being trusted.
 
 ## Cutover — from hermetic to real
 

@@ -69,6 +69,22 @@ describe('simulator-admin snapshots', () => {
         expect(existsSync(path.join(emailsDir, 'leftover.json'))).toBe(false)
     })
 
+    test('reset clears per-actor holds, and a snapshot saves and restores them', async () => {
+        const { readActorHolds, setActorHold } = await import('./simulator')
+        const { resetWorld, saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
+
+        setActorHold('fixture-tug', true)
+        await saveSnapshot('holds-checkpoint')
+        setActorHold('fixture-tug', false)
+        setActorHold('fixture-barge', true)
+
+        await restoreSnapshot('holds-checkpoint')
+        expect(readActorHolds()).toEqual({ 'fixture-tug': true })
+
+        await resetWorld()
+        expect(readActorHolds()).toEqual({})
+    })
+
     test("reset clears the fake LLM's request catch, as it clears the mailbox", async () => {
         const { dataDir } = await import('./data-dir')
         const { resetWorld } = await import('./simulator-admin')
@@ -110,5 +126,17 @@ describe('simulator-admin snapshots', () => {
         const { restoreSnapshot } = await import('./simulator-admin')
 
         await expect(restoreSnapshot('never-saved-snapshot')).rejects.toThrow(/unknown snapshot/)
+    })
+
+    test('a rewrite requested from inside another is refused, not deadlocked, and the queue keeps working', async () => {
+        const { resetWorld, resetWorldThen, saveSnapshot } = await import('./simulator-admin')
+
+        // An app's preset half calling resetWorld() from inside the replay's turn would chain onto that
+        // very turn and wait for itself forever. It must fail fast instead.
+        await expect(resetWorldThen(() => resetWorld())).rejects.toThrow(/would deadlock/)
+        // ...and the queue is not poisoned: the next rewrite runs normally.
+        await expect(saveSnapshot('after-reentry')).resolves.toBeUndefined()
+        // Ordinary concurrent callers (not re-entrant) still queue rather than being refused.
+        await expect(Promise.all([resetWorld(), resetWorld()])).resolves.toEqual([undefined, undefined])
     })
 })

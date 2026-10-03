@@ -38,9 +38,10 @@ Here the fakes compose into a world with inhabitants, and a panel called **Simul
   an in-process shortcut. Pause one, or step it a single call at a time.
 - **A clock you can push forward.** Jump an hour, a day, a week, and watch the scheduled work that came
   due actually fire.
-- **A world you can snapshot and restore**, so a demo starts from the same state every time.
-- **Walkthroughs that drive themselves.** A _tour_ is the temporal sibling of a snapshot: it restores one,
-  then drives the real screens with a ghost cursor while a bar narrates. Nothing is submitted until the
+- **A world you can snapshot and restore**, plus demo presets that load the same starting point in the
+  static demo too, so a demo starts from the same state every time.
+- **Walkthroughs that drive themselves.** A _tour_ is the temporal sibling of a snapshot: it restores one
+  (or a demo preset), then drives the real screens with a ghost cursor while a bar narrates. Nothing is submitted until the
   person watching presses Next, and every registered tour is run to its last step in CI, so a screen change
   that breaks the story fails the build instead of embarrassing you in front of a stakeholder.
 
@@ -91,6 +92,12 @@ That last build deserves a note. `dist-demo/index.html` is **one HTML file with 
 screens over in-memory fakes, Simulator included. You can email it to someone and they can click through
 the whole product from disk, or press **Simulator → Tours → Start** and be walked through it. It is also the most demanding proof that the ports boundary really holds: if
 anything reached past a port, it could not build.
+
+**Demoing it.** Two clicks get you into the story, on `pnpm dev` and in the single-file demo alike.
+**Simulator → Snapshots → Start from a preset → Load** resets the world to a scripted starting point and
+signs you in as the right person; **Simulator → Tours → Start** hands the wheel to a narrated walkthrough,
+which may itself begin from a preset. [docs/runbooks/demo.md](docs/runbooks/demo.md) is the story to tell;
+`/new-preset` and `/new-tour` are how you write your own.
 
 ## Architecture in one paragraph
 

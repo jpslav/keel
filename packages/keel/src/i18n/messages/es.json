@@ -243,7 +243,14 @@
         "tourMiss": "No encontrado ({action}): {target}",
         "tourReportClean": "Recorrido terminado: {steps} pasos, no falta nada.",
         "tourReportProblems": "Recorrido terminado: {steps} pasos, faltan {count}.",
-        "tourReportDismiss": "Descartar"
+        "tourReportDismiss": "Descartar",
+        "presetsHeading": "Empezar desde un preajuste",
+        "presetsHint": "Reinicia el mundo y reproduce un punto de partida guionizado; funciona en todas las demos, incluida la de un solo archivo.",
+        "presetsLoad": "Cargar",
+        "noticePresetLoaded": "Preajuste cargado: {name}",
+        "snapshotsNameReserved": "Ese nombre pertenece al reinicio o a un preajuste; elige otro.",
+        "noticePresetFailed": "No se pudo cargar el preajuste: {name}. El mundo quedó a medio preparar; reinícialo para empezar de cero.",
+        "noticePresetFailedStale": "No se pudo cargar el preajuste: {name}. El mundo se reinició pero quedó a medio preparar, y esta página aún muestra el anterior; reinicia el mundo para empezar de cero."
     },
     "acceptInvite": {
         "title": "Únete a {org}",

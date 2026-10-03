@@ -15,8 +15,10 @@ import type { ScheduleRowLike, WorldJobLike } from 'keel/components/simulator/jo
 import type { MailItem } from 'keel/components/simulator/mail-app'
 import type { SmsMessageRow } from 'keel/components/simulator/messages-app'
 import type { FeatureFlag, Snapshot, SnapshotAgreement } from 'keel/components/simulator/snapshots-app'
+import { resolveWorldStart } from 'keel/core/presets'
 import { useTours } from 'keel/demo-static/tour/use-tours'
 import { actors } from '@app-config/actors'
+import { presets } from '@app-config/presets'
 import { tabs as appSimulatorTabs } from '@app-config/simulator'
 
 interface Summary {
@@ -99,6 +101,12 @@ const POST_NOTICE_KEY = 'app-simulator-post-notice'
 type SimulatorTab =
     'people' | 'mail' | 'messages' | 'events' | 'jobs' | 'hooks' | 'actors' | 'errors' | 'snapshots' | 'tours'
 
+/** A promise that never settles: what a world-start handler answers once it has started a full reload
+ *  (see handleReset). Nothing should run after it on a document that is being replaced. */
+function untilReload(): Promise<never> {
+    return new Promise<never>(() => {})
+}
+
 /**
  * Suppression gate: the actor iframes (/[locale]/simulator/actors/<actor>) render inside this same
  * [locale] layout, but they are self-contained process frames — the panel and its polling must NOT
@@ -123,6 +131,8 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
     // The app's own copy namespace, for things the panel renders but the framework does not name —
     // today, the registered actors' card titles.
     const tActors = useTranslations('actors')
+    // Root translator: a demo preset's title is a fully-qualified key into the app catalog.
+    const tRoot = useTranslations()
     const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY)
     const [expanded, setExpanded] = useState(false)
     const [activeTab, setActiveTab] = useState<SimulatorTab>('people')
@@ -138,17 +148,22 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
     const [hooksData, setHooksData] = useState<HooksResponse>(EMPTY_HOOKS)
     const [snapshotsBusy, setSnapshotsBusy] = useState(false)
     const [busySnapshot, setBusySnapshot] = useState<string | null>(null)
+    const [busyPreset, setBusyPreset] = useState<string | null>(null)
     const [agreementsData, setAgreementsData] = useState<AgreementsResponse>(EMPTY_AGREEMENTS)
     const [busyAgreement, setBusyAgreement] = useState<string | null>(null)
     const [notices, setNotices] = useState<SimulatorNotice[]>([])
     const noticeSeq = useRef(0)
     const prevUnread = useRef<Map<string, number> | null>(null)
-    // Scripted walkthroughs (@app-config/tours, read by the engine itself). The one snapshot this host
-    // can put the world into for a tour is the same reset the Snapshots tab offers — and since that
-    // reloads the page, the engine's resume marker is what carries the tour across it.
+    // Scripted walkthroughs (@app-config/tours, read by the engine itself). A tour's starting world
+    // resolves the same way on every host (keel/core/presets.ts): reset, then a registered demo preset,
+    // then — this host only — a saved snapshot. Each of those reloads the page, so the engine's resume
+    // marker is what carries the tour across it.
     const tours = useTours({
         onSnapshot: (snapshot) => {
-            if (snapshot === 'reset') handleReset()
+            const start = resolveWorldStart(snapshot, presets)
+            if (start.kind === 'reset') return handleReset()
+            if (start.kind === 'preset') return handleLoadPreset(start.preset.id)
+            return handleRestoreSnapshot(start.name)
         },
     })
 
@@ -259,6 +274,8 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                 if (parsed.kind === 'restore' && parsed.name) {
                     pushNotice(t('noticeSnapshotRestored', { name: parsed.name }))
                 }
+                const preset = parsed.kind === 'preset' ? presets.find((p) => p.id === parsed.name) : undefined
+                if (preset) pushNotice(t('noticePresetLoaded', { name: tRoot(preset.titleKey) }))
             } catch {
                 // stale/garbled marker — nothing to confirm
             }
@@ -536,17 +553,22 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
         window.location.assign(nextPath + search + hash)
     }
 
-    function handleReset() {
+    // The three world-start handlers (reset, restore, preset) answer a promise a tour start can await:
+    // it resolves false when the server refused, and on success it never settles, because the page is
+    // reloading. Awaiting it keeps the tour from showing step 1 on a document that is about to be
+    // replaced — a Next pressed in that window would be lost to the reload.
+    function handleReset(): Promise<boolean> {
         setSnapshotsBusy(true)
-        void fetch('/api/simulator/reset', { method: 'POST' }).then((response) => {
+        return fetch('/api/simulator/reset', { method: 'POST' }).then((response) => {
             if (response.ok) {
                 window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'reset' }))
                 // Hard reload of a wiped world (per design invariant) — no point resetting
                 // snapshotsBusy, this tab is about to be torn down along with everything else.
                 window.location.assign(`/${locale}`)
-                return
+                return untilReload()
             }
             setSnapshotsBusy(false)
+            return false
         })
     }
 
@@ -565,9 +587,9 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
         })
     }
 
-    function handleRestoreSnapshot(name: string) {
+    function handleRestoreSnapshot(name: string): Promise<boolean> {
         setBusySnapshot(name)
-        void fetch('/api/simulator/snapshots/restore', {
+        return fetch('/api/simulator/snapshots/restore', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ name }),
@@ -575,10 +597,45 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
             if (response.ok) {
                 window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'restore', name }))
                 window.location.assign(`/${locale}`)
-                return
+                return untilReload()
             }
             setBusySnapshot(null)
+            return false
         })
+    }
+
+    // Load a demo preset: the server resets the world, replays the preset and signs THIS browser in as
+    // its viewpoint (keel/server-lib/demo-presets.ts), then answers where to land — a full reload, like
+    // a restore, because the world underneath every RSC just changed.
+    function handleLoadPreset(id: string): Promise<boolean> {
+        setBusyPreset(id)
+        return fetch('/api/simulator/presets', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: id, locale }),
+        }).then(
+            async (response) => {
+                if (response.ok) {
+                    const { redirectTo } = (await response.json()) as { redirectTo: string }
+                    window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'preset', name: id }))
+                    window.location.assign(redirectTo)
+                    return untilReload()
+                }
+                return presetFailed(id)
+            },
+            () => presetFailed(id),
+        )
+    }
+
+    // A refused or failed load is SAID, never just un-busied: the server may have reset the world before
+    // the step that failed, so what this page still shows is not what `.data/` now holds — and the notice
+    // says exactly that (`noticePresetFailedStale`, not the static host's wording, whose screen IS the
+    // world). No reload, so a tour that asked for the preset can still record the miss.
+    function presetFailed(id: string): false {
+        setBusyPreset(null)
+        const preset = presets.find((p) => p.id === id)
+        pushNotice(t('noticePresetFailedStale', { name: preset ? tRoot(preset.titleKey) : id }))
+        return false
     }
 
     function handleDeleteSnapshot(name: string) {
@@ -716,9 +773,9 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                 runServerErrorScenario={handleServerErrorScenario}
                 snapshots={{
                     snapshots: snapshotsData.snapshots,
-                    onReset: handleReset,
+                    onReset: () => void handleReset(),
                     onSave: handleSaveSnapshot,
-                    onRestore: handleRestoreSnapshot,
+                    onRestore: (name) => void handleRestoreSnapshot(name),
                     onDelete: handleDeleteSnapshot,
                     busy: snapshotsBusy,
                     busySnapshot,
@@ -727,6 +784,8 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                     agreements: agreementsData.agreements,
                     onBumpAgreement: handleBumpAgreement,
                     busyAgreement,
+                    onLoadPreset: (id) => void handleLoadPreset(id),
+                    busyPreset,
                 }}
                 tours={tours.tab}
             />

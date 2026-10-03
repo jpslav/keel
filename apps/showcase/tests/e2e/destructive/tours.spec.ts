@@ -57,3 +57,30 @@ for (const tour of tours.slice(0, 1)) {
         await expect(page.getByTestId('tour-bar')).toHaveCount(0)
     })
 }
+
+// The tour that starts from a demo PRESET rather than from the seed (keel/core/presets.ts). On this host
+// loading the preset is a server replay and a reload, landing on the preset's viewpoint — so this
+// proves both halves at once: the world is the preset's, and the tour survived the trip.
+for (const tour of tours
+    .filter((candidate) => candidate.snapshot !== undefined && candidate.snapshot !== 'reset')
+    .slice(0, 1)) {
+    test('a tour that starts from a preset loads it on the server and resumes on the other side', async ({ page }) => {
+        await signInAs(page, 'person-staff')
+        await page.goto('/en/dashboard')
+        await openSimulatorPanel(page)
+
+        await page.getByTestId('simulator-tab-tours').click()
+        await page.getByTestId('tour-fast').click()
+        await page.getByTestId(`tour-start-${tour.id}`).click()
+
+        // The preset's viewpoint is Dana; this test started as Sam, so the name is the proof the
+        // replay — not the old session — decided who is looking.
+        await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye', { timeout: 60_000 })
+        await expect(page.getByTestId('tour-bar')).toBeVisible({ timeout: 60_000 })
+        await expect(page.getByTestId('tour-progress')).toHaveAttribute('data-step', '1')
+        await expect(page.getByTestId('tour-miss')).toHaveCount(0)
+
+        await page.getByTestId('tour-exit').click()
+        await expect(page.getByTestId('tour-report')).toHaveAttribute('data-misses', '0')
+    })
+}

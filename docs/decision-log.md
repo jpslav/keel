@@ -1425,3 +1425,179 @@ gate (`knip`) as surely as dead vendor code fails the doctrine.
 - **Out of scope by choice, not by test:** stopping the invite flow from emailing admins (a product
   decision), a caller-named org for `sendInvite` and the live-org list it needs, a fake-person helper,
   and a package licence file.
+
+## Demo presets are declarative, registered beside the flags, and replayed per host (2026-10-03, `prebaked-demo-presets`)
+
+- **No prebaked `.data/` worlds.** The task proposed a `pnpm snapshots:seed` that drove the fake
+  adapters and saved through `saveSnapshot()`. Those copies carry pglite's binary state, so they could
+  only ever restore on a server, and the task's own second half asks for the `file://` demo too. Presets
+  are a seed-relative script instead (`keel/core/presets.ts`), replayed fresh on each load. Nothing
+  binary is generated or committed, and nothing goes stale when a migration changes the database.
+  Directory snapshots stay as the server's "save what I clicked together".
+- **Registered on `@app-config/simulator`, not a new seam module.** Presets are Simulator content,
+  like the flags beside them, and `simulator` is already on ADR-0012's list of value imports. A new
+  module would cost every app and the fixture one more file to say nothing in. The starter registers
+  `presets = []`; the fixture registers one preset in its own vocabulary, because the server replay's
+  test must replay keel's world, not an app's.
+- **Three operations: `invite` and `inbound` name their actor and team; `flag` is world-wide.** That set
+  covers the task's worlds (a pending invite, unread mail, tenant rows, both tenants busy). App rows
+  come in through inbound email, which the app already registers handlers for on both hosts, so
+  presets need no app-registered operation kinds yet. That stays a possible extension point; nothing
+  needs it today. Operations never mean "whoever is signed in", so a replay is deterministic.
+- **Authorization moves to build time.** A replay has no session. Instead of authorizing at replay
+  time, `presetProblems` holds every registered preset to the product's own rules: the inviter must
+  manage the team, the role must be grantable, no duplicate addresses, and handlers and flags must
+  exist. It runs as a seam-conformance test under every app and the fixture. The server replay throws
+  on anything it cannot perform, rather than skipping it, because getting that far means the gate was
+  bypassed.
+- **The invite flow was extracted, not copied.** Everything after the org route's decision to invite
+  (mint, audit, email, analytics, admins' notification) is now `keel/server-lib/invite.ts`
+  `sendOrgInvite`, shared by the route and the replay. The route keeps authorization, validation and
+  the duplicate check, which genuinely differ by caller.
+- **The viewpoint is who the restorer sits down as, not captured state.** It is a per-browser cookie
+  and the world is shared. A preset may name a seed person, and loading it signs in only the browser
+  that loaded it (cookies on that one response). Other browsers keep their viewpoint. If theirs
+  pointed at a person the reset removed, they land on sign-in, as after any reset. Viewpoint capture
+  for directory snapshots was not added: it would raise the same question with no good answer.
+- **One resolution order for a world-start name: `'reset'` → preset → saved snapshot**
+  (`resolveWorldStart`), shared by both hosts' tour starts (and the showcase test that checks every tour's
+  start). Saving a snapshot under
+  `reset` or a preset id is refused, in the UI and with a 403 from `saveSnapshot`, so a tour's
+  `snapshot` can never name two worlds. Restore and delete stay permitted, so a snapshot saved before a
+  preset took its name is not orphaned.
+- **A tour start a host cannot honour is a miss.** `useTours`' `onSnapshot` may now answer `false`.
+  The static shell does that for a saved-snapshot name, so a tour that only works on a server fails the
+  `file://` walkthrough gate, and a unit test in the showcase says so without building a bundle. The
+  server glue's reset/restore/preset handlers answer a promise that settles `false` on refusal and
+  never settles on success, because the page is reloading. This also closed a race that predates
+  presets: step 1 used to render on the doomed document, and a Next pressed there was lost.
+- **A second tour, rather than re-pointing the flagship one.** `invite-from-preset` starts from
+  `mid-demo` and walks the pending invite to a member, so a preset start runs end to end in CI. The
+  ticket tour keeps `'reset'` and its "press Next to become Dana" opening, which is its first lesson.
+
+## Presets move to their own seam module and gain `extends` (2026-10-03, `presets-own-module`)
+
+- **A seam module of their own.** Replaced: the same day's "registered on `@app-config/simulator`, not a
+  new seam module". A list expected to grow to dozens of entries, now with composition, is its own
+  registry, and `simulator.ts` goes back to being the panel's tabs and flags. Each preset is one file
+  under `presets/`, listed in `presets.ts`. The cost is one more file for the starter (`presets = []`)
+  and the fixture, which is now an 18-module seam.
+- **Single inheritance only.** A preset has at most one `extends`. A list of bases raises ordering and
+  conflict questions (whose viewpoint wins, whose duplicate invite) that nobody needs answered yet. The
+  rule today is the plain one: base operations first, the nearest viewpoint wins.
+- **`operations` is optional.** A preset can differ from its base by viewpoint alone ("mid-demo, signed
+  in as someone else"), without restating the script.
+- **Validation runs on the expanded list.** `presetProblems` checks what actually replays, so a duplicate
+  invite split across a base and its child is caught, and a child that overrides a bad viewpoint is not
+  blamed for it. The price is that a base's own problem repeats under each child, and operation numbers
+  count in the expanded list.
+- **A consequence in the showcase.** `multi-tenant` now builds on `mid-demo`, so it also contains
+  Jordan's pending invite, which it did not before. The static-shell spec that proved "loading another
+  preset is a reset underneath" by Jordan's absence now proves it with a hand-made flag flip instead.
+
+## Preset operations become a registry keel and the app both extend (2026-10-03, `preset-operations`)
+
+- **The operation kinds are a registry, not a closed union.** `invite`, `inbound` and `flag` were a
+  union in `keel/core/presets.ts` that each host replayed with its own hard-coded `switch`, so an adopter
+  could neither add a kind ("assign a ticket") nor make a preset follow a customized invite flow. Now keel
+  contributes its kinds, the app registers its own on the seam (`appPresetOperations`, typed by an
+  `AppPresetOperation` union composed like job kinds), and each host dispatches every step through ONE
+  function that looks the kind up: `performPresetOperation` on the server, its twin in the static world.
+- **Three parts per kind, never in one module.** A pure DEFINITION (argument schema, the product rules
+  as `check`, the named results it `consumes`) on `@app-config/presets`; a SERVER half on the new
+  server-only `@app-config/preset-operations`; a STATIC half supplied by the static composition root
+  through `DemoWorldOptions.presetOperations`. The split is physical, not stylistic: a server half
+  reaches `server-only` modules and pglite, and the `file://` demo is one browser bundle that fails to
+  load with either inside it. It is the same split inbound email already had (server registry vs the
+  static twins in `inboundHandlers`). The bundle carries no `pglite` string after the change.
+- **Replacement by kind name.** Definitions and both halves compose `{ ...framework, ...app }` keyed by
+  kind, so an app entry named `invite` replaces keel's. keel's server halves are published
+  (`keel/server-lib/preset-operations`) and its static halves reach an app half through the context's
+  `framework` map, so a replacement can WRAP keel's behaviour instead of copying it — the fixture's `flag`
+  does exactly that, and keel's replay test proves the app entry is the one that ran.
+- **Standard Schema, with Valibot for keel's own kinds.** `PresetOperationDefinition.args` is typed
+  against the Standard Schema v1 interface, vendored as types only (`keel/core/standard-schema.ts`), so
+  an app may write its kinds in Zod or ArkType. keel's three kinds, the fixture's and the showcase's use
+  Valibot, which makes it a new runtime dependency of `keel/core` (allowed: the core fence bans
+  frameworks and vendor SDKs, not small pure libraries). Valibot over Zod for the static demo's byte
+  budget: Valibot is standalone functions a bundler can keep one at a time, where Zod's default API
+  hangs its methods on schema classes (Zod was not measured here). Measured: the showcase's `dist-demo/index.html` went from 938,049 to 942,766 bytes (+4,717;
+  budget 950,000, unchanged), the starter's from 849,632 to 853,371 (+3,739). About 3 KB of each is
+  Valibot's four schema constructors and issue plumbing, which the bundler keeps although the static
+  world never calls them (no host validates at replay time; the conformance gate does): annotating the
+  schema calls `/* @__PURE__ */` brought the showcase to +1,690 in a trial, and was not adopted because
+  every app author would have to repeat it on every nested call.
+- **Shape in the schema, rules in `check`.** keel's `invite` schema accepts any role (`v.picklist(ROLES)`)
+  and any string as the email; "cannot be granted by invite" and the email shape stay in `check`, with
+  their old sentences. A preset asking for `admin` is a product rule being broken, and the gate should
+  answer with the org screen's own words. `check` runs only once the shape passes, and it receives the
+  script's earlier valid operations (`earlier`), which is what the duplicate-invite rule always needed.
+- **Named results.** An operation may say `as: 'refund'`; the id of what it created is bound to that
+  name for the rest of the replay, and a later operation names it in an argument its kind `consumes`.
+  Each host keeps its own name → id map (a uuid on the server, the twin's id in the static world), so a
+  script never holds a host's ids. `presetProblems` holds names to be unique and bound EARLIER; an
+  unbound name throws on the server and settles the static replay false. For `inbound` to produce a
+  name, a handler's 'handled' result (and the static twin's) gains an optional `subjectId` — the row it
+  created — which intake passes through on `IntakeOutcome`. Additive: no existing handler had to change,
+  and the compose route's response simply gains the field.
+- **Operations, not a bus, for product code a preset drives.** The showcase's `ticket.assign` does not
+  re-implement assignment or post an event a listener reacts to. The PATCH ticket route's post-authorize
+  body — write, `ticket.assigned`/`ticket.updated` audit, the assignee's notification — moved, with the
+  session's user replaced by an explicit actor, into a named domain operation, `applyTicketChanges` (`apps/showcase/src/domain/ticket-changes.ts`),
+  which the route and the preset's server half both call; the route keeps parsing, validation,
+  `requireUser`, org resolution, the org-scoped lookup and `authorize(...)`. The core takes the ticket
+  as the caller resolved it, rather than its id, so the org-scoped lookup cannot be skipped and the
+  route makes no extra read. The static twin got the same treatment (`applyDemoTicketChanges`, shared
+  by the ticket card and the static half). The route's unit suite passed unchanged across the move.
+- **Coverage where each half lives.** The seam-conformance suite holds definitions and server halves to
+  each other both ways under every app. Static halves are built at runtime by the composition root, out
+  of a unit test's sight, so the static-shell e2e loads every registered preset and waits for its
+  "Preset loaded" notice: a kind with no static half settles the replay false and the notice never comes.
+
+## Holding one actor is a preset operation kind, answered per actor (2026-10-03, `preset-actor-holds`)
+
+The Simulator's actors have had ONE hold, the app's world-wide `actors-held` flag. A demo preset can now
+hold a single counterparty (`{ op: 'actor.hold', actor: 'partner-desk', held: true }`), which `multi-tenant`
+uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
+
+- **An operation kind, not a field on `DemoPreset`.** A `holds: [...]` field would have been a second
+  mechanism beside the script, with its own replay path on each host and no place in the ordered, named,
+  recordable list a preset already is. As a kind it reuses all of it: the same conformance gate, the same
+  `extends` composition (a child can release what its base held), and the same two halves. It also
+  prepares the next step. Per-actor scenario settings (an actor that fails a given share of its calls,
+  say) become more fields on the SAME per-actor world state this slice adds, and more operation kinds
+  or arguments over it, rather than another channel.
+- **World state is a per-actor map.** Server: `readActorHolds`/`setActorHold` in the fake Simulator state
+  (`keel/adapters/fake/simulator`), persisted at `.data/simulator/actor-holds.json`. That directory is
+  already a LIVE_DIR, so reset, save and restore cover it with no new code, and a test proves each. Static:
+  `actorHolds` in the in-memory world, cleared by `resetWorld` and exposed on `DemoWorld`.
+- **The server host asks one question per tick.** The actor frame used to fetch every flag from
+  `GET /api/simulator/flags` and pick `actors-held` out. It now calls `GET /api/simulator/actors/held?actor=<id>`,
+  which answers `{ held }` for exactly that actor: the world-wide flag OR its own hold. The flags route stays
+  (its POST is how the Snapshots tab and the specs flip a flag; its GET, the read-out of every flag, has no
+  caller left in this repo, and was kept rather than removed in a slice about something else). The static host computes the same OR in memory
+  (`actorsHeld || actorHolds[id]`).
+- **The framework still does not value-import the actor registry at runtime.** keel's `actor.hold` `check`
+  needs the registered ids, so `PresetWorld` gains `actors`, derived in the seam-conformance suite from the
+  seam's `actors` list. That is a value read by a TEST only, but it means `@app-config/actors` is no longer
+  type-only: the starter registers `actors = []` and the fixture one actor, `fixture-tug` (ADR-0012
+  addendum). Neither host's half validates the id at replay, since neither could without that import; an
+  unknown id would write a hold nothing reads, and the gate rejects the preset first.
+- **Deferred: an Actors-tab toggle.** A per-actor hold switch in the Snapshots or Actors tab is a natural
+  follow-up (it would call a route that writes the same file, and the static twin would set `actorHolds`).
+  Not built here: the slice's job was the preset path, and a toggle needs its own copy in both catalogs and
+  its own specs.
+- **Measured:** the showcase's `dist-demo/index.html` went from 942,766 to 942,996 bytes (+230; budget
+  950,000), the starter's from 853,371 to 853,483 (+112).
+
+## Demo presets: final-review fixes before `main` (2026-10-03, `presets-main-sync`)
+
+- **A replay that cannot finish says so, on both hosts.**
+    - **Static demo:** an abandoned queue now pushes `noticePresetFailed`, rather than leaving the "World reset" notice over a half-replayed world.
+    - **Server:** a refused or failed load shows the same notice and does NOT reload. Reloading would show the reset world, but it would also hand a waiting tour to its resume marker, so the tour could never record the miss. The notice tells the viewer the world is only partly set up and to reset it.
+- **The server replay holds the world lock across the reset AND the script** (`resetWorldThen` in `keel/adapters/fake/simulator-admin.ts`). Before, the lock covered only the reset, so a second load arriving mid-script wiped the first one's world under it. A test running two loads at once was seen failing without the lock.
+- **A throwing inbound handler twin is filed `failed`**, as the server intake files it, instead of escaping the static replay.
+- **The static shell tracks the in-flight load.** The Snapshots tab's "one world rewrite at a time" is now true on the `file://` host too, not only on the server.
+- **A tour start that rejects outright is a recorded miss,** never an unhandled rejection that leaves a resume marker for a tour that never began.
+- **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
+- **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.

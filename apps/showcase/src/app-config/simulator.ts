@@ -3,8 +3,9 @@
  * ADR-0012). The framework panel (packages/keel/src/components/simulator/simulator-panel.tsx) owns its subsystem
  * tabs (people, mail, messages, events, jobs, hooks, errors, snapshots) and its two feature flags
  * (demo-banner, jobs-held — KNOWN_FLAGS in packages/keel/src/adapters/fake/analytics.ts); the app registers its OWN
- * Simulator tabs + flags HERE. A real adopter replaces this file (its own tabs/flags, or none). PURE
- * TypeScript, no framework imports — shared by the server glue and the static-demo twin.
+ * Simulator tabs + flags HERE (its demo presets are their own seam module, `./presets.ts`). A real adopter
+ * replaces this file (its own, or none). PURE TypeScript, no framework imports — shared by the server glue and the
+ * static-demo twin.
  *
  * labelKey is resolved by the HOST glue from the `simulator` i18n namespace (matching how the panel
  * labels its own tabs): the seam carries the key, the host translates it and supplies the ReactNode

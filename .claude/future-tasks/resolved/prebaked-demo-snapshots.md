@@ -1,6 +1,7 @@
 # Prebaked demo snapshots
 
-**Priority:** P2 · **Status:** open
+**Was:** P2 · **Status:** RESOLVED 2026-10-03 (`prebaked-demo-presets`) — as declarative **demo presets**, not
+prebaked `.data/` copies. Implementation summary at the end; the original task text is kept above it.
 
 Snapshots are directory copies of `.data/`, so canonical demo starting points are cheap to ship: a script
 (`pnpm snapshots:seed`?) that builds 2–3 checked-in worlds by driving the fake adapters directly, then saving
@@ -64,3 +65,48 @@ So the prebaked worlds this task already asks for need a second half to be usefu
 can run: a declarative preset representation (and a replay path) that a host with no server — the
 static/served demo — can also honour. Once that exists, tours starting from a preset on every host is
 just wiring `onSnapshot` on that host too, not a separate task.
+
+## Implementation summary (2026-10-03)
+
+Built as the review concluded: **declarative presets every host replays**, not binary snapshots exposed
+more widely. No `pnpm snapshots:seed` and no committed worlds. The decision log entry "Demo presets are
+declarative…" records each unplanned call.
+
+- **Contract** — `packages/keel/src/core/presets.ts`: `DemoPreset` (`id`, `titleKey`/`summaryKey` into
+  the app catalog, optional `viewpoint`, `operations`). It also defines the operation vocabulary
+  `invite` / `inbound` / `flag`, each naming its actor and team. `resolveWorldStart` gives the one
+  resolution order (`'reset'` → preset → saved snapshot). `presetProblems` holds a preset to the
+  product's own rules.
+- **Registration** — `presets` on `@app-config/simulator`: the showcase registers `fresh`, `mid-demo`
+  and `multi-tenant`; the starter registers `[]` (no presets section, one type import); keel's fixture
+  registers `busy-harbor` in its own vocabulary. A seam-conformance test
+  (`server-lib/demo-presets-seam.test.ts`) runs under every app and the fixture.
+- **Server replay** — `packages/keel/src/server-lib/demo-presets.ts` behind
+  `apps/showcase/src/app/api/simulator/presets/route.ts`. It resets the world, invites through
+  `sendOrgInvite` (extracted from the org route, now shared), sends inbound mail through the framework
+  intake, sets flags through the fake analytics store, then signs in the restorer with `devSignIn`.
+- **Static replay** — `world.applyPreset` in `packages/keel/src/demo-static/world.ts`. It replays
+  through the twins, one step per commit, so each step sees the world its predecessor left.
+- **Viewpoint** — who the restorer sits down as, applied only to the browser that loaded the preset.
+  Other browsers keep theirs. That is the answer to the per-browser-cookie vs shared-world tension.
+- **Surfaces** — the Snapshots tab lists presets on both hosts (`preset-load-<id>`). A tour's
+  `snapshot` may name a preset on both hosts. Saving a snapshot under a reserved name is refused. A
+  tour start a host cannot honour is a recorded miss. The second showcase tour, `invite-from-preset`,
+  starts from `mid-demo` and runs in the `file://` CI walkthrough.
+- **Proofs** — the keel replay test against the fixture; the static-shell and destructive server e2e
+  for loading presets; the tours e2e on both hosts. Each new gate was watched failing first: a broken
+  preset, and a tour naming a server-only snapshot.
+
+## Later the same day: what the summary above no longer says (2026-10-03)
+
+Three follow-up slices on `integration/demo-presets` superseded parts of the summary above.
+
+- **Registration:** presets moved off `@app-config/simulator` onto their own seam module, `@app-config/presets`, one file per preset. They gained single-inheritance `extends`, flattened by `expandPreset`.
+- **Operations:** the operation set stopped being a fixed `invite` / `inbound` / `flag`. It is now a registry keel and the app both extend:
+    - each kind is a definition (Standard Schema args) plus a server half plus a static half;
+    - an app kind may replace one of keel's;
+    - named results (`as` / `consumes`) let a later step act on a row an earlier step created;
+    - the showcase's `ticket.assign` calls the same `applyTicketChanges` its PATCH route does.
+- **Actors:** a preset can hold one Simulator actor with the framework kind `actor.hold`.
+
+The decision log carries each step: "Presets move to their own seam module…", "Preset operations become a registry…" and "Holding one actor is a preset operation kind…". So do the ADR-0012 addenda.

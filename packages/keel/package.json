@@ -75,6 +75,7 @@
         "./core/llm-models": "./src/core/llm-models.ts",
         "./core/locale": "./src/core/locale.ts",
         "./core/notifications": "./src/core/notifications.ts",
+        "./core/presets": "./src/core/presets.ts",
         "./core/roles": "./src/core/roles.ts",
         "./core/schedules": "./src/core/schedules.ts",
         "./core/state-machine": "./src/core/state-machine.ts",
@@ -125,8 +126,11 @@
         "./seed/contracts": "./src/seed/contracts.ts",
         "./server-lib/assistant": "./src/server-lib/assistant.ts",
         "./server-lib/defer": "./src/server-lib/defer.ts",
+        "./server-lib/demo-presets": "./src/server-lib/demo-presets.ts",
+        "./server-lib/invite": "./src/server-lib/invite.ts",
         "./server-lib/notify": "./src/server-lib/notify.ts",
         "./server-lib/notify-deps": "./src/server-lib/notify-deps.ts",
+        "./server-lib/preset-operations": "./src/server-lib/preset-operations.ts",
         "./server-lib/sms": "./src/server-lib/sms.ts",
         "./server-lib/webhook-dispatch": "./src/server-lib/webhook-dispatch.ts",
         "./service-auth/mailgun": "./src/service-auth/mailgun.ts",
@@ -152,7 +156,8 @@
         "mailgun.js": "^13.3.0",
         "pg": "^8.22.0",
         "posthog-node": "^5.46.1",
-        "server-only": "^0.0.1"
+        "server-only": "^0.0.1",
+        "valibot": "^1.5.0"
     },
     "peerDependencies": {
         "@mantine/core": "^9.5.0",

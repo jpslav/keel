@@ -326,3 +326,101 @@ occur. The trigger was an engine-parity proof (a `date` column, `docs/decision-l
 only worth anything on real Postgres. The Consequences' "contract runner stays single-app" is now "one app
 plus the framework's own seam". A second APP still needs its own project and database, and
 `.claude/future-tasks/contract-suite-single-app.md` stays open for that.
+
+## Addendum (2026-10-03): demo presets on the `simulator` seam
+
+`@app-config/simulator` now also exports **`presets`** (`DemoPreset[]`, contract in `keel/core/presets.ts`),
+read as a value by the static world, the Snapshots tab, `saveSnapshot`'s reserved-name check and the server
+replay (`keel/server-lib/demo-presets.ts`). That is no new entry on the enumerated value-import list: it is
+the same module, and the same kind of registration as its flags. The empty form is `presets = []`, which
+renders no presets section. The fixture registers one preset in its own vocabulary, so keel's replay test
+never borrows an app's world. A registered preset is seam-conformance-tested under every app
+(`server-lib/demo-presets-seam.test.ts`) against the seed and registries it will replay into.
+
+The public surface grows by three subpaths, `core/presets`, `server-lib/demo-presets` and `server-lib/invite`,
+to **129**. The internal count is unchanged at 34.
+
+## Addendum (2026-10-03, later): presets get their own seam module
+
+`presets` moves out of `@app-config/simulator` into **`@app-config/presets`**, a new seam module and a new
+entry on the enumerated value-import list above: the static world, the Snapshots tab, `saveSnapshot`'s
+reserved-name check and the server replay all read it as a value. This supersedes the same-day addendum
+above, which kept presets on `simulator` because that module was already on the list. `simulator` goes back
+to the panel's extra tabs and feature flags (`flags`, `tabs`, `actorsHeldFlag`).
+
+The reason is that a preset registry is its own subject. It is expected to grow to dozens of entries, one
+file per preset, and it now carries composition: `DemoPreset.extends` names one other preset (single
+inheritance) that is replayed first, and `expandPreset` in `keel/core/presets.ts` flattens the chain for
+both hosts. Sharing a file with the panel's tabs and flags no longer described either. The empty form is
+unchanged in meaning (`presets = []`, no presets section), and `presetProblems` validates the expanded
+script, so an unknown base, a cycle, or a duplicate invite split across a chain fails the seam-conformance
+test under every app.
+
+The fixture's seam is now **18** modules (`presets.ts` added). It registers `busy-harbor` and a child,
+`busy-harbor-lead`, which extends it, so keel's replay test proves inheritance in keel's own vocabulary.
+The public surface and internal counts are unchanged.
+
+## Addendum (2026-10-03, later still): preset operation kinds and `@app-config/preset-operations`
+
+Demo-preset operation kinds become a registry the framework and the app both extend. Two seam changes:
+
+- **`@app-config/presets` exports two more things.** `appPresetOperations` (`PresetOperationDefinition[]`,
+  contract in `keel/core/presets.ts`) is the app's operation DEFINITIONS — argument schema, product
+  rules, consumed names — read as a value by keel's seam-conformance suite. `AppPresetOperation` is a TYPE,
+  composed into `PresetOperation = FrameworkPresetOperation | AppPresetOperation` exactly as job kinds
+  compose; the empty form is `never` and `[]`. Definitions are pure, so the static demo may bundle the
+  module as before. Nothing new on the enumerated value-import list: `presets` is already on it.
+- **`@app-config/preset-operations` is a new seam module, SERVER-ONLY, and a new entry on the enumerated
+  value-import list.** It exports `appPresetOperationHandlers`, the app's server halves keyed by kind,
+  which `keel/server-lib/demo-presets.ts` composes over keel's (`{ ...framework, ...app }`, so an app
+  entry with a framework kind's name replaces it). It is a separate module from `presets` because the
+  static demo bundles `presets`, and a server half reaches modules (`server-only`, pglite) that stop that
+  bundle loading. The static halves do not go on the seam at all: like the inbound-email twins, the
+  static composition root supplies them through `DemoWorldOptions.presetOperations`, because they act on
+  that root's own in-memory rows. The empty form is `{}`.
+
+The contract is typed against the Standard Schema v1 interface (vendored as types in
+`keel/core/standard-schema.ts`), not against a validation library, so the seam does not choose one for the
+app; keel's own kinds happen to use Valibot.
+
+The fixture's seam is now **19** modules (`preset-operations.ts` added). It registers one app kind,
+`docket.flag`, which consumes a named result an `inbound` step produced, and a `flag` server half that
+replaces keel's by name, so keel's replay test proves both in keel's own vocabulary.
+
+The public surface grows by one subpath, `server-lib/preset-operations` (the server-half types, keel's
+own halves to wrap, and `resolvePresetOrg`), to **130**. The internal count is **37**: `core/standard-schema` is new, and re-deriving it (non-test modules
+under `src/` that the map does not publish) found two more that earlier figures missed —
+`components/simulator/tab-mount` and `components/simulator/people-dimensions`, added on `main` while the
+count stayed at 34. That number is now gated too: `public-surface.test.ts` holds the sentence in
+`docs/adopting.md` to the walked count, as it already held CLAUDE.md's published count.
+
+## Addendum (2026-10-03, later still: per-actor holds): `@app-config/actors` gains a value
+
+`@app-config/actors` was type-only (`ActorId`); it now also exports **`actors`**, the registered actors as a
+`readonly { id: string }[]` (the showcase's carries each actor's copy keys as well). keel's `actor.hold`
+demo-preset kind must reject an actor id the app did not register, and its definition is pure, so
+`PresetWorld` gains `actors` and the seam-conformance suite derives it from this list, the way it derives
+people, teams, handlers and flags. The empty form is `actors = []` alongside `type ActorId = never`.
+
+This is **not a new entry on the enumerated value-import list**: only a test reads the value. Framework
+runtime code still takes `ActorId` as a type, and neither host's `actor.hold` half validates its argument
+(the gate already has). The cost is that every registration must now provide the list, which is why the
+starter gained `actors = []` and the fixture, whose registration was empty, now registers one actor
+(`fixture-tug`): keel's replay test cannot prove that a hold is written, nor the gate that a known id passes
+and an unknown one is named, against an empty list. The fixture hosts no panel, so the actor is only an id.
+
+The fixture's seam is still **19** modules, and the public and internal counts are unchanged.
+
+## Addendum (2026-10-03, last): the fixture's seam is no longer counted
+
+The addenda above give the fixture's seam as 18 modules, then 19. Neither number came with a counting
+rule, and different rules give different answers:
+
+- top-level `app-config/` files alone;
+- those plus the `db/` registrations;
+- those plus the files under `presets/operations/`.
+
+The body's "17" was already one off by the rule it seemed to use. So the count is dropped rather than
+corrected. CLAUDE.md now says what the fixture registers ("every `@app-config/*` module the framework
+reads"), and the seam-conformance suites, not a number, are what hold the fixture to it. The published
+and internal counts above keep their numbers, because each has a stated rule and a test.

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
-import { welcome } from '../catalog'
+import { presets } from '../../src/app-config/presets'
+import { appMessage, simulatorNotice, welcome } from '../catalog'
 
 const indexUrl = `file://${path.resolve(__dirname, '../../dist-demo/index.html')}`
 
@@ -181,8 +182,9 @@ test('simulator panel resets the static shell back to its initial state', async 
     await page.getByTestId('invite-submit').click()
     await expect(page.getByTestId('invite-sent')).toBeVisible()
 
-    // The static shell's Snapshots tab is reset-only (no snapshots prop, no server to snapshot against)
-    // — the two-step confirm lives in SnapshotsApp itself, shared with the real app.
+    // The static shell's Snapshots tab has no save/restore (no snapshots prop, no server to snapshot
+    // against) — reset and the demo presets only. The two-step confirm lives in SnapshotsApp itself,
+    // shared with the real app.
     await page.getByTestId('simulator-pill').click()
     await page.getByTestId('simulator-tab-snapshots').click()
     await page.getByTestId('snapshots-reset').click()
@@ -412,3 +414,99 @@ test('the ticket queue pages through its cursor chain from file://', async ({ pa
         .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ref') ?? ''))
     expect(new Set(refs).size).toBe(refs.length)
 })
+
+test('static shell: a demo preset loads from the Snapshots tab — no server, same world as pnpm dev', async ({
+    page,
+}) => {
+    // Three preset loads, and two waits on an actor's first autonomous tick (a few seconds each).
+    test.setTimeout(60_000)
+    await page.goto(indexUrl)
+    await page.getByTestId('simulator-pill').click()
+    await page.getByTestId('simulator-tab-snapshots').click()
+
+    // A saved snapshot needs a server's `.data/`; a preset is a script, so this host lists them too.
+    await expect(page.getByTestId('snapshots-list')).toHaveCount(0)
+    await page.getByTestId('preset-load-mid-demo').click()
+
+    // The preset's viewpoint: signed in as Dana, on her desk, with the replayed inbound mail as tickets.
+    await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye')
+    await expect(page.getByTestId('tickets-list')).toContainText('Refund stuck in pending for three days')
+    await expect(page.getByTestId('tickets-list')).toContainText('Checkout times out for shoppers in the EU')
+    // The app's own operation kind, `ticket.assign`, replayed by its STATIC half: the ticket the refund
+    // email opened (named `refund` in the script) is Sam's.
+    const refund = page.getByTestId('ticket-item').filter({ hasText: 'Refund stuck in pending for three days' })
+    await expect(refund.getByTestId(/^ticket-assignee-/)).toHaveValue('Sam Rivera')
+
+    // A change made by hand, which no preset script makes — the next load must wipe it.
+    await page.getByTestId('flag-toggle-demo-banner').click()
+    await expect(page.getByTestId('demo-banner-flag')).toBeVisible()
+
+    // The replayed invite: a pending person in People, with the invite unread in their inbox.
+    await page.getByTestId('simulator-tab-people').click()
+    const invited = page.locator('[data-testid^="people-"]').filter({ hasText: 'jordan.ellis@example.test' })
+    await expect(invited).toContainText('invited')
+    await invited.click()
+    await page.getByTestId('simulator-tab-mail').click()
+    await expect(page.getByTestId('mail-list').locator('[data-testid^="mail-item-"]')).toHaveCount(1)
+
+    // Loading another preset is a reset underneath: the hand-made banner flag is gone, and multi-tenant's
+    // world is here — Pinebrook's queue, signed in at Pinebrook as Gale, Riley's refused email filed
+    // 'unmatched'. It EXTENDS mid-demo, so Jordan's invite is replayed too, from the base.
+    await page.getByTestId('simulator-tab-snapshots').click()
+    await page.getByTestId('preset-load-multi-tenant').click()
+    await expect(page.getByTestId('signed-in-as')).toContainText('Gale Bennett')
+    await expect(page.getByTestId('demo-banner-flag')).toHaveCount(0)
+    // Subjects only the preset creates: the seed already holds a Pinebrook ticket, so asserting on IT would
+    // pass with the replay doing nothing.
+    await expect(page.getByTestId('tickets-list')).toContainText('Room upgrade emails link to the wrong hotel')
+    await expect(page.getByTestId('tickets-list')).toContainText('Gift card balance shows zero')
+    await expect(page.getByTestId('tickets-list')).not.toContainText('Refund stuck in pending')
+    await page.getByTestId('simulator-tab-people').click()
+    await expect(page.getByTestId('simulator-people')).toContainText('jordan.ellis@example.test')
+    await expect(page.getByTestId('simulator-people')).toContainText('priya.shah@example.test')
+    await page.getByTestId('simulator-tab-mail').click()
+    const refused = page.getByTestId('inbound-list').locator('[data-testid^="inbound-item-"]').filter({
+        hasText: 'Can I reopen my old ticket?',
+    })
+    await expect(refused).toContainText('unmatched')
+
+    // multi-tenant's `actor.hold`: the partner desk has been held, and the bundle analyzer has not. The
+    // actors run from page load, and `held` is only reported once an autonomous tick has asked the
+    // world, so wait for the first tick (a few seconds) rather than sleeping a fixed time. The analyzer
+    // is checked AFTER that: it ticks on the same schedule, so a hold wrongly applied to it by now would
+    // already show, and "not held" cannot pass merely because nothing has asked yet.
+    await page.getByTestId('simulator-tab-actors').click()
+    const partnerDesk = page.getByTestId('actor-card-partner-desk').getByTestId('actor-status')
+    const analyzer = page.getByTestId('actor-card-bundle-analyzer').getByTestId('actor-status')
+    await expect(partnerDesk).toHaveAttribute('data-state', 'held', { timeout: 30_000 })
+    await expect(analyzer).not.toHaveAttribute('data-state', 'held')
+    // ...and it is a hold on ONE actor, not the world's: loading a preset without it releases the desk.
+    await page.getByTestId('simulator-tab-snapshots').click()
+    await page.getByTestId('preset-load-mid-demo').click()
+    await page.getByTestId('simulator-tab-actors').click()
+    await expect(partnerDesk).not.toHaveAttribute('data-state', 'held', { timeout: 30_000 })
+})
+
+/**
+ * Every registered preset replays to the end in THIS world. The static demo replays a preset through the
+ * static half of each operation kind — keel's own, or the one the composition root supplies for an app
+ * kind (src/demo-static/app.tsx `presetOperations`) — and no unit test can see that map, since it is built
+ * at runtime. A kind without a static half settles the replay false, and the "Preset loaded" notice never
+ * appears, so this is the gate that a new kind shipped its static half. Asserted on the WHOLE load notice
+ * (keel's copy with the preset's title in it) and on the ABSENCE of the failure notice — the failure notice
+ * names the preset too, so matching the title alone would pass on a replay that broke.
+ */
+for (const preset of presets) {
+    test(`static shell: preset "${preset.id}" replays every operation to the end`, async ({ page }) => {
+        await page.goto(indexUrl)
+        await page.getByTestId('simulator-pill').click()
+        await page.getByTestId('simulator-tab-snapshots').click()
+        await page.getByTestId(`preset-load-${preset.id}`).click()
+        // Filtered, not the whole overlay: the steps' own notices (mail sent, inbound filed) show while
+        // the replay runs, and the load notice replaces them only once the last step has run.
+        const title = appMessage('en', preset.titleKey)
+        const notices = page.getByTestId('simulator-notice')
+        await expect(notices.filter({ hasText: simulatorNotice('en', 'noticePresetLoaded', title) })).toBeVisible()
+        await expect(notices.filter({ hasText: simulatorNotice('en', 'noticePresetFailed', title) })).toHaveCount(0)
+    })
+}

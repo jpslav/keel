@@ -1290,3 +1290,25 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   what makes a failed removal visible.
 - **`scripts/e2e-profile.mjs` is left alone**: it already `rmSync`s its scratch directory, and it is a
   script, outside the rule's scope (test files).
+
+## Demo presets (2026-10-03, `prebaked-demo-presets`)
+
+- **Replaying a script in a React-state world needs one step per commit.** The static twin's operations
+  read the world through the render's closure: the invite's duplicate check reads `invites`, and the
+  inbound twin reads the member list and the app's ticket list. A loop that calls `resetWorld()` and
+  then every operation in the same handler runs every step against the world as it was BEFORE the
+  reset. Functional `setX(prev => …)` updates queue correctly, but the reads do not. `world.ts` drains a
+  queue instead, one step per zero-delay timer after each commit, which is what the server gets for free
+  by writing to disk between steps. The timer is there for the `set-state-in-effect` rule, and its
+  cleanup makes a reset mid-replay drop the rest of the queue.
+- **A handler that starts a full reload should never resolve.** The server glue's reset fired its
+  fetch and returned, so a tour's `start()` went straight on to show step 1 on a document that was about
+  to be replaced. An e2e that pressed Next promptly lost the press to the reload. Returning a promise
+  that never settles on success, and settles `false` on refusal, is the honest type. Found by walking the
+  whole preset tour on the server host, which CI does not do; CI walks tours only from `file://`.
+- **The server's duplicate check is the caller's, not the shared invite core's.** `sendOrgInvite` starts
+  after the org route's 409 check, and keel's server half of the `invite` kind makes the same check
+  before calling it. The static twin's `inviteInto` keeps the check itself and answers false, which
+  `sendInvite` turns into its form error and the replay into a failure. A preset is held to "no
+  duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
+  error contract onto callers that each want a different one.
