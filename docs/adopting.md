@@ -40,6 +40,10 @@ Three kinds of thing live in this repo (see
   consumer, which is what makes the framework/app line falsifiable rather than merely asserted:
   anything keel reaches for that only exists because the showcase supplies it fails to compile there.
 - **The repo scaffold**: the verify gate, lint fences, CI, docs doctrine, infra draft. You keep it.
+  One rule in it reaches your own tests: a test that needs a scratch directory calls
+  `makeTestTmpDir()` / `makeTestTmpDirAsync()` from `tests/support/tmp-dir.ts`, never `mkdtemp` (lint
+  bans it), and `test:unit`, `test:coverage` and `test:contract` run through
+  `scripts/check-tmpdir-leak.mjs`, which fails the run if a directory made that way survives it.
 
 Apps live under `apps/` — one per product, each with its own `package.json`, configs and tests
 (ADR-0007). Root commands that operate on ALL apps (`pnpm verify`, `pnpm typecheck`, `pnpm lint`,
@@ -239,7 +243,7 @@ declaration.
 vocabulary — its seed slugs, its `tickets` table, its `export-tickets` job kind, its route tree — so
 deleting the demo took `pnpm test:unit` and `pnpm typecheck` down with it. The framework now carries a
 seam of its own, `packages/keel/test-fixture`: a conforming `@app-config/*` registration with its own
-two-tenant seed world, one table and migration, one job/webhook/notification kind, an inbound handler,
+two-tenant seed world, one table and its migrations, one job/webhook/notification kind, an inbound handler,
 and a route tree that exists only to be read by the authorization scan. The root TypeScript program
 resolves `@app-config/*` there, and `vitest.config.ts` runs keel's suite in a `keel` project pointed at
 it. Nothing in that fixture is deletable by adoption, and its vocabulary is deliberately none of the

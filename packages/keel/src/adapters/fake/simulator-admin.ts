@@ -10,8 +10,8 @@ import { closeFakeDb } from './db'
 /**
  * Snapshots: world reset + named snapshots (simulated-mode-only, NOT a port). Every fake adapter already
  * writes its state to a flat-file directory under `.data/` — auth (sessions' signing secret,
- * profile overrides, invites, the dynamic-person overlay), emails, analytics, pglite, storage,
- * and Simulator's own continuity state — so the simulated world's state IS the filesystem, and
+ * profile overrides, invites, the dynamic-person overlay), emails, caught LLM requests, analytics,
+ * pglite, storage, and Simulator's own continuity state — so the simulated world's state IS the filesystem, and
  * "reset" / "save a snapshot" / "restore a snapshot" are directory operations, not application
  * logic: `rmSync`/`cpSync` over those directories. `.data/snapshots/<name>/` holds one directory copy
  * per snapshot; `.data/snapshots/` itself is never touched by reset because it isn't a LIVE_DIR.
@@ -24,7 +24,7 @@ import { closeFakeDb } from './db'
  * production concern.
  */
 
-const LIVE_DIRS = ['auth', 'emails', 'analytics', 'pglite', 'storage', 'simulator', 'webhooks', 'sms']
+const LIVE_DIRS = ['auth', 'emails', 'llm-requests', 'analytics', 'pglite', 'storage', 'simulator', 'webhooks', 'sms']
 const DEV_SECRET_FILE = 'dev-secret'
 
 function root(): string {
@@ -98,9 +98,25 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
 /** Wipes the simulated world back to the seed baseline: closes pglite first (nothing can touch
  *  `.data/pglite` while it's open), then clears every LIVE_DIR except the dev-secret. */
 export async function resetWorld(): Promise<void> {
+    return serialize(resetUnlocked)
+}
+
+async function resetUnlocked(): Promise<void> {
+    await closeFakeDb()
+    wipeLiveDirsPreservingDevSecret()
+}
+
+/**
+ * Resets the world and then runs `rebuild` INSIDE the same turn of the queue: nothing else that rewrites
+ * the world (another reset, a save, a restore, another rebuild) can interleave between the wipe and the
+ * last step. The demo-preset replay (keel/server-lib/demo-presets.ts) is the caller — a preset is a reset
+ * plus a script, and two browsers loading presets at once must each get a whole one. Ordinary requests
+ * are not serialized, as for every operation here (see the module comment).
+ */
+export async function resetWorldThen<T>(rebuild: () => Promise<T>): Promise<T> {
     return serialize(async () => {
-        await closeFakeDb()
-        wipeLiveDirsPreservingDevSecret()
+        await resetUnlocked()
+        return rebuild()
     })
 }
 

@@ -2,10 +2,8 @@ import { actors } from '@app-config/actors'
 import { loadAppMessages } from '@app-config/messages'
 import { organizations, people } from '@app-config/seed'
 import { appPresetOperations, presets } from '@app-config/presets'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import { KNOWN_FLAGS } from '../adapters/fake/analytics'
 import { composePresetOperations, expandPreset, presetProblems } from '../core/presets'
 import { inboundHandlers } from '../inbound-email/handlers'
@@ -33,7 +31,7 @@ import type { MessageTree } from '../i18n/messages'
  * demo-presets.test.ts: a throwaway data dir, a cookie jar, a stub translator, and the fake adapters
  * standing in for the `server-only` registry.
  */
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-demo-presets-seam-'))
+const tmp = makeTestTmpDir('app-demo-presets-seam-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

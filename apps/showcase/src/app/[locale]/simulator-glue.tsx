@@ -613,16 +613,28 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ name: id, locale }),
-        }).then(async (response) => {
-            if (response.ok) {
-                const { redirectTo } = (await response.json()) as { redirectTo: string }
-                window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'preset', name: id }))
-                window.location.assign(redirectTo)
-                return untilReload()
-            }
-            setBusyPreset(null)
-            return false
-        })
+        }).then(
+            async (response) => {
+                if (response.ok) {
+                    const { redirectTo } = (await response.json()) as { redirectTo: string }
+                    window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'preset', name: id }))
+                    window.location.assign(redirectTo)
+                    return untilReload()
+                }
+                return presetFailed(id)
+            },
+            () => presetFailed(id),
+        )
+    }
+
+    // A refused or failed load is SAID, never just un-busied: the server may have reset the world before
+    // the step that failed, so what this page still shows is not what `.data/` now holds. No reload, so a
+    // tour that asked for the preset can still record the miss.
+    function presetFailed(id: string): false {
+        setBusyPreset(null)
+        const preset = presets.find((p) => p.id === id)
+        pushNotice(t('noticePresetFailed', { name: preset ? tRoot(preset.titleKey) : id }))
+        return false
     }
 
     function handleDeleteSnapshot(name: string) {

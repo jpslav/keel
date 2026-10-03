@@ -188,7 +188,9 @@ every developer and every agent. Determinism also makes tests trustworthy.
 
 **Tradeoff.** Fakes can drift from real behavior — mitigated by running the _same_ suite against the real
 engine. Here, `pnpm test:contract` runs the identical row-level-security proofs on real Postgres (embedded
-binaries locally, a service container in CI); if the fake ever drifts, one of the two runs breaks.
+binaries locally, a service container in CI); if the fake ever drifts, one of the two runs breaks. keel's
+own fixture runs there too, in a database of its own, which is how a driver-level difference between the
+engines (a `date` column read back as a different value on each) is caught the same way.
 
 ## LLM stubbing — record / replay by default ✅
 
@@ -199,6 +201,12 @@ adapter. **Demo mode is always canned.**
 
 **Why.** Dev, demo, and test want determinism, speed, and zero setup; local models provide none of those,
 plus worse quality. Canned demos never lose "live-demo roulette."
+
+**The request side is caught too.** The fake adapter writes every request it is sent (purpose, system,
+messages, and a tool loop's tool definitions) to `.data/llm-requests/` before it looks up a fixture, the
+way the fake email adapter catches a send. A fixture proves what the app does with an answer; the catch
+proves what the app put into the prompt — including for a request that matches no fixture. A world reset
+clears it and a snapshot carries it.
 
 **Tradeoff.** Fixtures must be re-recorded when prompts or models change — a one-command chore (`pnpm
 llm:record` / `.claude/commands/record-fixtures.md`), with the diff reviewed like any other change. See ADR

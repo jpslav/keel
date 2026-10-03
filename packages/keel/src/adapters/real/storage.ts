@@ -1,7 +1,16 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import {
+    DeleteObjectsCommand,
+    GetObjectCommand,
+    ListObjectsV2Command,
+    PutObjectCommand,
+    S3Client,
+} from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post'
 import type { StoragePort, StoredObject } from '../../ports/storage'
+
+/** S3's hard cap on keys in one DeleteObjects request. */
+const DELETE_BATCH_SIZE = 1000
 
 /** AUTHORED — CUTOVER (`cloud-accounts`): typechecked, never run against a real bucket. */
 export function createRealStorage(bucket: string, region: string): StoragePort {
@@ -36,6 +45,37 @@ export function createRealStorage(bucket: string, region: string): StoragePort {
                 }),
                 { expiresIn: expiresInSeconds },
             )
+        },
+
+        async list(prefix) {
+            const keys: string[] = []
+            let continuationToken: string | undefined
+            do {
+                const page = await client.send(
+                    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+                )
+                for (const object of page.Contents ?? []) if (object.Key !== undefined) keys.push(object.Key)
+                continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+            } while (continuationToken)
+            return keys.sort()
+        },
+
+        async delete(keys) {
+            for (let start = 0; start < keys.length; start += DELETE_BATCH_SIZE) {
+                const batch = keys.slice(start, start + DELETE_BATCH_SIZE)
+                // Quiet: S3 answers with failures only, so a clean batch has no `Errors` to read. A
+                // missing key is not a failure (S3 reports it as deleted), which is the idempotency we promise.
+                const result = await client.send(
+                    new DeleteObjectsCommand({
+                        Bucket: bucket,
+                        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+                    }),
+                )
+                const failed = result.Errors?.[0]
+                if (failed) {
+                    throw new Error(`storage delete failed for ${failed.Key}: ${failed.Code} ${failed.Message}`)
+                }
+            }
         },
 
         async createUploadTarget(key, { contentType, maxBytes }) {

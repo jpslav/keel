@@ -1,7 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 
 // The server replay of a demo preset, against keel's OWN seam: the fixture registers `busy-harbor`
 // (packages/keel/test-fixture/app-config/presets.ts), one operation of every kind plus a viewpoint, and
@@ -13,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 // next-intl's server translator is stubbed: the invite email's copy is not what is under test here. The
 // adapter registry is `server-only`, so it is replaced by the simulated-mode registry it would build —
 // the fake adapters themselves, unmocked, which is the whole path the replay drives.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-demo-presets-'))
+const tmp = makeTestTmpDir('app-demo-presets-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })
@@ -162,6 +160,22 @@ describe('applyDemoPreset (server host)', () => {
         expect(readFlags()['jobs-held']).toBe(true)
         // ...and the viewpoint is the child's own, not the base's `fixture-hand`
         expect((await fakeAuth.getCurrentUser())?.id).toBe('fixture-lead')
+    })
+
+    test('two loads at once each get a whole world: the second waits for the first instead of wiping it mid-script', async () => {
+        const { applyDemoPreset } = await import('./demo-presets')
+        const { fakeAuth } = await import('../adapters/fake/auth')
+
+        // Without the world lock around reset AND script, the second load's reset lands between the first
+        // load's steps — closing the database under it, or leaving a half-replayed world behind.
+        await Promise.all([
+            applyDemoPreset('busy-harbor', { baseUrl: BASE_URL }),
+            applyDemoPreset('busy-harbor', { baseUrl: BASE_URL }),
+        ])
+
+        const invited = (await fakeAuth.listMembers('depot')).filter((member) => member.status === 'invited')
+        expect(invited.map((member) => member.email)).toEqual([INVITEE])
+        expect((await depotDocketLabels()).filter((label) => label === 'Crane four is stuck')).toHaveLength(1)
     })
 
     test('replaying is idempotent: the reset underneath means a second load is the same world, not twice it', async () => {

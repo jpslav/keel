@@ -248,7 +248,8 @@
         "presetsHint": "Reinicia el mundo y reproduce un punto de partida guionizado; funciona en todas las demos, incluida la de un solo archivo.",
         "presetsLoad": "Cargar",
         "noticePresetLoaded": "Preajuste cargado: {name}",
-        "snapshotsNameReserved": "Ese nombre pertenece al reinicio o a un preajuste; elige otro."
+        "snapshotsNameReserved": "Ese nombre pertenece al reinicio o a un preajuste; elige otro.",
+        "noticePresetFailed": "No se pudo cargar el preajuste: {name}. El mundo quedó a medio preparar; reinícialo para empezar de cero."
     },
     "acceptInvite": {
         "title": "Únete a {org}",

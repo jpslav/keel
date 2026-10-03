@@ -1,6 +1,6 @@
 # Fake LLM adapter should catch every request it's sent
 
-**Priority:** P2 · **Status:** open
+**Priority:** P2 · **Status:** RESOLVED 2026-10-03
 
 The fake email adapter catches every message it's asked to send into `.data/emails/`, which is how a
 Simulator tab or a test inspects what was actually sent without a real mail provider. The fake LLM
@@ -17,3 +17,18 @@ Evidence: `packages/keel/src/adapters/fake/llm.ts` (today's fixture-only lookup,
 `packages/keel/src/adapters/fake/simulator-admin.ts` (`LIVE_DIRS`, the world-reset/snapshot mechanism
 any new catch directory would need to join so a reset clears it and a snapshot carries it, the same
 way the mailbox already does).
+
+## Resolution
+
+The fake LLM writes every request to `.data/llm-requests/` before its fixture lookup, so a request with
+no fixture is still caught. Each catch records the purpose, system prompt, messages and timestamp, and
+for `runToolLoop` the tool definitions (name, description, input schema; never the `execute` closure).
+`listCaughtLlmRequests(purpose?)` (oldest first) and `clearCaughtLlmRequests()` are simulated-only
+exports, not on `LlmPort`. The directory is in `LIVE_DIRS`, so a world reset clears it and a snapshot
+carries it.
+
+One limit: `stream` is an async generator, so its catch lands on first iteration, and a stream nobody
+consumes is never caught.
+
+Nothing reads the catch yet outside tests. A Simulator view of it would sit naturally beside
+`llm-fixtures-tab.md`.

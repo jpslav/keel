@@ -53,7 +53,7 @@ import {
     type InviteArgs,
     type PresetOperation,
 } from '../core/presets'
-import { canManageOrg } from '../core/roles'
+import { canManageOrg, isAssignableRole } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
     backoffDelayMs,
@@ -809,20 +809,28 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             error = `no handler: ${parsed.handler}`
         } else {
             handlerClaimed = parsed.handler
-            const result = handler({
-                org: seedOrg,
-                members: allPeople.filter((p) => p.memberships.some((m) => m.orgSlug === seedOrg.slug)),
-                fromEmail,
-                subject: input.subject,
-                bodyText,
-                recordAudit: (entry) => appendAudit(entry, seedOrg.tenantSlug, seedOrg.slug, at),
-            })
-            if (result.status === 'handled') {
-                status = 'handled'
-                actor = result.actorUserId
-                subjectId = result.subjectId
-            } else {
-                error = result.reason
+            // A THROW is the third outcome, as in the server intake (keel/inbound-email/intake.ts): the
+            // row is kept as 'failed' and nothing else stops — a preset replaying this email carries on
+            // with no named result, exactly as the server replay does.
+            try {
+                const result = handler({
+                    org: seedOrg,
+                    members: allPeople.filter((p) => p.memberships.some((m) => m.orgSlug === seedOrg.slug)),
+                    fromEmail,
+                    subject: input.subject,
+                    bodyText,
+                    recordAudit: (entry) => appendAudit(entry, seedOrg.tenantSlug, seedOrg.slug, at),
+                })
+                if (result.status === 'handled') {
+                    status = 'handled'
+                    actor = result.actorUserId
+                    subjectId = result.subjectId
+                } else {
+                    error = result.reason
+                }
+            } catch (thrown) {
+                status = 'failed'
+                error = thrown instanceof Error ? thrown.message : String(thrown)
             }
         }
 
@@ -863,6 +871,10 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      * the team are explicit because the demo-preset replay names both; the org screen passes whoever is
      * signed in. Answers false for a team the seed does not have, or for the duplicate the real API
      * refuses with a 409.
+     *
+     * One known divergence: the server renders the email in the INVITER's locale (the invitee has none
+     * yet); this twin renders it in the locale the demo is being viewed in, because the static shell
+     * loads one catalog at a time. Same keys, same placeholders — only the language can differ.
      */
     function inviteInto(inviter: SeedPerson, orgSlug: string, email: string, role: string): boolean {
         const target = findOrg(orgSlug)
@@ -910,6 +922,15 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     /** Twin of POST /api/org/invite: the signed-in person invites into the active team. */
     async function sendInvite({ email, role }: { email: string; role: string }) {
         setInviteError(null)
+        // The same allowlist the real invite route enforces. The org screen only offers assignable
+        // roles, so no click reaches this — but a tour script or other non-UI caller can pass 'admin'
+        // straight in. The error is set before throwing because the org screen swallows the rejection
+        // and shows only `inviteError`. (A demo preset's invite never gets here: it is held to the same
+        // rule at build time, by the `invite` kind's check in keel/core/presets.ts.)
+        if (!isAssignableRole(role)) {
+            setInviteError(tOrg('inviteFailed'))
+            throw new Error('role not assignable')
+        }
         if (!person) return
         // The display name honours an unsaved profile edit, like the rest of the signed-in header.
         if (!inviteInto({ ...person, name }, activeOrgSlug, email, role)) {
@@ -1176,7 +1197,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             return filed ? { ref: filed.subjectId } : false
         }) satisfies StaticPresetOperationHandler<InboundArgs>,
         flag: ((args) => {
-            if (!(args.flag in INITIAL_FLAGS)) return false
+            if (!Object.hasOwn(INITIAL_FLAGS, args.flag)) return false
             setFlags((prev) => ({ ...prev, [args.flag]: args.enabled }))
             return {}
         }) satisfies StaticPresetOperationHandler<FlagArgs>,
@@ -1255,8 +1276,14 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         const id = setTimeout(() => {
             const [step, ...rest] = replay
             const performed = step === undefined || performReplayStep(step)
-            // A step the world cannot perform abandons the rest, like the server replay's throw.
+            // A step the world cannot perform abandons the rest, like the server replay's throw — and SAYS
+            // so: the world underneath is reset-plus-partial, which must not pass for the preset. The name
+            // comes from the queue's own closing step.
             const done = !performed || rest.length === 0
+            if (!performed) {
+                const title = rest.find((pending) => pending.step === 'loaded')
+                pushNotice(tSimulator('noticePresetFailed', { name: title?.step === 'loaded' ? title.title : '' }))
+            }
             setReplay(done ? null : rest)
             if (done) {
                 replayDone.current?.(performed)

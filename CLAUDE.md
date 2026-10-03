@@ -34,8 +34,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   explicitly — the ESLint fence and the ports/hermetic bans, `.jscpd.json`, `knip.json`'s `project`,
   and the root `tsconfig.json`. It sat outside the fence once, which made it the one directory in
   `packages/keel` where importing an app's `@/*` or `@app/seed` was legal; a location is not a
-  boundary. It is a conforming 19-module registration with its own seed
-  world, table + migration, job/webhook/notification kinds, inbound handler, catalog and route tree,
+  boundary. It is a conforming registration of every `@app-config/*` module the framework reads, with its own seed
+  world, table + its migrations, job/webhook/notification kinds, inbound handler, catalog and route tree,
   and the ROOT `tsconfig.json` resolves `@app-config/*` there. Its vocabulary
   (`harbor`/`lakeside`, `depot`/`annex`/`steward`/`wharf`, `fixture-*`, `dockets`) is deliberately
   neither app's: **never reach for an app's slugs, tables or job kinds in a `packages/keel` test** —
@@ -70,13 +70,15 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `pnpm exec playwright install chromium`.
 - `pnpm verify` does NOT run `test:contract`, jscpd, coverage, or gitleaks — CI runs those
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
-  same RLS proofs on real Postgres); after renumbering/renaming a migration, wipe local `.data` first.
+  same RLS proofs on real Postgres, for the contract app AND keel's fixture seam, each in its own
+  database); after renumbering/renaming a migration, wipe local `.data` first.
   **Also wipe `apps/*/.data` after changing `packages/seed`** — the app seeder is guarded by "does this
   world have any rows yet", so new seed rows are invisible on an existing world and only CI sees them.
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The
   primitive opens `withTenant` itself and re-runs your whole scoped query on every page, so page two
   cannot be scoped differently from page one; the cursor is client input, parsed by a total function
-  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Worked example:
+  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Its optional
+  `orderBy` column is fixed per route (a cursor names no column), never client-chosen. Worked example:
   `apps/showcase/src/domain/db/tickets.ts` + `apps/showcase/src/app/api/tickets/route.ts`, with the
   index in `apps/showcase/src/app-config/db/migrations/1004_tickets_keyset_index.ts` and proofs in both
   RLS suites.
@@ -110,6 +112,11 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   are derived per checkout by `scripts/ports.mjs`, so parallel agent sessions don't adopt each other's
   dev server; `SHOWCASE_PORT`/`STARTER_PORT`/`LADLE_PORT`/`CONTRACT_PG_PORT` override it (the last
   also isolates `pnpm test:contract` between worktrees), and `print-port.mjs` reports it.
+- **A test that needs a scratch directory calls `makeTestTmpDir()` / `makeTestTmpDirAsync()`**
+  (`tests/support/tmp-dir.ts`) — never `mkdtemp`/`mkdtempSync`, which `keel/no-direct-mkdtemp` bans in test
+  files. The helper removes the directory when the file finishes; `test:unit`, `test:coverage` and
+  `test:contract` run through `scripts/check-tmpdir-leak.mjs`, which fails the run if one survives. Do not
+  call `vitest run` directly in a new script that is meant to gate — route it through that script.
 - **E2E `workers` stays 1.** Every worker shares one `.data` behind one dev server, so parallelism buys
   flakes, not speed (measured; the old "10GB VM / OOM" reason was wrong). Parallelism belongs where the
   worlds are separate: across apps locally, across CI shards. Read

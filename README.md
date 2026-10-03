@@ -83,7 +83,7 @@ the two words apart is the point — the framework is much broader than the worl
 | `pnpm dev`               | Hermetic dev: all fake adapters, seeded, offline                                    |
 | `pnpm dev:real`          | Real adapters against cloud resources — fails fast, listing missing cutover items   |
 | `pnpm verify`            | The gate: typecheck + lint + unit + e2e + static-demo build + `file://` walkthrough |
-| `pnpm test:contract`     | The same RLS proofs on **real Postgres**                                            |
+| `pnpm test:contract`     | The same RLS proofs on **real Postgres**, for the app and for keel's own fixture    |
 | `pnpm build:demo`        | Demo build (fake adapters, demo badge); `pnpm start:demo` serves it                 |
 | `pnpm build:demo-static` | Single-file demo (`dist-demo/index.html`) that runs from `file://`                  |
 | `pnpm ladle`             | Component workshop (screens + email templates)                                      |

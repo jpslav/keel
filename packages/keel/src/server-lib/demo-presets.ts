@@ -1,7 +1,7 @@
 import { appPresetOperationHandlers } from '@app-config/preset-operations'
 import { presets } from '@app-config/presets'
 import { devSignIn } from '../adapters/fake/auth'
-import { resetWorld } from '../adapters/fake/simulator-admin'
+import { resetWorldThen } from '../adapters/fake/simulator-admin'
 import { expandPreset, type PresetOperation } from '../core/presets'
 import { NotFoundError } from '../ports/errors'
 import { frameworkPresetOperationHandlers, type ServerPresetOperationHandler } from './preset-operations'
@@ -28,16 +28,19 @@ export async function applyDemoPreset(id: string, options: { baseUrl: string }):
     const preset = expandPreset(id, presets)
     if (!preset) throw new NotFoundError(`unknown preset: ${id}`)
 
-    await resetWorld()
-    // Named results live for one replay: a name is the id a step created in THIS world.
-    const refs = new Map<string, string>()
-    for (const operation of preset.operations) {
-        await performPresetOperation(operation, { baseUrl: options.baseUrl, refs })
-    }
+    // The reset and the whole script run as ONE turn of the world's queue, so a second load (or a reset,
+    // save or restore) arriving meanwhile waits for this one instead of interleaving with it.
+    return resetWorldThen(async () => {
+        // Named results live for one replay: a name is the id a step created in THIS world.
+        const refs = new Map<string, string>()
+        for (const operation of preset.operations) {
+            await performPresetOperation(operation, { baseUrl: options.baseUrl, refs })
+        }
 
-    if (preset.viewpoint === undefined) return { signedIn: false }
-    await devSignIn(preset.viewpoint)
-    return { signedIn: true }
+        if (preset.viewpoint === undefined) return { signedIn: false }
+        await devSignIn(preset.viewpoint)
+        return { signedIn: true }
+    })
 }
 
 /**

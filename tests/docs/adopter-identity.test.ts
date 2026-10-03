@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { makeTestTmpDir } from '../support/tmp-dir'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -85,7 +85,7 @@ let probeDir: string
 let initAppOutput: string
 
 beforeAll(() => {
-    probeDir = mkdtempSync(path.join(tmpdir(), 'keel-adopter-identity-'))
+    probeDir = makeTestTmpDir('keel-adopter-identity-')
     copyTree(ROOT, probeDir)
 
     // The harshest path init-app supports, same as the adoption-probe CI job: rename AND eject in one call.
@@ -102,10 +102,6 @@ beforeAll(() => {
     }
     initAppOutput = initApp.stdout
 }, 120_000)
-
-afterAll(() => {
-    if (probeDir) rmSync(probeDir, { recursive: true, force: true })
-})
 
 function readProbe(relative: string): string {
     return readFileSync(path.join(probeDir, relative), 'utf8')

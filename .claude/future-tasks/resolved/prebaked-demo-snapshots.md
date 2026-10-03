@@ -96,3 +96,17 @@ declarative…" records each unplanned call.
 - **Proofs** — the keel replay test against the fixture; the static-shell and destructive server e2e
   for loading presets; the tours e2e on both hosts. Each new gate was watched failing first: a broken
   preset, and a tour naming a server-only snapshot.
+
+## Later the same day: what the summary above no longer says (2026-10-03)
+
+Three follow-up slices on `integration/demo-presets` superseded parts of the summary above.
+
+- **Registration:** presets moved off `@app-config/simulator` onto their own seam module, `@app-config/presets`, one file per preset. They gained single-inheritance `extends`, flattened by `expandPreset`.
+- **Operations:** the operation set stopped being a fixed `invite` / `inbound` / `flag`. It is now a registry keel and the app both extend:
+    - each kind is a definition (Standard Schema args) plus a server half plus a static half;
+    - an app kind may replace one of keel's;
+    - named results (`as` / `consumes`) let a later step act on a row an earlier step created;
+    - the showcase's `ticket.assign` calls the same `applyTicketChanges` its PATCH route does.
+- **Actors:** a preset can hold one Simulator actor with the framework kind `actor.hold`.
+
+The decision log carries each step: "Presets move to their own seam module…", "Preset operations become a registry…" and "Holding one actor is a preset operation kind…". So do the ADR-0012 addenda.
