@@ -116,12 +116,7 @@ export function ActorShell({ actor, tick, startPaused, held, intervalMs, inline 
         heldRef.current = held
     }, [held])
     const autonomousTick = useCallback(async () => {
-        let isHeld = false
-        try {
-            isHeld = (await heldRef.current?.()) ?? false
-        } catch {
-            isHeld = false
-        }
+        const isHeld = await Promise.resolve(heldRef.current?.() ?? false).catch(() => false)
         setWorldHeld(isHeld)
         if (!isHeld) await runTickRef.current()
     }, [])
