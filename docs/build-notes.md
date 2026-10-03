@@ -349,6 +349,12 @@ signatures, render purity. Skim the bold lead-ins; they are the index._
   path trips the purity lint. Fix: capture the anchor ONCE in a lazy `useState(() => Date.now())`
   initializer (the one place an impure read is allowed) and read `mountedAtMs + offset` everywhere —
   render-pure, and consistent with the seed schedule's `next_run_at` basis (also computed at mount).
+- **An iframe in server-rendered HTML holds up the host page's `load` event.** Making the Simulator's
+  actor frames mount from page load put two same-origin iframes into every page's SSR output. A
+  document's `load` waits for its subframes, so every page — and every Playwright
+  `waitForURL(..., 'load')` — also waited on two dev-server builds of the actor page. The e2e suite went
+  from 1.7m to 3.1m with two minute-long timeouts. Mounting background iframes just after the host's own
+  `load` (`tab-mount.ts`'s `pageLoaded`) brought it back to 1.8m with none (2026-10-03).
 - **`react-hooks/purity` can blame a `Date.now()` you didn't touch.** In
   `packages/keel/src/demo-static/world.ts`, adding any CALL on a seed person's `memberships` inside
   `useDemoWorld` (an inline `.map`, or a module-level helper taking the array) made the rule flag the
