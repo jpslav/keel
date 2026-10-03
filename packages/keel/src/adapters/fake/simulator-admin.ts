@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
-import { presets } from '@app-config/simulator'
+import { presets } from '@app-config/presets'
 import { isReservedWorldStartName, WORLD_START_NAME_PATTERN } from '../../core/presets'
 import { ForbiddenError, NotFoundError } from '../../ports/errors'
 import { writeFileAtomicSync, writeJsonAtomicSync } from './atomic-write'

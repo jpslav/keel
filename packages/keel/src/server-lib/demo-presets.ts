@@ -1,11 +1,11 @@
 import { organizations, people } from '@app-config/seed'
-import { presets } from '@app-config/simulator'
+import { presets } from '@app-config/presets'
 import { auth, db } from '../adapters/index'
 import { KNOWN_FLAGS, setFlag } from '../adapters/fake/analytics'
 import { devSignIn } from '../adapters/fake/auth'
 import { resetWorld } from '../adapters/fake/simulator-admin'
 import { DEMO_INBOUND_DOMAIN, formatInboundRecipient } from '../core/inbound-email'
-import type { PresetOperation } from '../core/presets'
+import { expandPreset, type PresetOperation } from '../core/presets'
 import { orgIdForSlug } from '../db/org-lookup'
 import { tenantIdForSlug } from '../db/tenant-lookup'
 import { intakeInboundEmail } from '../inbound-email/intake'
@@ -30,7 +30,9 @@ import { sendOrgInvite } from './invite'
  * world keep theirs. See `DemoPreset.viewpoint`.
  */
 export async function applyDemoPreset(id: string, options: { baseUrl: string }): Promise<{ signedIn: boolean }> {
-    const preset = presets.find((candidate) => candidate.id === id)
+    // The `extends` chain flattened (keel/core/presets.ts `expandPreset`): null is an unknown id, and also
+    // a preset whose chain names an unknown base or loops — both of which the conformance gate rejects.
+    const preset = expandPreset(id, presets)
     if (!preset) throw new NotFoundError(`unknown preset: ${id}`)
 
     await resetWorld()

@@ -1,12 +1,12 @@
 import { loadAppMessages } from '@app-config/messages'
 import { organizations, people } from '@app-config/seed'
-import { presets } from '@app-config/simulator'
+import { presets } from '@app-config/presets'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { KNOWN_FLAGS } from '../adapters/fake/analytics'
-import { presetProblems } from '../core/presets'
+import { expandPreset, presetProblems } from '../core/presets'
 import { inboundHandlers } from '../inbound-email/handlers'
 import type { MessageTree } from '../i18n/messages'
 
@@ -83,9 +83,13 @@ describe('registered demo presets', () => {
         const { applyDemoPreset } = await import('./demo-presets')
         const { fakeAuth } = await import('../adapters/fake/auth')
         for (const preset of presets) {
+            // What replays is the EXPANDED preset (`extends` chain flattened): a child's inherited invites
+            // and viewpoint are as much its world as its own.
+            const expanded = expandPreset(preset.id, presets)
+            if (!expanded) throw new Error(`${preset.id} does not expand (unknown base or a cycle)`)
             const result = await applyDemoPreset(preset.id, { baseUrl: 'http://localhost:3000/' })
-            expect(result, preset.id).toEqual({ signedIn: preset.viewpoint !== undefined })
-            for (const operation of preset.operations) {
+            expect(result, preset.id).toEqual({ signedIn: expanded.viewpoint !== undefined })
+            for (const operation of expanded.operations) {
                 if (operation.op !== 'invite') continue
                 const members = await fakeAuth.listMembers(operation.org)
                 expect(
@@ -93,8 +97,8 @@ describe('registered demo presets', () => {
                     `${preset.id}: invite to ${operation.email}`,
                 ).toBe(true)
             }
-            if (preset.viewpoint !== undefined) {
-                expect((await fakeAuth.getCurrentUser())?.id, preset.id).toBe(preset.viewpoint)
+            if (expanded.viewpoint !== undefined) {
+                expect((await fakeAuth.getCurrentUser())?.id, preset.id).toBe(expanded.viewpoint)
             }
         }
     }, 60_000)

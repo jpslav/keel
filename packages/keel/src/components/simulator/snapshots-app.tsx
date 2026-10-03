@@ -3,7 +3,8 @@
 import { Button, Group, Stack, Switch, Text, TextInput, UnstyledButton } from '@mantine/core'
 import { useLocale, useTranslations } from 'next-intl'
 import { useState } from 'react'
-import { flags as appSimulatorFlags, presets as appPresets } from '@app-config/simulator'
+import { presets as appPresets } from '@app-config/presets'
+import { flags as appSimulatorFlags } from '@app-config/simulator'
 import { isReservedWorldStartName, WORLD_START_NAME_PATTERN } from '../../core/presets'
 import { formatWhen } from './format-when'
 
@@ -50,8 +51,8 @@ const snapshotActionStyle = {
  *
  * DEMO PRESETS (keel/core/presets.ts) render on EVERY host that passes `onLoadPreset`: a preset is a
  * script each host replays its own way, not a directory copy, so unlike a saved snapshot it needs no
- * server. The list comes from the seam (`@app-config/simulator`), read here exactly as the flag labels
- * are, and the section disappears for an app that registers none.
+ * server. The list comes from the seam (`@app-config/presets`), read here as the flags are
+ * (`@app-config/simulator`), and the section disappears for an app that registers none.
  */
 export function SnapshotsApp({
     snapshots,

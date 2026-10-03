@@ -429,6 +429,10 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
     await expect(page.getByTestId('tickets-list')).toContainText('Refund stuck in pending for three days')
     await expect(page.getByTestId('tickets-list')).toContainText('Checkout times out for shoppers in the EU')
 
+    // A change made by hand, which no preset script makes — the next load must wipe it.
+    await page.getByTestId('flag-toggle-demo-banner').click()
+    await expect(page.getByTestId('demo-banner-flag')).toBeVisible()
+
     // The replayed invite: a pending person in People, with the invite unread in their inbox.
     await page.getByTestId('simulator-tab-people').click()
     const invited = page.locator('[data-testid^="people-"]').filter({ hasText: 'jordan.ellis@example.test' })
@@ -437,15 +441,17 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
     await page.getByTestId('simulator-tab-mail').click()
     await expect(page.getByTestId('mail-list').locator('[data-testid^="mail-item-"]')).toHaveCount(1)
 
-    // Loading another preset is a reset underneath: mid-demo's invite is gone, multi-tenant's world is
-    // here — Pinebrook's queue, signed in at Pinebrook as Gale, Riley's refused email filed 'unmatched'.
+    // Loading another preset is a reset underneath: the hand-made banner flag is gone, and multi-tenant's
+    // world is here — Pinebrook's queue, signed in at Pinebrook as Gale, Riley's refused email filed
+    // 'unmatched'. It EXTENDS mid-demo, so Jordan's invite is replayed too, from the base.
     await page.getByTestId('simulator-tab-snapshots').click()
     await page.getByTestId('preset-load-multi-tenant').click()
     await expect(page.getByTestId('signed-in-as')).toContainText('Gale Bennett')
+    await expect(page.getByTestId('demo-banner-flag')).toHaveCount(0)
     await expect(page.getByTestId('tickets-list')).toContainText('Booking confirmations arrive twice')
     await expect(page.getByTestId('tickets-list')).not.toContainText('Refund stuck in pending')
     await page.getByTestId('simulator-tab-people').click()
-    await expect(page.getByTestId('simulator-people')).not.toContainText('jordan.ellis@example.test')
+    await expect(page.getByTestId('simulator-people')).toContainText('jordan.ellis@example.test')
     await expect(page.getByTestId('simulator-people')).toContainText('priya.shah@example.test')
     await page.getByTestId('simulator-tab-mail').click()
     const refused = page.getByTestId('inbound-list').locator('[data-testid^="inbound-item-"]').filter({

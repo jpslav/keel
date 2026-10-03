@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import en from '../../messages/en.json'
 import es from '../../messages/es.json'
 import { resolveWorldStart } from 'keel/core/presets'
-import { presets } from './simulator'
+import { presets } from './presets'
 import { tours } from './tours'
 
 /**

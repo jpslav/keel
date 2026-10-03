@@ -143,6 +143,6 @@
         "midDemoTitle": "A mitad de la demo",
         "midDemoSummary": "Dos tickets nuevos en la cola y una persona invitada al equipo cuya invitación espera sin leer.",
         "multiTenantTitle": "Ambos sitios ocupados",
-        "multiTenantSummary": "Colas en Northwind y Pinebrook, una invitación pendiente, un correo rechazado y el resaltado de SLA activo. Sesión iniciada en Pinebrook."
+        "multiTenantSummary": "Todo lo de A mitad de la demo, más la cola de Pinebrook, una invitación pendiente en Platform, un correo rechazado de un miembro restringido y el resaltado de SLA activo. Sesión iniciada en Pinebrook."
     }
 }

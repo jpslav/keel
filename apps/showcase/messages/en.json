@@ -143,6 +143,6 @@
         "midDemoTitle": "Mid-demo",
         "midDemoSummary": "Two new tickets in the queue and a teammate whose invite is waiting unread.",
         "multiTenantTitle": "Both sites busy",
-        "multiTenantSummary": "Queues at Northwind and Pinebrook, a pending invite, one refused email, SLA highlighting on. Signed in at Pinebrook."
+        "multiTenantSummary": "Everything in Mid-demo, plus Pinebrook's queue, a pending Platform invite, a refused email from a restricted member and SLA highlighting on. Signed in at Pinebrook."
     }
 }
