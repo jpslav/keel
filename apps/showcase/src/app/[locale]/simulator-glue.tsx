@@ -18,7 +18,8 @@ import type { FeatureFlag, Snapshot, SnapshotAgreement } from 'keel/components/s
 import { resolveWorldStart } from 'keel/core/presets'
 import { useTours } from 'keel/demo-static/tour/use-tours'
 import { actors } from '@app-config/actors'
-import { presets, tabs as appSimulatorTabs } from '@app-config/simulator'
+import { presets } from '@app-config/presets'
+import { tabs as appSimulatorTabs } from '@app-config/simulator'
 
 interface Summary {
     viewpoint: string | null

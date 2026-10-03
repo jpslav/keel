@@ -12,7 +12,9 @@ import { canManageOrg, isRole, ORG_ASSIGNABLE_ROLES, type Role } from './roles'
  * pure TypeScript and lives in core.
  *
  * Preset CONTENT is app vocabulary (whose desk, which team, what the email says), so an app registers
- * presets on the ADR-0012 seam (`@app-config/simulator`'s `presets`), with copy in its own catalog.
+ * presets on the ADR-0012 seam (`@app-config/presets`), with copy in its own catalog. A preset may
+ * `extends` another (single inheritance, `expandPreset`), so "mid-demo, signed in as someone else" is a
+ * line, not a copy.
  *
  * **An operation is something the product itself could have done.** Every one names its actor and its
  * team explicitly — never "whoever is signed in" — so a replay is deterministic, and `presetProblems`
@@ -50,7 +52,14 @@ export interface DemoPreset {
      * watching the same server keeps its own viewpoint across a restore.
      */
     viewpoint?: string
-    operations: PresetOperation[]
+    /**
+     * The id of another registered preset, replayed FIRST: this preset's world is the base's world plus
+     * its own operations, and its viewpoint overrides the base's when it names one. Single inheritance —
+     * one base, which may itself extend another (`expandPreset` walks the chain).
+     */
+    extends?: string
+    /** The script, in order. Absent = none, so a preset can differ from its base by viewpoint alone. */
+    operations?: PresetOperation[]
 }
 
 /** The one world start every host has: the seeded world, with no script on top. */
@@ -84,6 +93,57 @@ export function isReservedWorldStartName(name: string, presets: readonly DemoPre
     return name === RESET_WORLD_START || presets.some((preset) => preset.id === name)
 }
 
+/**
+ * A preset with its `extends` chain flattened: the operations to replay (the base chain's, oldest base
+ * first, then the preset's own) and the viewpoint to sit down as. The shape both replays run.
+ */
+export interface ExpandedPreset {
+    operations: PresetOperation[]
+    viewpoint?: string
+}
+
+/** Where an `extends` walk stopped: at a root (no base), at an id nothing registers, or back on a
+ *  preset it had already visited (a cycle). */
+type ChainEnd = { kind: 'root' } | { kind: 'unknown'; id: string } | { kind: 'cycle'; at: string }
+
+/** The presets from `id` toward its root (the preset itself first), and why the walk stopped. A visited
+ *  set bounds it, so a malformed registry can never loop it. An unregistered `id` yields an empty chain. */
+function walkExtends(id: string, presets: readonly DemoPreset[]): { chain: DemoPreset[]; end: ChainEnd } {
+    const chain: DemoPreset[] = []
+    const visited = new Set<string>()
+    let currentId: string | undefined = id
+    while (currentId !== undefined) {
+        if (visited.has(currentId)) return { chain, end: { kind: 'cycle', at: currentId } }
+        visited.add(currentId)
+        const preset = presets.find((candidate) => candidate.id === currentId)
+        if (!preset) return { chain, end: { kind: 'unknown', id: currentId } }
+        chain.push(preset)
+        currentId = preset.extends
+    }
+    return { chain, end: { kind: 'root' } }
+}
+
+/** Flattens a walked chain (preset first, root last): operations root-first, viewpoint nearest the preset. */
+function flattenChain(chain: readonly DemoPreset[]): ExpandedPreset {
+    const operations = [...chain].reverse().flatMap((preset) => preset.operations ?? [])
+    const viewpoint = chain.find((preset) => preset.viewpoint !== undefined)?.viewpoint
+    return viewpoint === undefined ? { operations } : { operations, viewpoint }
+}
+
+/**
+ * Flattens a preset's `extends` chain, base first. Operations are the chain's in order — the root's,
+ * then each descendant's, the named preset's own last — and the viewpoint is the nearest one defined
+ * walking from the preset toward its root, so a child overrides its base and otherwise inherits.
+ *
+ * Returns null for an id no preset has, a chain that names an unknown base, or a cycle: a preset that
+ * cannot be fully expanded is never replayed half-way. Pure and total (the walk is bounded by a visited
+ * set). `presetProblems` is what says WHICH of those it was; the replays only need to know.
+ */
+export function expandPreset(id: string, presets: readonly DemoPreset[]): ExpandedPreset | null {
+    const { chain, end } = walkExtends(id, presets)
+    return end.kind === 'root' ? flattenChain(chain) : null
+}
+
 /** The world a preset is checked against — derived from the seed and the registries, never hand-listed. */
 export interface PresetWorld {
     people: { id: string; email: string; memberships: { orgSlug: string; role: string }[] }[]
@@ -101,6 +161,14 @@ const EMAIL_SHAPE = /.+@.+\..+/
  * one host and silently does nothing on the other is the failure this exists to stop, so the checks
  * mirror what each operation's server path would refuse — run in every app's seam-conformance suite,
  * not at replay time, so a broken preset fails the build rather than a demo.
+ *
+ * Operations and the viewpoint are checked on the EXPANDED preset (`expandPreset`): what actually
+ * replays, so a duplicate invite split across a base and its child is caught, and a child that
+ * overrides a bad viewpoint is not blamed for it. Consequences, both deliberate: an operation's number
+ * (`operation 3`) counts in the expanded list, base operations first; and a base's own problem repeats
+ * under every preset that extends it, because each of them replays it. A cycle is reported once on each
+ * preset that is IN it (a preset merely leading into one is not), and an unknown base on the preset that
+ * names it; either way the operations reachable before the chain broke are still checked.
  */
 export function presetProblems(presets: readonly DemoPreset[], world: PresetWorld): string[] {
     const problems: string[] = []
@@ -113,14 +181,20 @@ export function presetProblems(presets: readonly DemoPreset[], world: PresetWorl
         if (preset.id === RESET_WORLD_START) problems.push(`${where}: "reset" is reserved for the seeded world`)
         if (seen.has(preset.id)) problems.push(`${where}: registered twice`)
         seen.add(preset.id)
-        if (preset.viewpoint !== undefined && !world.people.some((person) => person.id === preset.viewpoint)) {
-            problems.push(`${where}: viewpoint "${preset.viewpoint}" is not a seed person`)
+
+        const { chain, end } = walkExtends(preset.id, presets)
+        if (end.kind === 'unknown' && chain.length === 1) problems.push(`${where}: extends unknown preset "${end.id}"`)
+        if (end.kind === 'cycle' && end.at === preset.id) problems.push(`${where}: extends chain has a cycle`)
+        const { operations, viewpoint } = flattenChain(chain)
+
+        if (viewpoint !== undefined && !world.people.some((person) => person.id === viewpoint)) {
+            problems.push(`${where}: viewpoint "${viewpoint}" is not a seed person`)
         }
 
-        // Invites accumulate within one preset: inviting the same address twice is the duplicate the
-        // org screen refuses with a 409.
+        // Invites accumulate across the whole expanded script: inviting the same address twice is the
+        // duplicate the org screen refuses with a 409, whichever preset in the chain did the first.
         const invited = new Set<string>()
-        for (const [index, operation] of preset.operations.entries()) {
+        for (const [index, operation] of operations.entries()) {
             const at = `${where} operation ${index + 1} (${operation.op})`
             if (operation.op !== 'flag' && !world.orgSlugs.includes(operation.org)) {
                 problems.push(`${at}: unknown org "${operation.org}"`)

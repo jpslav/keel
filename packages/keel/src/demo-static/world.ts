@@ -1,4 +1,5 @@
-import { flags as appSimulatorFlags, presets } from '@app-config/simulator'
+import { presets } from '@app-config/presets'
+import { flags as appSimulatorFlags } from '@app-config/simulator'
 import {
     agreements as seedAgreements,
     findOrg,
@@ -44,7 +45,7 @@ import {
     notificationCopy,
     resolveEnabledChannels,
 } from '../core/notifications'
-import type { PresetOperation } from '../core/presets'
+import { expandPreset, type PresetOperation } from '../core/presets'
 import { canManageOrg } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
@@ -1095,7 +1096,8 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      * Twin of the server's demo-preset replay (keel/server-lib/demo-presets.ts): reset to the seed, then
      * replay the preset's operations through this world's own twins — the invite core, compose-inbound
      * (and so the app's inbound handler twins), the flag store — and finally sit down as the preset's
-     * viewpoint. Resolves true once the world is ready; false for an id no preset has, or when the replay
+     * viewpoint. The preset is its `extends` chain flattened (`expandPreset`), base first. Resolves true
+     * once the world is ready; false for an id no preset has (or one whose chain is broken), or when the replay
      * is abandoned (a reset mid-replay) or reaches a step this world cannot perform.
      *
      * The steps run ONE PER RENDER, from the effect below, rather than in a loop here. Every twin reads
@@ -1105,12 +1107,14 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      * what the server gets for free by writing to disk between steps.
      */
     function applyPreset(id: string): Promise<boolean> {
-        const preset = presets.find((candidate) => candidate.id === id)
-        if (!preset) return Promise.resolve(false)
+        const registered = presets.find((candidate) => candidate.id === id)
+        const expanded = expandPreset(id, presets)
+        if (!registered || !expanded) return Promise.resolve(false)
         resetWorld()
-        const steps: ReplayStep[] = [...preset.operations]
-        if (preset.viewpoint !== undefined) steps.push({ op: 'viewpoint', personId: preset.viewpoint })
-        steps.push({ op: 'loaded', title: tRoot(preset.titleKey) })
+        const steps: ReplayStep[] = [...expanded.operations]
+        if (expanded.viewpoint !== undefined) steps.push({ op: 'viewpoint', personId: expanded.viewpoint })
+        // The notice names the preset that was asked for, not a base it happened to build on.
+        steps.push({ op: 'loaded', title: tRoot(registered.titleKey) })
         setReplay(steps)
         return new Promise((resolve) => {
             replayDone.current = resolve

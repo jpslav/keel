@@ -1406,3 +1406,23 @@ read that as "keep the fixtures", and built their own world beside the starter's
 - **A second tour, rather than re-pointing the flagship one.** `invite-from-preset` starts from
   `mid-demo` and walks the pending invite to a member, so a preset start runs end to end in CI. The
   ticket tour keeps `'reset'` and its "press Next to become Dana" opening, which is its first lesson.
+
+## Presets move to their own seam module and gain `extends` (2026-10-03, `presets-own-module`)
+
+- **A seam module of their own.** Replaced: the same day's "registered on `@app-config/simulator`, not a
+  new seam module". A list expected to grow to dozens of entries, now with composition, is its own
+  registry, and `simulator.ts` goes back to being the panel's tabs and flags. Each preset is one file
+  under `presets/`, listed in `presets.ts`. The cost is one more file for the starter (`presets = []`)
+  and the fixture, which is now an 18-module seam.
+- **Single inheritance only.** A preset has at most one `extends`. A list of bases raises ordering and
+  conflict questions (whose viewpoint wins, whose duplicate invite) that nobody needs answered yet. The
+  rule today is the plain one: base operations first, the nearest viewpoint wins.
+- **`operations` is optional.** A preset can differ from its base by viewpoint alone ("mid-demo, signed
+  in as someone else"), without restating the script.
+- **Validation runs on the expanded list.** `presetProblems` checks what actually replays, so a duplicate
+  invite split across a base and its child is caught, and a child that overrides a bad viewpoint is not
+  blamed for it. The price is that a base's own problem repeats under each child, and operation numbers
+  count in the expanded list.
+- **A consequence in the showcase.** `multi-tenant` now builds on `mid-demo`, so it also contains
+  Jordan's pending invite, which it did not before. The static-shell spec that proved "loading another
+  preset is a reset underneath" by Jordan's absence now proves it with a hand-made flag flip instead.

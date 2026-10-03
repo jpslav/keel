@@ -289,22 +289,23 @@ The framework never imports your code directly; it imports the registration seam
 a lint fence enforces the direction. Each module there is the app-side half of one capability. The
 "empty" column is what `apps/starter` registers — read it as the off switch for that capability:
 
-| Seam module                                   | You register                                           | Empty looks like              |
-| --------------------------------------------- | ------------------------------------------------------ | ----------------------------- |
-| `abilities.ts`                                | your subject types + authorization rules + staff org   | (starter registers one)       |
-| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001 | (starter registers one)       |
-| `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables               | an empty async body           |
-| `jobs.ts`                                     | your background job kinds + handlers                   | `[] as const`, `{}`           |
-| `digest.ts`                                   | the rows the framework's scheduled digest summarizes   | `async () => []`              |
-| `actors.ts`                                   | your simulated counterparties for dev/demo             | `type ActorId = never`        |
-| `simulator.ts`                                | your extra Simulator tabs, feature flags, demo presets | `flags = []`, `presets = []`  |
-| `tours.ts`                                    | scripted Simulator walkthroughs of your product        | `tours = []` (no Tours tab)   |
-| `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                | `[] as const` / `never`       |
-| `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers              | `{}`                          |
-| `assistant.ts`                                | your LLM tools + system prompt                         | omit the module and its route |
-| `messages.ts`                                 | your i18n namespaces + catalog loader (partitioned)    | (every app registers some)    |
-| `identity.ts`                                 | `APP_SLUG`, re-exported from the app's app config      | (every app registers it)      |
-| `seed.ts`                                     | your seed data re-export                               | (every app registers it)      |
+| Seam module                                   | You register                                            | Empty looks like              |
+| --------------------------------------------- | ------------------------------------------------------- | ----------------------------- |
+| `abilities.ts`                                | your subject types + authorization rules + staff org    | (starter registers one)       |
+| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001  | (starter registers one)       |
+| `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                | an empty async body           |
+| `jobs.ts`                                     | your background job kinds + handlers                    | `[] as const`, `{}`           |
+| `digest.ts`                                   | the rows the framework's scheduled digest summarizes    | `async () => []`              |
+| `actors.ts`                                   | your simulated counterparties for dev/demo              | `type ActorId = never`        |
+| `simulator.ts`                                | your extra Simulator tabs + feature flags               | `flags = []`                  |
+| `presets.ts`                                  | demo presets: named starting worlds every host can load | `presets = []`                |
+| `tours.ts`                                    | scripted Simulator walkthroughs of your product         | `tours = []` (no Tours tab)   |
+| `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                 | `[] as const` / `never`       |
+| `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers               | `{}`                          |
+| `assistant.ts`                                | your LLM tools + system prompt                          | omit the module and its route |
+| `messages.ts`                                 | your i18n namespaces + catalog loader (partitioned)     | (every app registers some)    |
+| `identity.ts`                                 | `APP_SLUG`, re-exported from the app's app config       | (every app registers it)      |
+| `seed.ts`                                     | your seed data re-export                                | (every app registers it)      |
 
 The one place an empty registration is not free: `AppSubjectFields` in `abilities.ts` must be an
 `interface` (the framework's `AbilitySubject` extends it), and an app with no extra subject fields

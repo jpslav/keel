@@ -4,7 +4,8 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 // The server replay of a demo preset, against keel's OWN seam: the fixture registers `busy-harbor`
-// (packages/keel/test-fixture/app-config/simulator.ts), one operation of every kind plus a viewpoint.
+// (packages/keel/test-fixture/app-config/presets.ts), one operation of every kind plus a viewpoint, and
+// `busy-harbor-lead`, which extends it with no operations of its own and a different viewpoint.
 // Same throwaway-dir + mocked-cookie-jar setup as fake/auth.test.ts (the viewpoint is a cookie), and
 // next-intl's server translator is stubbed: the invite email's copy is not what is under test here. The
 // adapter registry is `server-only`, so it is replaced by the simulated-mode registry it would build —
@@ -76,6 +77,26 @@ describe('applyDemoPreset (server host)', () => {
         // viewpoint: THIS browser now sits at fixture-hand's desk
         expect((await fakeAuth.getCurrentUser())?.id).toBe('fixture-hand')
         expect(await readViewpointCookie()).toBe('person:fixture-hand')
+    })
+
+    test('a preset that extends another replays the base first, then sits the restorer down at its own viewpoint', async () => {
+        const { applyDemoPreset } = await import('./demo-presets')
+        const { fakeAuth } = await import('../adapters/fake/auth')
+        const { listCaughtEmails } = await import('../adapters/fake/email')
+        const { readFlags, setFlag } = await import('../adapters/fake/analytics')
+
+        setFlag('jobs-held', false) // so the flag below can only be the inherited operation's doing
+        const result = await applyDemoPreset('busy-harbor-lead', { baseUrl: BASE_URL })
+
+        expect(result).toEqual({ signedIn: true })
+        // everything busy-harbor does, inherited: the invite and its email, the docket, the flag...
+        const depot = await fakeAuth.listMembers('depot')
+        expect(depot.filter((member) => member.status === 'invited').map((member) => member.email)).toEqual([INVITEE])
+        expect(listCaughtEmails().filter((mail) => mail.to === INVITEE)).toHaveLength(1)
+        expect(await depotDocketLabels()).toContain('Crane four is stuck')
+        expect(readFlags()['jobs-held']).toBe(true)
+        // ...and the viewpoint is the child's own, not the base's `fixture-hand`
+        expect((await fakeAuth.getCurrentUser())?.id).toBe('fixture-lead')
     })
 
     test('replaying is idempotent: the reset underneath means a second load is the same world, not twice it', async () => {

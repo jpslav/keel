@@ -42,7 +42,7 @@ const INBOUND_BODY =
  *  the correct outcome — the narration says NW-1042 out loud. */
 const NEW_TICKET_REF = 'NW-1042'
 
-/** The teammate the `mid-demo` preset invites (src/app-config/simulator.ts). Simulated data, like the
+/** The teammate the `mid-demo` preset invites (src/app-config/presets/mid-demo.ts). Simulated data, like the
  *  ticket subjects above: the tour types their name and then looks for it. */
 const INVITEE_NAME = 'Jordan Ellis'
 

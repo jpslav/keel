@@ -1,5 +1,5 @@
 import { findOrg, findTenant, type SeedPerson } from '@app-config/seed'
-import { presets } from '@app-config/simulator'
+import { presets } from '@app-config/presets'
 import { Badge, Group } from '@mantine/core'
 import { useTranslations } from 'next-intl'
 import type { ReactNode } from 'react'

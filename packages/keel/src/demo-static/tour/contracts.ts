@@ -79,7 +79,7 @@ export interface TourDefinition {
     summaryKey: string
     /**
      * The world state this tour assumes, restored before step 1. `'reset'` (the seeded world) and the id
-     * of any registered demo preset (`@app-config/simulator` `presets`, keel/core/presets.ts) work on
+     * of any registered demo preset (`@app-config/presets`, keel/core/presets.ts) work on
      * EVERY host; a saved snapshot name works only on a server host, and the `file://` walkthrough gate
      * records it as a miss. Omit for a tour that runs from wherever the viewer happens to be.
      */

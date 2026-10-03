@@ -333,9 +333,10 @@ server through the same code the product runs (`keel/server-lib/demo-presets.ts`
 its in-memory world, one step per commit so each step sees the world its predecessor left. So a preset
 works in `dist-demo/index.html`, and a tour may start from one on every host; `'reset'` → preset →
 saved snapshot is the one resolution order (`resolveWorldStart`), and saving a snapshot under a reserved
-name is refused so it can never mean two worlds. Preset content is app vocabulary, registered on
-`@app-config/simulator` beside the flags, and every registered preset is held at build time to what the
-product itself would allow (`presetProblems`, run as seam conformance under every app) — a preset is a
+name is refused so it can never mean two worlds. Preset content is app vocabulary, registered on its
+own seam module, `@app-config/presets` (one file per preset; a preset may `extends` one other, single
+inheritance), and every registered preset is held at build time to what the product itself would allow
+(`presetProblems`, run as seam conformance under every app) — a preset is a
 shortcut to a world someone could have clicked together, never a back door into one they could not. The
 viewpoint rides along as **who the restorer sits down as**, not as captured state: it is a per-browser
 cookie and the world is shared, so loading a preset signs in only the browser that loaded it.
