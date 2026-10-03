@@ -35,7 +35,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   and the root `tsconfig.json`. It sat outside the fence once, which made it the one directory in
   `packages/keel` where importing an app's `@/*` or `@app/seed` was legal; a location is not a
   boundary. It is a conforming 17-module registration with its own seed
-  world, table + migration, job/webhook/notification kinds, inbound handler, catalog and route tree,
+  world, table + its migrations, job/webhook/notification kinds, inbound handler, catalog and route tree,
   and the ROOT `tsconfig.json` resolves `@app-config/*` there. Its vocabulary
   (`harbor`/`lakeside`, `depot`/`annex`/`steward`/`wharf`, `fixture-*`, `dockets`) is deliberately
   neither app's: **never reach for an app's slugs, tables or job kinds in a `packages/keel` test** —
@@ -70,13 +70,15 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `pnpm exec playwright install chromium`.
 - `pnpm verify` does NOT run `test:contract`, jscpd, coverage, or gitleaks — CI runs those
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
-  same RLS proofs on real Postgres); after renumbering/renaming a migration, wipe local `.data` first.
+  same RLS proofs on real Postgres, for the contract app AND keel's fixture seam, each in its own
+  database); after renumbering/renaming a migration, wipe local `.data` first.
   **Also wipe `apps/*/.data` after changing `packages/seed`** — the app seeder is guarded by "does this
   world have any rows yet", so new seed rows are invisible on an existing world and only CI sees them.
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The
   primitive opens `withTenant` itself and re-runs your whole scoped query on every page, so page two
   cannot be scoped differently from page one; the cursor is client input, parsed by a total function
-  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Worked example:
+  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Its optional
+  `orderBy` column is fixed per route (a cursor names no column), never client-chosen. Worked example:
   `apps/showcase/src/domain/db/tickets.ts` + `apps/showcase/src/app/api/tickets/route.ts`, with the
   index in `apps/showcase/src/app-config/db/migrations/1004_tickets_keyset_index.ts` and proofs in both
   RLS suites.

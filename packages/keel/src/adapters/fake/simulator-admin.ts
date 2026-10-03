@@ -8,8 +8,8 @@ import { closeFakeDb } from './db'
 /**
  * Snapshots: world reset + named snapshots (simulated-mode-only, NOT a port). Every fake adapter already
  * writes its state to a flat-file directory under `.data/` — auth (sessions' signing secret,
- * profile overrides, invites, the dynamic-person overlay), emails, analytics, pglite, storage,
- * and Simulator's own continuity state — so the simulated world's state IS the filesystem, and
+ * profile overrides, invites, the dynamic-person overlay), emails, caught LLM requests, analytics,
+ * pglite, storage, and Simulator's own continuity state — so the simulated world's state IS the filesystem, and
  * "reset" / "save a snapshot" / "restore a snapshot" are directory operations, not application
  * logic: `rmSync`/`cpSync` over those directories. `.data/snapshots/<name>/` holds one directory copy
  * per snapshot; `.data/snapshots/` itself is never touched by reset because it isn't a LIVE_DIR.
@@ -22,7 +22,7 @@ import { closeFakeDb } from './db'
  * production concern.
  */
 
-const LIVE_DIRS = ['auth', 'emails', 'analytics', 'pglite', 'storage', 'simulator', 'webhooks', 'sms']
+const LIVE_DIRS = ['auth', 'emails', 'llm-requests', 'analytics', 'pglite', 'storage', 'simulator', 'webhooks', 'sms']
 const SNAPSHOT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/
 const DEV_SECRET_FILE = 'dev-secret'
 
