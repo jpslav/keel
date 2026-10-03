@@ -307,7 +307,8 @@ it can act on its own.
 
 **Tours: the world's narrative, next to the world's state ✅.** A snapshot snapshots what the world IS; a
 **tour** is its temporal sibling — a scripted walkthrough that drives the running app for a watcher, with
-narration, starting from a snapshot it declares. The engine is the framework's
+narration, starting from a world it declares (`'reset'`, a demo preset, or — on a server only — a saved
+snapshot). The engine is the framework's
 (`packages/keel/src/demo-static/tour/`): a ghost cursor that glides to real elements, fires real clicks,
 types character by character, and drives Simulator itself through the panel's own controls; the Tours tab
 sits beside Snapshots and disappears entirely for an app that registers none. Each tour is APP content on the

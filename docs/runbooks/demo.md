@@ -139,7 +139,8 @@ how they hear about it.
 **A ticket, end to end** restores the seeded world and then drives sections 2 to 5 with a ghost cursor:
 it opens the panel, signs in as Dana from the People, types the customer's email into the inbound composer,
 hands the resulting ticket to Sam, holds the world's jobs, sends the bundle to the analyzer, registers a
-webhook on the Platform Team, accepts the escalation, and opens the signed delivery.
+webhook on the Platform Team, accepts the escalation, and opens the signed delivery. A second tour,
+**Joining the desk, from a preset** (§8), starts from the Mid-demo preset instead of the seed.
 
 Use it when you cannot be in the room, or as a preview: **Fast** collapses the reading pauses. Pressing
 Next is what submits anything, so you can stop on any step and poke at the product; wander off the story
@@ -158,7 +159,7 @@ everything back — including the seeded queue, which comes back exactly as it s
 starting point, and signs you in as the right person. **Fresh desk** is the seed with Dana already
 signed in; **Mid-demo** adds two new tickets and a teammate (Jordan) whose invite is waiting unread —
 the second tour, **Joining the desk, from a preset**, walks that invite to the end; **Both sites busy**
-gives Pinebrook a queue of its own, a refused email from a restricted member, and late-ticket
+adds Northwind tickets and a pending Platform invite, and gives Pinebrook a queue of its own, a refused email from a restricted member, and late-ticket
 highlighting on, signed in at Pinebrook. Presets are scripts, not saved files, so they work identically
 in `dist-demo/index.html`. Loading one signs in only YOUR browser; anyone else watching the same server
 keeps who they were.
