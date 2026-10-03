@@ -10,7 +10,7 @@ inside an iframe the host page has embedded.
 
 **Need:** a derived app that embeds something in an iframe — most obviously a code editor or another
 third-party widget that only ships as an embeddable frame — and wants a tour to walk through using
-it needs the driver able to target elements inside a *same-origin* iframe (cross-origin is a real
+it needs the driver able to target elements inside a _same-origin_ iframe (cross-origin is a real
 browser restriction with no general fix; same-origin is not), at minimum via an explicit selector
 form that names the frame (e.g. `{ frame: string; selector: string }`, resolved through
 `iframe.contentDocument`).

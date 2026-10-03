@@ -23,7 +23,7 @@ mount condition for something that is supposed to keep running in the background
 
 Separately — and this is a real design decision, not a small addition — a derived app whose actors
 model independent external systems (counterparties that poll or claim work and deliver results on
-their own schedule, not a schedule tied to *any* page being open) would need an actor able to run
+their own schedule, not a schedule tied to _any_ page being open) would need an actor able to run
 with no page open at all, and such actors instanceable per organization: one running instance per
 external-system/org pairing, each with its own loop.
 
@@ -38,11 +38,11 @@ is at most a server-host-only capability, and adopting it is a doctrine change
 (`development-approach.md`'s own framing would need an ADR addendum), not an extension of the
 current design.
 
-It's also worth separating two things that sound alike: per-organization actor *registration*
+It's also worth separating two things that sound alike: per-organization actor _registration_
 already exists — an app can register one actor per org today in `@app-config/actors`
 (`apps/showcase/src/app-config/actors.ts` splits its two actors' job pools by org by exactly this
 convention). What doesn't exist is registering (or instancing) an actor for an organization created
-at *runtime*, after the app's config was written — that's the part a static per-org registry can't
+at _runtime_, after the app's config was written — that's the part a static per-org registry can't
 cover, and the part a dynamic/server-side model would actually need to add.
 
 The driver/tick split in `actor-runtime.ts` already keeps the tick logic transport- and UI-agnostic,

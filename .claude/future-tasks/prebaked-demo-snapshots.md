@@ -53,7 +53,7 @@ causes: "`'reset'` is the snapshot every host has... a server host may also rest
 (`packages/keel/src/demo-static/tour/use-tours.tsx`) — a static/served demo host has no `onSnapshot`
 that can do anything with a named snapshot at all. But the reason isn't only missing wiring: a saved
 snapshot is a directory copy that includes pglite's own binary state (see "Watch out" above), and
-there is no server process on a `file://` static host to restore a binary directory *into* — a static
+there is no server process on a `file://` static host to restore a binary directory _into_ — a static
 host has nothing `cpSync` could target. So a snapshot that works on every host can't be today's
 `.data/` copy exposed more widely; it needs a declarative representation instead — a seed plus a
 scripted sequence of operations each host can replay in its own way (the static shell driving its

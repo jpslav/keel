@@ -6,7 +6,7 @@ The `Person` row type in `packages/keel/src/components/simulator/people-app.tsx`
 `tenantSlug` but nothing naming an organization/team, so a row's only group-identity cue is the
 tenant it shares with every other row. `docs/adr/0004-tenancy-rls.md` ("Organizations ('teams') are
 an app-level filter, not a second RLS GUC") describes organizations as a first-class app-level
-structure *inside* a tenant — so a derived app that is single-tenant with teams has people whose
+structure _inside_ a tenant — so a derived app that is single-tenant with teams has people whose
 meaningful group identity is their org(s), and the People tab shows every one of them the same
 tenant slug with no way to tell who is on which team.
 
@@ -19,7 +19,7 @@ membership's role; every other organization they belong to, and the fact they be
 is invisible, not merely unlabeled.
 
 **Need:** the People tab, and the `Person` shape it renders, should be able to show each of a
-person's organization(s) and their role *within* each — at minimum as an optional field
+person's organization(s) and their role _within_ each — at minimum as an optional field
 (`orgs: { slug: string; role: string }[]`, mirroring `SeedMembership`'s own `{ orgSlug, role }` shape
 in `packages/keel/src/seed/contracts.ts`) that an app can populate, rendered as one chip per
 membership alongside the existing tenant chip, following the same seam pattern `tenantSlug` already
