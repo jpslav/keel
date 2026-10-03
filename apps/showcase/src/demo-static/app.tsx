@@ -33,9 +33,11 @@ import { TicketsCard, type TicketItem } from '../components/tickets-card'
 import { WelcomeScreen } from '../components/welcome-screen'
 import { staffOrgSlug } from '../app-config/abilities'
 import { actors, analyzerOrgSlug } from '../app-config/actors'
+import { ticketAssignStatic } from '../app-config/presets/operations/ticket-assign/static'
 import { actorsHeldFlag, tabs as appSimulatorTabs } from '../app-config/simulator'
 import { type EscalationStatus, escalationMachine } from '../domain/escalations'
-import { TICKET_PAGE_SIZE, nextTicketRef, type TicketStatus, ticketMachine } from '../domain/tickets'
+import { TICKET_PAGE_SIZE, nextTicketRef, type TicketStatus } from '../domain/tickets'
+import { applyDemoTicketChanges, type DemoTicket } from './ticket-changes'
 
 /**
  * The static demo's COMPOSITION ROOT — the `file://` twin of the server-side glue, and the same job:
@@ -51,21 +53,6 @@ import { TICKET_PAGE_SIZE, nextTicketRef, type TicketStatus, ticketMachine } fro
  * No logic worth unit-testing lives in this file; the parity that matters is that the cards below are
  * gated by the SAME pure ability model and driven through the SAME state machines the real routes use.
  */
-
-/** In-memory twin of a tickets row — tenant+org scoped, so the static dashboard shows only the active
- *  team's queue (no cross-tenant leakage) and can gate create/update/delete by the same pure ability
- *  model the real server runs. Tickets are just rows, so this is genuine parity, not a degrade. */
-interface DemoTicket {
-    id: string
-    tenantSlug: string
-    orgSlug: string
-    ref: string
-    subject: string
-    body: string
-    status: TicketStatus
-    assigneeUserId: string | null
-    createdAt: string
-}
 
 /** In-memory twin of an escalations row. An escalation is TWO-SIDED — it names a raising desk and a
  *  receiving team, both within one tenant — so the static dashboard can show the same row to both
@@ -245,11 +232,16 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
                 ...prev,
             ])
             recordAudit({ action: 'ticket.created', subjectType: 'Ticket', subjectId: id, actorUserId: sender.id })
-            return { status: 'handled', actorUserId: sender.id }
+            return { status: 'handled', actorUserId: sender.id, subjectId: id }
         }
 
     const world = useDemoWorld({
         inboundHandlers: { support: ticketFromEmail('open'), feedback: ticketFromEmail('resolved') },
+        // Static halves of the app's demo-preset operation kinds — the twins of the server halves on
+        // @app-config/preset-operations. Built from THIS render's rows, like the inbound twins above.
+        presetOperations: {
+            'ticket.assign': ticketAssignStatic({ tickets: demoTickets, setTickets: setDemoTickets }),
+        },
         // The same opening outbox the server seeder sends through the email port, so the `file://`
         // demo starts with the same badge on the Simulator pill.
         initialMail: seedMail.map((message) => ({
@@ -497,44 +489,23 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
                         world.logAudit('ticket.created', 'Ticket', id)
                     }}
                     onUpdate={async (id, changes) => {
-                        const target = demoTickets.find((t) => t.id === id)
-                        if (!target) return
-                        // Same state-machine guard as updateTicket — an illegal hop is a refused no-op,
-                        // and the audit trail must say only what actually happened (the server 409s).
-                        if (changes.status && !ticketMachine.canTransition(target.status, changes.status)) return
-                        setDemoTickets((prev) =>
-                            prev.map((t) =>
-                                t.id === id
-                                    ? {
-                                          ...t,
-                                          status: changes.status ?? t.status,
-                                          assigneeUserId:
-                                              changes.assigneeUserId !== undefined
-                                                  ? changes.assigneeUserId
-                                                  : t.assigneeUserId,
-                                      }
-                                    : t,
-                            ),
+                        // The twin of PATCH /api/tickets/[id] → applyTicketChanges: the SAME edit the
+                        // `ticket.assign` preset step makes, by the signed-in person in the active team.
+                        applyDemoTicketChanges(
+                            demoTickets,
+                            {
+                                ticketId: id,
+                                orgSlug: activeOrgSlug,
+                                changes,
+                                actor: { id: person.id, name: world.name },
+                            },
+                            {
+                                setTickets: setDemoTickets,
+                                recordAudit: (entry) =>
+                                    world.logAudit(entry.action, entry.subjectType, entry.subjectId),
+                                notifyMemberOf: world.notifyMemberOf,
+                            },
                         )
-                        const reassigned =
-                            changes.assigneeUserId !== undefined && changes.assigneeUserId !== target.assigneeUserId
-                        world.logAudit(reassigned ? 'ticket.assigned' : 'ticket.updated', 'Ticket', id)
-                        // Being handed a ticket notifies the ASSIGNEE, not the team's admins — the same
-                        // recipient decision the server route makes, and self-assignment notifies nobody.
-                        if (reassigned && changes.assigneeUserId) {
-                            world.notifyMemberOf(
-                                activeOrgSlug,
-                                changes.assigneeUserId,
-                                'ticket.assigned',
-                                {
-                                    ticketId: id,
-                                    ref: target.ref,
-                                    subject: target.subject,
-                                    assignedByName: world.name,
-                                },
-                                person.id,
-                            )
-                        }
                     }}
                     onDelete={async (id) => {
                         setDemoTickets((prev) => prev.filter((t) => t.id !== id))

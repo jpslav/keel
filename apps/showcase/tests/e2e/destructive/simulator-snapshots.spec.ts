@@ -120,6 +120,10 @@ test('presets: loading one replays it on the server, signs this browser in, and 
     await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye', { timeout: 20_000 })
     await expect(page.getByTestId('tickets-list')).toContainText('Refund stuck in pending for three days')
     await expect(page.getByTestId('tickets-list')).toContainText('Checkout times out for shoppers in the EU')
+    // The app's own operation kind, `ticket.assign`: its server half ran the same applyTicketChanges the
+    // PATCH route runs, on the ticket the refund email opened (named `refund` in the script).
+    const refund = page.getByTestId('ticket-item').filter({ hasText: 'Refund stuck in pending for three days' })
+    await expect(refund.getByTestId(/^ticket-assignee-/)).toHaveValue('Sam Rivera')
 
     await ensurePanelOpen(page)
     await page.getByTestId('simulator-tab-people').click()

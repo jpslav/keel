@@ -34,14 +34,14 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   explicitly — the ESLint fence and the ports/hermetic bans, `.jscpd.json`, `knip.json`'s `project`,
   and the root `tsconfig.json`. It sat outside the fence once, which made it the one directory in
   `packages/keel` where importing an app's `@/*` or `@app/seed` was legal; a location is not a
-  boundary. It is a conforming 18-module registration with its own seed
+  boundary. It is a conforming 19-module registration with its own seed
   world, table + migration, job/webhook/notification kinds, inbound handler, catalog and route tree,
   and the ROOT `tsconfig.json` resolves `@app-config/*` there. Its vocabulary
   (`harbor`/`lakeside`, `depot`/`annex`/`steward`/`wharf`, `fixture-*`, `dockets`) is deliberately
   neither app's: **never reach for an app's slugs, tables or job kinds in a `packages/keel` test** —
   that regression is what the odd vocabulary exists to make obvious, and it is what used to leave
   `pnpm init-app --eject-showcase` with a red gate.
-- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 129 published subpaths
+- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 130 published subpaths
   (its `exports` keys minus `.` and `./package.json`; count it, never remember it);
   the rest of the package is internal and reachable only by relative import inside it. Lint-enforced
   (`keel/public-surface`, which reads that map, so the map is the only list). Adding a module does NOT
@@ -145,7 +145,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   grep for survivors and check each one against that list.
 - Commands: `/verify`, `/new-port`, `/new-slice`, `/record-fixtures`, `/pre-pr`, `/branch-review`,
   `/sub-review`, `/repo-health`, `/a11y-review`, `/design-review`; capability scaffolds `/new-entity`,
-  `/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`.
+  `/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`,
+  `/new-preset-operation`.
 - Record important lessons in `docs/build-notes.md`; unplanned decisions in `docs/decision-log.md`;
   designed-but-unbuilt work in `.claude/future-tasks/` (one file per item, listed in its `index.md`).
   Amend an ADR by appending a dated addendum — never by editing what its body said.

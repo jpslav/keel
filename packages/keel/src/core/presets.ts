@@ -1,4 +1,7 @@
-import { canManageOrg, isRole, ORG_ASSIGNABLE_ROLES, type Role } from './roles'
+import type { AppPresetOperation } from '@app-config/presets'
+import * as v from 'valibot'
+import { canManageOrg, isRole, ORG_ASSIGNABLE_ROLES, ROLES, type Role } from './roles'
+import type { StandardSchemaV1, StandardSchemaV1Issue } from './standard-schema'
 
 /**
  * DEMO PRESETS — named starting points for the simulated world that EVERY host can restore.
@@ -21,19 +24,67 @@ import { canManageOrg, isRole, ORG_ASSIGNABLE_ROLES, type Role } from './roles'
  * below holds each one to the same rules the product enforces (an invite comes from someone who may
  * invite, into a role that may be granted). A preset can therefore only describe a world someone could
  * have clicked together; it is a shortcut to that world, never a back door into a different one.
+ *
+ * **The operation KINDS are a registry, not a closed list.** keel contributes `invite`, `inbound` and
+ * `flag` (`frameworkPresetOperations` below); an app contributes its own on the same seam module
+ * (`appPresetOperations`, typed by its `AppPresetOperation` union), and an app entry with keel's kind name
+ * REPLACES keel's (`composePresetOperations`). Each kind is three parts that never share a module: this
+ * pure DEFINITION (the argument schema, the product rules, the named results it consumes), a SERVER half
+ * (keel/server-lib/preset-operations.ts, the app's `@app-config/preset-operations`), and a STATIC half
+ * (keel/demo-static/world.ts, the app's `DemoWorldOptions.presetOperations`). The split is physical: the
+ * server half reaches pglite and `server-only` modules, and the static demo is one browser bundle that
+ * would fail to load with either inside it.
+ *
+ * **Named results.** An operation may say `as: 'refund'`; the id of the thing it created is then bound to
+ * that name for the rest of the replay, and a later operation names it in an argument its kind
+ * `consumes`. Each host keeps its own name → id map (a real uuid on the server, the twin's id in the
+ * static world), so a script can say "assign THAT ticket" without either host's ids leaking into it.
  */
 
-/** One step of a preset's script. Objects, not tuples (contrast tour actions): an operation carries
- *  four or five named fields, and a positional list of strings would make `from` and `org` easy to swap. */
-export type PresetOperation =
-    /** `by` (a seed person who manages `org`) invites `email` into `org` as `role` — the invite, its
-     *  email in the invitee's inbox, the audit row and the admins' notification, as the org screen does. */
-    | { op: 'invite'; by: string; org: string; email: string; role: Role }
-    /** The world emails `<org>+<handler>@…` — the Simulator's compose-inbound, through the same intake
-     *  and the same registered handler a real message would reach. */
-    | { op: 'inbound'; org: string; handler: string; from: string; subject: string; body: string }
-    /** A Snapshots-tab feature flag, framework (`demo-banner`, `jobs-held`) or app-registered. */
-    | { op: 'flag'; flag: string; enabled: boolean }
+/**
+ * One step of a preset's script, as written: `op` names the kind, `as` optionally names its result for
+ * later steps, and every other field is the kind's argument object. Objects, not tuples (contrast tour
+ * actions): an operation carries four or five named fields, and a positional list of strings would make
+ * `from` and `org` easy to swap. An app spells its kinds with this too:
+ * `export type AppPresetOperation = PresetOperationOf<'ticket.assign', TicketAssignArgs>`.
+ */
+export type PresetOperationOf<Kind extends string, Args> = { op: Kind; as?: string } & Args
+
+/** `by` (a seed person who manages `org`) invites `email` into `org` as `role` — the invite, its email in
+ *  the invitee's inbox, the audit row and the admins' notification, as the org screen does. `role` is any
+ *  role, so a preset CAN ask for one no invite may grant; `presetProblems` is what says no. */
+export interface InviteArgs {
+    by: string
+    org: string
+    email: string
+    role: Role
+}
+
+/** The world emails `<org>+<handler>@…` — the Simulator's compose-inbound, through the same intake and
+ *  the same registered handler a real message would reach. With `as`, names the row the handler opened. */
+export interface InboundArgs {
+    org: string
+    handler: string
+    from: string
+    subject: string
+    body: string
+}
+
+/** A Snapshots-tab feature flag, framework (`demo-banner`, `jobs-held`) or app-registered. */
+export interface FlagArgs {
+    flag: string
+    enabled: boolean
+}
+
+/** keel's own operation kinds, as preset authors write them. */
+export type FrameworkPresetOperation =
+    | PresetOperationOf<'invite', InviteArgs>
+    | PresetOperationOf<'inbound', InboundArgs>
+    | PresetOperationOf<'flag', FlagArgs>
+
+/** Every operation a preset may contain: keel's kinds plus the app's, composed like job kinds (ADR-0012).
+ *  The app half is a TYPE on its seam module, `never` when it registers none. */
+export type PresetOperation = FrameworkPresetOperation | AppPresetOperation
 
 /** A registered preset — what the Snapshots tab lists, and what a tour may name as its `snapshot`. */
 export interface DemoPreset {
@@ -146,7 +197,14 @@ export function expandPreset(id: string, presets: readonly DemoPreset[]): Expand
 
 /** The world a preset is checked against — derived from the seed and the registries, never hand-listed. */
 export interface PresetWorld {
-    people: { id: string; email: string; memberships: { orgSlug: string; role: string }[] }[]
+    people: {
+        id: string
+        email: string
+        memberships: { orgSlug: string; role: string }[]
+        /** The seed person's limited-access flag — what the ability model reads, so an app kind's check
+         *  can ask the same question its route's `authorize` would. */
+        restricted: boolean
+    }[]
     orgSlugs: string[]
     /** Registered inbound-email handler slugs. */
     handlers: string[]
@@ -154,13 +212,127 @@ export interface PresetWorld {
     flags: string[]
 }
 
+/**
+ * One operation KIND: what its arguments look like, what the product would refuse, and which named
+ * results it reads. Pure — imported by both hosts' conformance checks and bundled into the static demo —
+ * so it never holds the kind's behaviour; that is the server and static halves (see the module comment).
+ *
+ * `check` and `consumes` are METHOD signatures on purpose: method parameters are compared bivariantly, so
+ * a definition typed for its own arguments still fits a `PresetOperationDefinition[]` registry.
+ */
+export interface PresetOperationDefinition<Kind extends string = string, Args = unknown> {
+    kind: Kind
+    /** Shape of the operation's arguments (everything except `op` and `as`). Any Standard Schema library;
+     *  it must validate SYNCHRONOUSLY, because presetProblems is synchronous. */
+    args: StandardSchemaV1<unknown, Args>
+    /**
+     * Rules a shape cannot express (the inviter manages the team, the sender is a seed person), as
+     * sentences without the "preset … operation N" prefix. Pure. Runs only once the arguments pass the
+     * schema. `earlier` is the script's earlier operations whose arguments passed theirs — what a rule
+     * that spans steps needs (an address invited twice is a duplicate, whichever step did it first).
+     */
+    check?(args: Args, world: PresetWorld, earlier: readonly PresetOperation[]): string[]
+    /** Named results this operation CONSUMES — the names it reads from earlier operations' `as`. */
+    consumes?(args: Args): string[]
+}
+
 const EMAIL_SHAPE = /.+@.+\..+/
+
+const inviteOperation: PresetOperationDefinition<'invite', InviteArgs> = {
+    kind: 'invite',
+    args: v.object({ by: v.string(), org: v.string(), email: v.string(), role: v.picklist(ROLES) }),
+    check(args, world, earlier) {
+        const problems: string[] = []
+        if (!world.orgSlugs.includes(args.org)) problems.push(`unknown org "${args.org}"`)
+        const inviter = world.people.find((person) => person.id === args.by)
+        const membership = inviter?.memberships.find((m) => m.orgSlug === args.org)
+        if (!inviter) problems.push(`inviter "${args.by}" is not a seed person`)
+        else if (!membership || !isRole(membership.role) || !canManageOrg(membership.role)) {
+            problems.push(`"${args.by}" may not invite into "${args.org}"`)
+        }
+        // Grantable-by-invite is a product RULE, not the shape: the schema accepts any role, so a preset
+        // asking for `admin` gets the org screen's own sentence back rather than a type error.
+        if (!ORG_ASSIGNABLE_ROLES.includes(args.role)) problems.push(`role "${args.role}" cannot be granted by invite`)
+        const address = args.email.toLowerCase()
+        if (!EMAIL_SHAPE.test(address)) problems.push(`"${args.email}" is not an email address`)
+        // Inviting the same address twice is the duplicate the org screen refuses with a 409, whichever
+        // step in the expanded script did the first. `earlier` passed its schemas, but an app may have
+        // replaced `invite` with a differently-shaped kind, hence the typeof.
+        const invitedEarlier = earlier.some(
+            (operation) =>
+                operation.op === 'invite' &&
+                typeof operation.email === 'string' &&
+                operation.email.toLowerCase() === address,
+        )
+        if (invitedEarlier || world.people.some((person) => person.email.toLowerCase() === address)) {
+            problems.push(`"${args.email}" is already a person or an invite`)
+        }
+        return problems
+    },
+}
+
+const inboundOperation: PresetOperationDefinition<'inbound', InboundArgs> = {
+    kind: 'inbound',
+    args: v.object({ org: v.string(), handler: v.string(), from: v.string(), subject: v.string(), body: v.string() }),
+    check(args, world) {
+        const problems: string[] = []
+        if (!world.orgSlugs.includes(args.org)) problems.push(`unknown org "${args.org}"`)
+        if (!world.handlers.includes(args.handler)) problems.push(`no inbound handler "${args.handler}"`)
+        // A seed person, so a typo cannot quietly turn an intended ticket into an 'unmatched' filing.
+        // Whether that person may author into the team stays the HANDLER's call — a refused email is a
+        // legitimate thing for a preset to show.
+        const sender = args.from.toLowerCase()
+        if (!world.people.some((person) => person.email.toLowerCase() === sender)) {
+            problems.push(`sender "${args.from}" is not a seed person`)
+        }
+        return problems
+    },
+}
+
+const flagOperation: PresetOperationDefinition<'flag', FlagArgs> = {
+    kind: 'flag',
+    args: v.object({ flag: v.string(), enabled: v.boolean() }),
+    check: (args, world) => (world.flags.includes(args.flag) ? [] : [`unknown flag "${args.flag}"`]),
+}
+
+/** keel's own operation kinds. An app may replace any of them by registering a definition of the same
+ *  `kind` in its `appPresetOperations` (`/new-preset-operation --from <kind>` copies one to start from;
+ *  `composePresetOperations([])[kind]` reaches keel's to wrap). */
+const frameworkPresetOperations: readonly PresetOperationDefinition[] = [
+    inviteOperation,
+    inboundOperation,
+    flagOperation,
+]
+
+/**
+ * The operation registry a preset is checked against: keel's kinds, then the app's, keyed by kind — so an
+ * app definition with keel's kind name REPLACES keel's, the same `{ ...framework, ...app }` composition
+ * every other registry on the seam uses.
+ */
+export function composePresetOperations(
+    appDefinitions: readonly PresetOperationDefinition[],
+): Readonly<Record<string, PresetOperationDefinition>> {
+    const composed: Record<string, PresetOperationDefinition> = {}
+    for (const definition of [...frameworkPresetOperations, ...appDefinitions]) composed[definition.kind] = definition
+    return composed
+}
+
+/** "email" for a top-level key, "items.0.name" for a nested one, "" for the value itself. */
+function issuePath(issue: StandardSchemaV1Issue): string {
+    return (issue.path ?? []).map((segment) => String(typeof segment === 'object' ? segment.key : segment)).join('.')
+}
 
 /**
  * Everything wrong with a preset list, as readable sentences (empty = valid). A preset that replays on
  * one host and silently does nothing on the other is the failure this exists to stop, so the checks
  * mirror what each operation's server path would refuse — run in every app's seam-conformance suite,
  * not at replay time, so a broken preset fails the build rather than a demo.
+ *
+ * `definitions` is the composed registry (`composePresetOperations(appPresetOperations)`). Each
+ * operation is held, in order, to: a registered kind (`no operation kind "X"`); its kind's argument
+ * schema, one sentence per issue naming the path; then its kind's `check`. Named results are checked
+ * across the script: an `as` names one operation only, and every name a kind `consumes` must be bound by
+ * an EARLIER operation's `as` — replay is in order, so a name bound later is as missing as one never bound.
  *
  * Operations and the viewpoint are checked on the EXPANDED preset (`expandPreset`): what actually
  * replays, so a duplicate invite split across a base and its child is caught, and a child that
@@ -170,10 +342,13 @@ const EMAIL_SHAPE = /.+@.+\..+/
  * preset that is IN it (a preset merely leading into one is not), and an unknown base on the preset that
  * names it; either way the operations reachable before the chain broke are still checked.
  */
-export function presetProblems(presets: readonly DemoPreset[], world: PresetWorld): string[] {
+export function presetProblems(
+    presets: readonly DemoPreset[],
+    world: PresetWorld,
+    definitions: Readonly<Record<string, PresetOperationDefinition>>,
+): string[] {
     const problems: string[] = []
     const seen = new Set<string>()
-    const emails = new Set(world.people.map((person) => person.email.toLowerCase()))
 
     for (const preset of presets) {
         const where = `preset "${preset.id}"`
@@ -191,45 +366,55 @@ export function presetProblems(presets: readonly DemoPreset[], world: PresetWorl
             problems.push(`${where}: viewpoint "${viewpoint}" is not a seed person`)
         }
 
-        // Invites accumulate across the whole expanded script: inviting the same address twice is the
-        // duplicate the org screen refuses with a 409, whichever preset in the chain did the first.
-        const invited = new Set<string>()
+        // Earlier operations whose arguments passed their schema — what a kind's `check` may look back at.
+        const passed: PresetOperation[] = []
+        // Each `as` name → the (1-based) operation that bound it first.
+        const boundAt = new Map<string, number>()
         for (const [index, operation] of operations.entries()) {
-            const at = `${where} operation ${index + 1} (${operation.op})`
-            if (operation.op !== 'flag' && !world.orgSlugs.includes(operation.org)) {
-                problems.push(`${at}: unknown org "${operation.org}"`)
+            const number = index + 1
+            const at = `${where} operation ${number} (${operation.op})`
+            const { op, as, ...args } = operation
+
+            if (as !== undefined) {
+                const first = boundAt.get(as)
+                if (first !== undefined) problems.push(`${at}: "${as}" is already the name of operation ${first}`)
+                else boundAt.set(as, number)
             }
-            if (operation.op === 'invite') {
-                const inviter = world.people.find((person) => person.id === operation.by)
-                const membership = inviter?.memberships.find((m) => m.orgSlug === operation.org)
-                if (!inviter) problems.push(`${at}: inviter "${operation.by}" is not a seed person`)
-                else if (!membership || !isRole(membership.role) || !canManageOrg(membership.role)) {
-                    problems.push(`${at}: "${operation.by}" may not invite into "${operation.org}"`)
-                }
-                if (!ORG_ASSIGNABLE_ROLES.includes(operation.role)) {
-                    problems.push(`${at}: role "${operation.role}" cannot be granted by invite`)
-                }
-                const address = operation.email.toLowerCase()
-                if (!EMAIL_SHAPE.test(address)) problems.push(`${at}: "${operation.email}" is not an email address`)
-                if (emails.has(address) || invited.has(address)) {
-                    problems.push(`${at}: "${operation.email}" is already a person or an invite`)
-                }
-                invited.add(address)
+
+            // An own-property lookup, so a kind named like an Object.prototype member is just unknown.
+            const definition = Object.hasOwn(definitions, op) ? definitions[op] : undefined
+            if (!definition) {
+                problems.push(`${at}: no operation kind "${op}"`)
+                continue
             }
-            if (operation.op === 'inbound') {
-                if (!world.handlers.includes(operation.handler)) {
-                    problems.push(`${at}: no inbound handler "${operation.handler}"`)
-                }
-                // A seed person, so a typo cannot quietly turn an intended ticket into an 'unmatched'
-                // filing. Whether that person may author into the team stays the HANDLER's call — a
-                // refused email is a legitimate thing for a preset to show.
-                if (!emails.has(operation.from.toLowerCase())) {
-                    problems.push(`${at}: sender "${operation.from}" is not a seed person`)
-                }
+            const result = definition.args['~standard'].validate(args)
+            if (result instanceof Promise) {
+                problems.push(
+                    `${at}: schema for kind "${op}" validated asynchronously; preset schemas must be synchronous`,
+                )
+                continue
             }
-            if (operation.op === 'flag' && !world.flags.includes(operation.flag)) {
-                problems.push(`${at}: unknown flag "${operation.flag}"`)
+            if (result.issues) {
+                for (const issue of result.issues) {
+                    const path = issuePath(issue)
+                    problems.push(`${at}: ${path ? `${path}: ` : ''}${issue.message}`)
+                }
+                continue
             }
+
+            for (const problem of definition.check?.(result.value, world, passed) ?? [])
+                problems.push(`${at}: ${problem}`)
+            for (const name of definition.consumes?.(result.value) ?? []) {
+                const bound = boundAt.get(name)
+                if (bound !== undefined && bound < number) continue
+                const later = operations.findIndex((candidate, i) => i > index && candidate.as === name)
+                problems.push(
+                    later === -1
+                        ? `${at}: no earlier operation is named "${name}"`
+                        : `${at}: "${name}" is not named until operation ${later + 1}, after this one`,
+                )
+            }
+            passed.push(operation)
         }
     }
     return problems
