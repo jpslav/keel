@@ -1198,3 +1198,23 @@ pass got no exclusion list; prior claims were handed to it as hypotheses to re-d
   "126 published subpaths" figure out of `CLAUDE.md` and fails if it is wrong — and 126 was right in
   all three places it appears. Its complement, "the other 33 modules are internal", was ungated and
   was 34, in three files. A gate on half a derived pair is a gate on half a derived pair.
+
+## Demo presets (2026-10-03, `prebaked-demo-presets`)
+
+- **Replaying a script in a React-state world needs one step per commit.** The static twin's operations
+  read the world through the render's closure: the invite's duplicate check reads `invites`, and the
+  inbound twin reads the member list and the app's ticket list. A loop that calls `resetWorld()` and
+  then every operation in the same handler runs every step against the world as it was BEFORE the
+  reset. Functional `setX(prev => …)` updates queue correctly, but the reads do not. `world.ts` drains a
+  queue instead, one step per zero-delay timer after each commit, which is what the server gets for free
+  by writing to disk between steps. The timer is there for the `set-state-in-effect` rule, and its
+  cleanup makes a reset mid-replay drop the rest of the queue.
+- **A handler that starts a full reload should never resolve.** The server glue's reset fired its
+  fetch and returned, so a tour's `start()` went straight on to show step 1 on a document that was about
+  to be replaced. An e2e that pressed Next promptly lost the press to the reload. Returning a promise
+  that never settles on success, and settles `false` on refusal, is the honest type. Found by walking the
+  whole preset tour on the server host, which CI does not do; CI walks tours only from `file://`.
+- **The duplicate check is the caller's, not the shared invite core's.** `sendOrgInvite` and the
+  twin's `inviteInto` both start AFTER "may this happen". The org route answers 409, the twin sets its
+  form error, and a preset is held to "no duplicates" at build time. Pushing the check into the shared
+  core would have forced one error contract onto three callers that each want a different one.

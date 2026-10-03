@@ -314,3 +314,16 @@ pnpm verify` exits 0 end to end.
   cannot tell you the framework still works without it.
 - Deferred deliberately: self-fetching tab components promoted into the framework (they would force the
   static twin to fake `fetch`), and per-capability package splits (a publish-time question, ADR-0013).
+
+## Addendum (2026-10-03): demo presets on the `simulator` seam
+
+`@app-config/simulator` now also exports **`presets`** (`DemoPreset[]`, contract in `keel/core/presets.ts`),
+read as a value by the static world, the Snapshots tab, `saveSnapshot`'s reserved-name check and the server
+replay (`keel/server-lib/demo-presets.ts`). That is no new entry on the enumerated value-import list: it is
+the same module, and the same kind of registration as its flags. The empty form is `presets = []`, which
+renders no presets section. The fixture registers one preset in its own vocabulary, so keel's replay test
+never borrows an app's world. A registered preset is seam-conformance-tested under every app
+(`server-lib/demo-presets-seam.test.ts`) against the seed and registries it will replay into.
+
+The public surface grows by three subpaths, `core/presets`, `server-lib/demo-presets` and `server-lib/invite`,
+to **129**. The internal count is unchanged at 34.

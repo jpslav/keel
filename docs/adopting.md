@@ -229,8 +229,8 @@ want it.
 
 One gate is relaxed on the way out. keel's knip workspace carries `includeEntryExports: true`, which
 means "every symbol keel PUBLISHES must have a consumer" — an invariant the showcase made true by using
-nearly all of it. A one-entity app does not: `apps/starter` imports 30 of keel's 126 published subpaths,
-so the same setting would start demanding you delete the other 96 — capabilities you merely have not
+nearly all of it. A one-entity app does not: `apps/starter` imports 31 of keel's 129 published subpaths,
+so the same setting would start demanding you delete the other 98 — capabilities you merely have not
 reached yet, not dead code. `--eject-showcase` therefore turns it off. knip keeps reporting unused
 files, and the declared `exports` surface goes back to being what it is without a rich consumer: a
 declaration.
@@ -269,7 +269,7 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 ### What you may import from keel
 
-`packages/keel/package.json`'s `exports` map is the contract: it lists the 126 subpaths your app may
+`packages/keel/package.json`'s `exports` map is the contract: it lists the 129 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
 other 34 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
@@ -297,7 +297,7 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 | `jobs.ts`                                     | your background job kinds + handlers                   | `[] as const`, `{}`           |
 | `digest.ts`                                   | the rows the framework's scheduled digest summarizes   | `async () => []`              |
 | `actors.ts`                                   | your simulated counterparties for dev/demo             | `type ActorId = never`        |
-| `simulator.ts`                                | your extra Simulator tabs + feature flags              | `flags = []`                  |
+| `simulator.ts`                                | your extra Simulator tabs, feature flags, demo presets | `flags = []`, `presets = []`  |
 | `tours.ts`                                    | scripted Simulator walkthroughs of your product        | `tours = []` (no Tours tab)   |
 | `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                | `[] as const` / `never`       |
 | `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers              | `{}`                          |

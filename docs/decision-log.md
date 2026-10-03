@@ -1340,3 +1340,51 @@ read that as "keep the fixtures", and built their own world beside the starter's
 - **Actors off the page stay undecided.** Running an actor with no page open contradicts the stated
   "client-side processes, in same-origin iframes" design and can never work on the `file://` host; it
   stays open in `.claude/future-tasks/actors-as-independent-systems.md`.
+
+## Demo presets are declarative, registered beside the flags, and replayed per host (2026-10-03, `prebaked-demo-presets`)
+
+- **No prebaked `.data/` worlds.** The task proposed a `pnpm snapshots:seed` that drove the fake
+  adapters and saved through `saveSnapshot()`. Those copies carry pglite's binary state, so they could
+  only ever restore on a server, and the task's own second half asks for the `file://` demo too. Presets
+  are a seed-relative script instead (`keel/core/presets.ts`), replayed fresh on each load. Nothing
+  binary is generated or committed, and nothing goes stale when a migration changes the database.
+  Directory snapshots stay as the server's "save what I clicked together".
+- **Registered on `@app-config/simulator`, not a new seam module.** Presets are Simulator content,
+  like the flags beside them, and `simulator` is already on ADR-0012's list of value imports. A new
+  module would cost every app and the fixture one more file to say nothing in. The starter registers
+  `presets = []`; the fixture registers one preset in its own vocabulary, because the server replay's
+  test must replay keel's world, not an app's.
+- **Three operations, each naming its actor and team: `invite`, `inbound`, `flag`.** That set
+  covers the task's worlds (a pending invite, unread mail, tenant rows, both tenants busy). App rows
+  come in through inbound email, which the app already registers handlers for on both hosts, so
+  presets need no app-registered operation kinds yet. That stays a possible extension point; nothing
+  needs it today. Operations never mean "whoever is signed in", so a replay is deterministic.
+- **Authorization moves to build time.** A replay has no session. Instead of authorizing at replay
+  time, `presetProblems` holds every registered preset to the product's own rules: the inviter must
+  manage the team, the role must be grantable, no duplicate addresses, and handlers and flags must
+  exist. It runs as a seam-conformance test under every app and the fixture. The server replay throws
+  on anything it cannot perform, rather than skipping it, because getting that far means the gate was
+  bypassed.
+- **The invite flow was extracted, not copied.** Everything after the org route's decision to invite
+  (mint, audit, email, analytics, admins' notification) is now `keel/server-lib/invite.ts`
+  `sendOrgInvite`, shared by the route and the replay. The route keeps authorization, validation and
+  the duplicate check, which genuinely differ by caller.
+- **The viewpoint is who the restorer sits down as, not captured state.** It is a per-browser cookie
+  and the world is shared. A preset may name a seed person, and loading it signs in only the browser
+  that loaded it (cookies on that one response). Other browsers keep their viewpoint. If theirs
+  pointed at a person the reset removed, they land on sign-in, as after any reset. Viewpoint capture
+  for directory snapshots was not added: it would raise the same question with no good answer.
+- **One resolution order for a world-start name: `'reset'` → preset → saved snapshot**
+  (`resolveWorldStart`), used by both hosts' tour starts and by nothing else. Saving a snapshot under
+  `reset` or a preset id is refused, in the UI and with a 403 from `saveSnapshot`, so a tour's
+  `snapshot` can never name two worlds. Restore and delete stay permitted, so a snapshot saved before a
+  preset took its name is not orphaned.
+- **A tour start a host cannot honour is a miss.** `useTours`' `onSnapshot` may now answer `false`.
+  The static shell does that for a saved-snapshot name, so a tour that only works on a server fails the
+  `file://` walkthrough gate, and a unit test in the showcase says so without building a bundle. The
+  server glue's reset/restore/preset handlers answer a promise that settles `false` on refusal and
+  never settles on success, because the page is reloading. This also closed a race that predates
+  presets: step 1 used to render on the doomed document, and a Next pressed there was lost.
+- **A second tour, rather than re-pointing the flagship one.** `invite-from-preset` starts from
+  `mid-demo` and walks the pending invite to a member, so a preset start runs end to end in CI. The
+  ticket tour keeps `'reset'` and its "press Next to become Dana" opening, which is its first lesson.

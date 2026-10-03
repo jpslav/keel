@@ -154,6 +154,15 @@ per-row badges for anything past the desk's 48-hour SLA. It changes the product,
 Also here: **Save a snapshot** before you experiment, and **Reset world** (two-step confirm) to put
 everything back — including the seeded queue, which comes back exactly as it started.
 
+**Start from a preset** is the demo-prep shortcut: one click resets the world, replays a scripted
+starting point, and signs you in as the right person. **Fresh desk** is the seed with Dana already
+signed in; **Mid-demo** adds two new tickets and a teammate (Jordan) whose invite is waiting unread —
+the second tour, **Joining the desk, from a preset**, walks that invite to the end; **Both sites busy**
+gives Pinebrook a queue of its own, a refused email from a restricted member, and late-ticket
+highlighting on, signed in at Pinebrook. Presets are scripts, not saved files, so they work identically
+in `dist-demo/index.html`. Loading one signs in only YOUR browser; anyone else watching the same server
+keeps who they were.
+
 ## Extras worth showing, if there is time
 
 - **Invite someone.** **Team → Invite** `bob@example.com`. The invite email is caught by the fake mail
@@ -204,4 +213,5 @@ What degrades, and only where physics forbid otherwise:
 - **The assistant's composing pass** is replayed locally rather than streamed from a server. It emits
   the same text in chunks, and the tools still run live against the in-memory queue, so the sources
   list is real.
-- **Snapshots is reset-only** — there is nothing to snapshot.
+- **Snapshots is reset-and-presets only** — there is no `.data/` to save a snapshot into, but the demo
+  presets are scripts the in-memory world replays, so they (and the tour that starts from one) work here.
