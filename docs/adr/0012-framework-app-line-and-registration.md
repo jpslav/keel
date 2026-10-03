@@ -410,3 +410,17 @@ starter gained `actors = []` and the fixture, whose registration was empty, now 
 and an unknown one is named, against an empty list. The fixture hosts no panel, so the actor is only an id.
 
 The fixture's seam is still **19** modules, and the public and internal counts are unchanged.
+
+## Addendum (2026-10-03, last): the fixture's seam is no longer counted
+
+The addenda above give the fixture's seam as 18 modules, then 19. Neither number came with a counting
+rule, and different rules give different answers:
+
+- top-level `app-config/` files alone;
+- those plus the `db/` registrations;
+- those plus the files under `presets/operations/`.
+
+The body's "17" was already one off by the rule it seemed to use. So the count is dropped rather than
+corrected. CLAUDE.md now says what the fixture registers ("every `@app-config/*` module the framework
+reads"), and the seam-conformance suites, not a number, are what hold the fixture to it. The published
+and internal counts above keep their numbers, because each has a stated rule and a test.

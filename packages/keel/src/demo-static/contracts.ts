@@ -56,7 +56,8 @@ export interface DemoInboundContext {
 }
 
 /** Same two outcomes the real handler contract has: it produced its effect, or it declined with a
- *  reason. (A throw is the real contract's third outcome; the twin has no poison-message channel.) Like
+ *  reason. A throw is the third, as in the real contract: the twin's intake files the message `failed`.
+ *  Like
  *  the real contract, 'handled' may name the row it created (`subjectId`), which is what a demo preset's
  *  `inbound` step binds to its `as` name. */
 export type DemoInboundResult =

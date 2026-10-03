@@ -250,9 +250,9 @@ it. Nothing in that fixture is deletable by adoption, and its vocabulary is deli
 apps' — so a framework test that reacquires a dependency on YOUR world fails loudly instead of passing
 by coincidence. `pnpm verify` is green on a freshly ejected repo, end to end.
 
-The one thing that DOES stay app-shaped is the seam-conformance pair — the i18n partition/parity tests
-and the pglite RLS suite — which keep running under every app's own vitest project, against your
-catalog and your tables. That is what stops the fixture becoming the only world the framework is ever
+The one thing that DOES stay app-shaped is the seam-conformance set — the i18n partition/parity tests,
+the pglite RLS suite and the demo-presets check — which keep running under every app's own vitest
+project, against your catalog, your tables and your presets. That is what stops the fixture becoming the only world the framework is ever
 proved against.
 
 ## Layout
@@ -345,8 +345,8 @@ there.
 `packages/keel/src` (minus tests and stories), so `pnpm typecheck` compiles the ENTIRE framework
 against the starter's registrations — a framework module that assumed the showcase's tables or
 vocabulary fails there and nowhere else. `vitest.config.ts` then runs keel's seam-conformance tests
-(the i18n partition/parity pair and the composed pglite RLS suite) a second time under the starter's
-aliases. Both were watched failing before being trusted.
+(the i18n partition/parity pair, the composed pglite RLS suite and the demo-presets check) a second
+time under the starter's aliases. Each was watched failing before being trusted.
 
 ## Cutover — from hermetic to real
 

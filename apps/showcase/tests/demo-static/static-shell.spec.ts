@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import { presets } from '../../src/app-config/presets'
-import { appMessage, welcome } from '../catalog'
+import { appMessage, simulatorNotice, welcome } from '../catalog'
 
 const indexUrl = `file://${path.resolve(__dirname, '../../dist-demo/index.html')}`
 
@@ -182,8 +182,9 @@ test('simulator panel resets the static shell back to its initial state', async 
     await page.getByTestId('invite-submit').click()
     await expect(page.getByTestId('invite-sent')).toBeVisible()
 
-    // The static shell's Snapshots tab is reset-only (no snapshots prop, no server to snapshot against)
-    // — the two-step confirm lives in SnapshotsApp itself, shared with the real app.
+    // The static shell's Snapshots tab has no save/restore (no snapshots prop, no server to snapshot
+    // against) — reset and the demo presets only. The two-step confirm lives in SnapshotsApp itself,
+    // shared with the real app.
     await page.getByTestId('simulator-pill').click()
     await page.getByTestId('simulator-tab-snapshots').click()
     await page.getByTestId('snapshots-reset').click()
@@ -417,7 +418,7 @@ test('the ticket queue pages through its cursor chain from file://', async ({ pa
 test('static shell: a demo preset loads from the Snapshots tab — no server, same world as pnpm dev', async ({
     page,
 }) => {
-    // Two preset loads, and two waits on an actor's first autonomous tick (a few seconds each).
+    // Three preset loads, and two waits on an actor's first autonomous tick (a few seconds each).
     test.setTimeout(60_000)
     await page.goto(indexUrl)
     await page.getByTestId('simulator-pill').click()
@@ -455,7 +456,10 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
     await page.getByTestId('preset-load-multi-tenant').click()
     await expect(page.getByTestId('signed-in-as')).toContainText('Gale Bennett')
     await expect(page.getByTestId('demo-banner-flag')).toHaveCount(0)
-    await expect(page.getByTestId('tickets-list')).toContainText('Booking confirmations arrive twice')
+    // Subjects only the preset creates: the seed already holds a Pinebrook ticket, so asserting on IT would
+    // pass with the replay doing nothing.
+    await expect(page.getByTestId('tickets-list')).toContainText('Room upgrade emails link to the wrong hotel')
+    await expect(page.getByTestId('tickets-list')).toContainText('Gift card balance shows zero')
     await expect(page.getByTestId('tickets-list')).not.toContainText('Refund stuck in pending')
     await page.getByTestId('simulator-tab-people').click()
     await expect(page.getByTestId('simulator-people')).toContainText('jordan.ellis@example.test')
@@ -488,8 +492,9 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
  * static half of each operation kind — keel's own, or the one the composition root supplies for an app
  * kind (src/demo-static/app.tsx `presetOperations`) — and no unit test can see that map, since it is built
  * at runtime. A kind without a static half settles the replay false, and the "Preset loaded" notice never
- * appears, so this is the gate that a new kind shipped its static half. Asserted on the preset's title,
- * resolved from the app catalog the way the shell resolves it.
+ * appears, so this is the gate that a new kind shipped its static half. Asserted on the WHOLE load notice
+ * (keel's copy with the preset's title in it) and on the ABSENCE of the failure notice — the failure notice
+ * names the preset too, so matching the title alone would pass on a replay that broke.
  */
 for (const preset of presets) {
     test(`static shell: preset "${preset.id}" replays every operation to the end`, async ({ page }) => {
@@ -500,6 +505,8 @@ for (const preset of presets) {
         // Filtered, not the whole overlay: the steps' own notices (mail sent, inbound filed) show while
         // the replay runs, and the load notice replaces them only once the last step has run.
         const title = appMessage('en', preset.titleKey)
-        await expect(page.getByTestId('simulator-notice').filter({ hasText: title })).toBeVisible()
+        const notices = page.getByTestId('simulator-notice')
+        await expect(notices.filter({ hasText: simulatorNotice('en', 'noticePresetLoaded', title) })).toBeVisible()
+        await expect(notices.filter({ hasText: simulatorNotice('en', 'noticePresetFailed', title) })).toHaveCount(0)
     })
 }

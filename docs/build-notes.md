@@ -1306,7 +1306,9 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   to be replaced. An e2e that pressed Next promptly lost the press to the reload. Returning a promise
   that never settles on success, and settles `false` on refusal, is the honest type. Found by walking the
   whole preset tour on the server host, which CI does not do; CI walks tours only from `file://`.
-- **The duplicate check is the caller's, not the shared invite core's.** `sendOrgInvite` and the
-  twin's `inviteInto` both start AFTER "may this happen". The org route answers 409, the twin sets its
-  form error, and a preset is held to "no duplicates" at build time. Pushing the check into the shared
-  core would have forced one error contract onto three callers that each want a different one.
+- **The server's duplicate check is the caller's, not the shared invite core's.** `sendOrgInvite` starts
+  after the org route's 409 check, and keel's server half of the `invite` kind makes the same check
+  before calling it. The static twin's `inviteInto` keeps the check itself and answers false, which
+  `sendInvite` turns into its form error and the replay into a failure. A preset is held to "no
+  duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
+  error contract onto callers that each want a different one.

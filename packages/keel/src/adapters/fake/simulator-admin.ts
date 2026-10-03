@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { presets } from '@app-config/presets'
@@ -86,8 +87,22 @@ function wipeLiveDirsPreservingDevSecret(): void {
 // `result`, which is a distinct promise from `tail`.
 let tail: Promise<void> = Promise.resolve()
 
+// Marks the async call chain of the turn that is running, so a rewrite requested from INSIDE it is
+// recognised. Such a call would chain onto the very turn it is waiting in and deadlock the queue for
+// good — every later reset, save and restore hanging until the server restarts. It is refused instead,
+// loudly. Async-context storage rather than a module flag: an unrelated request arriving mid-turn is not
+// re-entrant and must still simply queue.
+const insideTurn = new AsyncLocalStorage<true>()
+
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
-    const result = tail.then(fn)
+    if (insideTurn.getStore()) {
+        return Promise.reject(
+            new Error(
+                'simulator-admin: a world reset/save/restore was requested from inside another (it would deadlock)',
+            ),
+        )
+    }
+    const result = tail.then(() => insideTurn.run(true, fn))
     tail = result.then(
         () => undefined,
         () => undefined,

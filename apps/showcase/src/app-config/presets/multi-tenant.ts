@@ -2,8 +2,8 @@ import type { DemoPreset } from 'keel/core/presets'
 
 export const multiTenant: DemoPreset = {
     // Both sites at once, on top of mid-demo (the Frontline morning tickets and Jordan's invite come
-    // from it). Pinebrook is the quiet tenant in the seed; here it has a queue of its own, and one email
-    // the desk refused — Riley is restricted, so the intake files it 'unmatched' instead of opening a
+    // from it). Pinebrook is the quiet tenant: the seed gives it one ticket, and this adds two more and one
+    // email the desk refused — Riley is restricted, so the intake files it 'unmatched' instead of opening a
     // ticket, which is the email-authoring rule visible in the inbound list. The viewpoint overrides
     // the base's: whoever loads this sits down at Pinebrook.
     id: 'multi-tenant',
@@ -26,8 +26,8 @@ export const multiTenant: DemoPreset = {
             org: 'support-crew',
             handler: 'support',
             from: 'gale.bennett@example.test',
-            subject: 'Booking confirmations arrive twice',
-            body: 'Guests are getting two confirmation emails for every booking since yesterday.',
+            subject: 'Room upgrade emails link to the wrong hotel',
+            body: 'Guests who accept an upgrade offer land on a different property in the booking flow.',
         },
         {
             op: 'inbound',

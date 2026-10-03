@@ -127,4 +127,16 @@ describe('simulator-admin snapshots', () => {
 
         await expect(restoreSnapshot('never-saved-snapshot')).rejects.toThrow(/unknown snapshot/)
     })
+
+    test('a rewrite requested from inside another is refused, not deadlocked, and the queue keeps working', async () => {
+        const { resetWorld, resetWorldThen, saveSnapshot } = await import('./simulator-admin')
+
+        // An app's preset half calling resetWorld() from inside the replay's turn would chain onto that
+        // very turn and wait for itself forever. It must fail fast instead.
+        await expect(resetWorldThen(() => resetWorld())).rejects.toThrow(/would deadlock/)
+        // ...and the queue is not poisoned: the next rewrite runs normally.
+        await expect(saveSnapshot('after-reentry')).resolves.toBeUndefined()
+        // Ordinary concurrent callers (not re-entrant) still queue rather than being refused.
+        await expect(Promise.all([resetWorld(), resetWorld()])).resolves.toEqual([undefined, undefined])
+    })
 })

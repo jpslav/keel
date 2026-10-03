@@ -27,7 +27,7 @@ export type TicketAssignOperation = PresetOperationOf<'ticket.assign', TicketAss
 
 export const ticketAssign: PresetOperationDefinition<'ticket.assign', TicketAssignArgs> = {
     kind: 'ticket.assign',
-    args: v.object({ by: v.string(), org: v.string(), ticket: v.string(), to: v.string() }),
+    args: v.strictObject({ by: v.string(), org: v.string(), ticket: v.string(), to: v.string() }),
     check(args, world, earlier) {
         const problems: string[] = []
         if (!world.orgSlugs.includes(args.org)) problems.push(`unknown org "${args.org}"`)

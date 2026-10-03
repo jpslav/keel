@@ -1439,7 +1439,7 @@ gate (`knip`) as surely as dead vendor code fails the doctrine.
   module would cost every app and the fixture one more file to say nothing in. The starter registers
   `presets = []`; the fixture registers one preset in its own vocabulary, because the server replay's
   test must replay keel's world, not an app's.
-- **Three operations, each naming its actor and team: `invite`, `inbound`, `flag`.** That set
+- **Three operations: `invite` and `inbound` name their actor and team; `flag` is world-wide.** That set
   covers the task's worlds (a pending invite, unread mail, tenant rows, both tenants busy). App rows
   come in through inbound email, which the app already registers handlers for on both hosts, so
   presets need no app-registered operation kinds yet. That stays a possible extension point; nothing

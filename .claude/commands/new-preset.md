@@ -14,8 +14,9 @@ tour can start from it. The contract and every operation kind's rules are in
 1. **Register.** One file per preset, `apps/showcase/src/app-config/presets/<id>.ts`, exporting a `DemoPreset`
    (`keel/core/presets`); import it into `presets` in `apps/showcase/src/app-config/presets.ts`. The array's
    order is the order the Snapshots tab lists them, and a base may sit anywhere in it. The registration is PURE
-   TypeScript — the static demo bundles it — so it imports nothing server-only. A script fragment two presets
-   share is a plain `PresetOperation[]` constant (`presets/morning-tickets.ts`).
+   TypeScript — the static demo bundles it — so it imports nothing server-only. A script fragment you want to
+   reuse by hand rather than through `extends` is a plain `PresetOperation[]` constant (the showcase's
+   `presets/morning-tickets.ts` is one, used by `mid-demo`).
     - **`id`** is a world-start name: lowercase letters, digits and hyphens, starting with a letter or digit,
       40 characters at most. It is the Snapshots row's testid (`preset-load-<id>`) and the name a tour's
       `snapshot` resolves. Never `reset` (the seeded world, no script). Unique in the registry, and it cannot
@@ -33,8 +34,9 @@ tour can start from it. The contract and every operation kind's rules are in
    `operations` is optional, so a preset that differs from its base by viewpoint alone omits it. An unknown
    base or a cycle fails the gate. The base's operations come first, your own last, and an operation number in
    a gate message counts in that expanded list.
-4. **Script the world.** `operations` is an ordered list of `{ op, as?, ...args }`. Every step names its actor
-   and its team explicitly — never "whoever is signed in", because nobody is yet — and the gate holds it to
+4. **Script the world.** `operations` is an ordered list of `{ op, as?, ...args }`. Every step that acts as
+   someone or in a team names them explicitly — never "whoever is signed in", because nobody is yet (`flag`
+   and `actor.hold` are world-wide and name no one) — and the gate holds it to
    what the product itself would allow, so a preset can only describe a world someone could have clicked
    together. keel's kinds:
     - `{ op: 'invite', by: 'person-admin', org: 'frontline', email: 'jordan.ellis@example.test', role: 'member' }`

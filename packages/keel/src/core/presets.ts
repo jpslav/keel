@@ -19,8 +19,9 @@ import type { StandardSchemaV1, StandardSchemaV1Issue } from './standard-schema'
  * `extends` another (single inheritance, `expandPreset`), so "mid-demo, signed in as someone else" is a
  * line, not a copy.
  *
- * **An operation is something the product itself could have done.** Every one names its actor and its
- * team explicitly — never "whoever is signed in" — so a replay is deterministic, and `presetProblems`
+ * **An operation is something the product itself could have done.** Every one that acts AS someone or IN a
+ * team names them explicitly — never "whoever is signed in" — and the world-wide ones (`flag`,
+ * `actor.hold`) name no one, so a replay is deterministic, and `presetProblems`
  * below holds each one to the same rules the product enforces (an invite comes from someone who may
  * invite, into a role that may be granted). A preset can therefore only describe a world someone could
  * have clicked together; it is a shortcut to that world, never a back door into a different one.
@@ -252,7 +253,7 @@ const EMAIL_SHAPE = /.+@.+\..+/
 
 const inviteOperation: PresetOperationDefinition<'invite', InviteArgs> = {
     kind: 'invite',
-    args: v.object({ by: v.string(), org: v.string(), email: v.string(), role: v.picklist(ROLES) }),
+    args: v.strictObject({ by: v.string(), org: v.string(), email: v.string(), role: v.picklist(ROLES) }),
     check(args, world, earlier) {
         const problems: string[] = []
         if (!world.orgSlugs.includes(args.org)) problems.push(`unknown org "${args.org}"`)
@@ -285,7 +286,13 @@ const inviteOperation: PresetOperationDefinition<'invite', InviteArgs> = {
 
 const inboundOperation: PresetOperationDefinition<'inbound', InboundArgs> = {
     kind: 'inbound',
-    args: v.object({ org: v.string(), handler: v.string(), from: v.string(), subject: v.string(), body: v.string() }),
+    args: v.strictObject({
+        org: v.string(),
+        handler: v.string(),
+        from: v.string(),
+        subject: v.string(),
+        body: v.string(),
+    }),
     check(args, world) {
         const problems: string[] = []
         if (!world.orgSlugs.includes(args.org)) problems.push(`unknown org "${args.org}"`)
@@ -303,13 +310,13 @@ const inboundOperation: PresetOperationDefinition<'inbound', InboundArgs> = {
 
 const flagOperation: PresetOperationDefinition<'flag', FlagArgs> = {
     kind: 'flag',
-    args: v.object({ flag: v.string(), enabled: v.boolean() }),
+    args: v.strictObject({ flag: v.string(), enabled: v.boolean() }),
     check: (args, world) => (world.flags.includes(args.flag) ? [] : [`unknown flag "${args.flag}"`]),
 }
 
 const actorHoldOperation: PresetOperationDefinition<'actor.hold', ActorHoldArgs> = {
     kind: 'actor.hold',
-    args: v.object({ actor: v.string(), held: v.boolean() }),
+    args: v.strictObject({ actor: v.string(), held: v.boolean() }),
     check: (args, world) => (world.actors.includes(args.actor) ? [] : [`unknown actor "${args.actor}"`]),
 }
 

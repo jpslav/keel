@@ -1272,7 +1272,10 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         if (!replay) return
         // One step per commit (see applyPreset), run off a zero-delay timer: each step's own state updates
         // commit before the next one runs, and the cleanup means an abandoned queue (a reset mid-replay)
-        // never fires a stale step.
+        // never fires a stale step. The step reads the world through the render that queued it, so a commit
+        // landing between that render and the timer (an actor's tick) is one commit ahead of what the step
+        // READS; its writes are functional updates and stay safe. No actor today creates anything a step
+        // reads (an invite, a ticket) — if one ever does, hold the actors during a replay.
         const id = setTimeout(() => {
             const [step, ...rest] = replay
             const performed = step === undefined || performReplayStep(step)

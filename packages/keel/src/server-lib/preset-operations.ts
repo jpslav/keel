@@ -7,7 +7,7 @@ import type { ActorHoldArgs, FlagArgs, FrameworkPresetOperation, InboundArgs, In
 import { orgIdForSlug } from '../db/org-lookup'
 import { tenantIdForSlug } from '../db/tenant-lookup'
 import { intakeInboundEmail } from '../inbound-email/intake'
-import { NotFoundError } from '../ports/errors'
+import { ForbiddenError, NotFoundError } from '../ports/errors'
 import { sendOrgInvite } from './invite'
 
 /**
@@ -67,6 +67,13 @@ const invite: ServerPresetOperationHandler<InviteArgs> = async (args, ctx) => {
     const inviter = people.find((person) => person.id === args.by)
     const { tenantId, orgId, orgName, tenantSlug } = await resolvePresetOrg(args.org)
     if (!inviter) throw new NotFoundError(`unknown person: ${args.by}`)
+    // The org route's 409, kept here too: the build-time gate already refuses a duplicate, and refusing it
+    // again at replay keeps a bypassed gate from minting a second membership — the static twin refuses it
+    // as well (`inviteInto` answers false).
+    const members = await auth.listMembers(args.org)
+    if (members.some((member) => member.email.toLowerCase() === args.email.toLowerCase())) {
+        throw new ForbiddenError(`already a member or invited: ${args.email}`)
+    }
     await sendOrgInvite({
         inviter,
         tenantSlug,
@@ -76,7 +83,7 @@ const invite: ServerPresetOperationHandler<InviteArgs> = async (args, ctx) => {
         orgName,
         email: args.email,
         role: args.role,
-        members: await auth.listMembers(args.org),
+        members,
         baseUrl: ctx.baseUrl,
     })
 }

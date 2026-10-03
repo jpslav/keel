@@ -148,24 +148,34 @@ and the bar offers you the way back. When it ends it says whether every element 
 
 ### 8. Snapshots: the knobs, and putting it back
 
-**Simulator → Snapshots** carries three feature flags. Two are the framework's (**Demo banner**, **Hold
-jobs**); the third, **Flag late tickets**, is the app's own — flip it and the queue grows a banner and
-per-row badges for anything past the desk's 48-hour SLA. It changes the product, not the panel.
+**Simulator → Snapshots** carries four feature flags. Two are the framework's (**Demo banner**, **Hold
+jobs**); two are the app's own. **Flag late tickets** makes the queue grow a banner and per-row badges
+for anything past the desk's 48-hour SLA, so it changes the product, not the panel. **Hold the actors**
+pauses every Simulator actor at once.
 
 Also here: **Save a snapshot** before you experiment, and **Reset world** (two-step confirm) to put
 everything back — including the seeded queue, which comes back exactly as it started.
 
 **Start from a preset** is the demo-prep shortcut: one click resets the world, replays a scripted
-starting point, and signs you in as the right person. **Fresh desk** is the seed with Dana already
-signed in; **Mid-demo** adds two new tickets — the refund one already assigned to Sam, who gets the
-assignment notification — and a teammate (Jordan) whose invite is waiting unread —
-the second tour, **Joining the desk, from a preset**, walks that invite to the end; **Both sites busy**
-builds on Mid-demo (the same two tickets, Sam's assignment and Jordan's invite), then adds a Platform ticket and a pending Platform
-invite, gives Pinebrook a queue of its own and a refused email from a restricted member, turns late-ticket
-highlighting on, and holds the **Partner desk** actor (its Actors-tab card reads _Held_ while the Bundle
-analyzer keeps running), signed in at Pinebrook. Presets are scripts, not saved files, so they work identically
-in `dist-demo/index.html`. Loading one signs in only YOUR browser; anyone else watching the same server
-keeps who they were.
+starting point, and signs you in as the right person.
+
+- **Fresh desk:** the seed, with Dana already signed in.
+- **Mid-demo:** two new tickets, the refund one already assigned to Sam (who gets the assignment
+  notification), and a teammate, Jordan, whose invite is waiting unread. The second tour, **Joining the
+  desk, from a preset**, walks that invite to the end.
+- **Both sites busy:** builds on Mid-demo (the same two tickets, Sam's assignment and Jordan's invite).
+  It adds a Platform ticket and a pending Platform invite; gives Pinebrook two more tickets on top of
+  its seeded one, plus a refused email from a restricted member; turns late-ticket highlighting on; and
+  holds the **Partner desk** actor, whose Actors-tab card reads _Held_ while the Bundle analyzer keeps
+  running. You're signed in at Pinebrook.
+
+Presets are scripts, not saved files, so they load the same world in `dist-demo/index.html`. The one
+visible difference is that the invite email shows in the language you are viewing the demo in, where
+the server uses the inviter's.
+
+Loading one signs in only YOUR browser. Anyone else watching the same server keeps who they were,
+unless they were signed in as someone the reset removed (a person created by accepting an invite), in
+which case they land on sign-in.
 
 ## Extras worth showing, if there is time
 
