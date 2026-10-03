@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the adapters.
 const tmp = mkdtempSync(path.join(tmpdir(), 'app-fakes-'))
@@ -217,6 +217,99 @@ describe('fake llm', () => {
     test('unknown purposes fail loudly with recording instructions', async () => {
         const { fakeLlm } = await import('./llm')
         await expect(fakeLlm.complete({ purpose: 'never-recorded', messages: [] })).rejects.toThrow(/llm:record/)
+    })
+})
+
+describe('fake llm request catch', () => {
+    const user = (content: string) => ({ role: 'user' as const, content })
+
+    beforeEach(async () => {
+        const { clearCaughtLlmRequests } = await import('./llm')
+        clearCaughtLlmRequests()
+    })
+
+    test('complete catches purpose, system and messages', async () => {
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+        await fakeLlm.complete({ purpose: 'fixture-echo', system: 'be brief', messages: [user('hello')] })
+        const [caught, ...rest] = listCaughtLlmRequests()
+        expect(rest).toEqual([])
+        expect(caught).toMatchObject({
+            purpose: 'fixture-echo',
+            system: 'be brief',
+            messages: [user('hello')],
+            tools: null,
+        })
+        expect(Number.isNaN(Date.parse(caught!.at))).toBe(false)
+    })
+
+    test('stream catches once consumed, with a null system when none was sent', async () => {
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+        for await (const chunk of fakeLlm.stream({ purpose: 'fixture-echo', messages: [user('streamed')] })) void chunk
+        expect(listCaughtLlmRequests()).toMatchObject([
+            { purpose: 'fixture-echo', system: null, messages: [user('streamed')], tools: null },
+        ])
+    })
+
+    test('runToolLoop catches the tool definitions but never the execute closure', async () => {
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+        const inputSchema = { type: 'object' as const, properties: { slug: { type: 'string' } }, required: ['slug'] }
+        await fakeLlm.runToolLoop({
+            purpose: 'fixture-echo',
+            system: 'use the tools',
+            messages: [user('look up depot')],
+            tools: [{ name: 'lookup_depot', description: 'Find a depot by slug', inputSchema }],
+            execute: async () => 'unused',
+        })
+        const [caught] = listCaughtLlmRequests()
+        expect(caught).toMatchObject({
+            purpose: 'fixture-echo',
+            system: 'use the tools',
+            messages: [user('look up depot')],
+        })
+        expect(caught!.tools).toEqual([{ name: 'lookup_depot', description: 'Find a depot by slug', inputSchema }])
+        // On disk too: a closure cannot survive JSON, and nothing about the request's `execute` leaks.
+        expect(JSON.stringify(caught)).not.toContain('execute')
+    })
+
+    test('a request that matches no fixture is still caught before the lookup throws', async () => {
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+        await expect(fakeLlm.complete({ purpose: 'never-recorded', messages: [user('lost')] })).rejects.toThrow(
+            /llm:record/,
+        )
+        await expect(
+            fakeLlm.runToolLoop({
+                purpose: 'never-recorded',
+                messages: [user('lost too')],
+                tools: [],
+                execute: async () => '',
+            }),
+        ).rejects.toThrow(/never-recorded/)
+        expect(listCaughtLlmRequests().map((c) => c.messages[0]!.content)).toEqual(['lost', 'lost too'])
+    })
+
+    test('lists oldest first (even within one millisecond) and filters by purpose', async () => {
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+        for (const n of [1, 2, 3, 4, 5]) await fakeLlm.complete({ purpose: 'fixture-echo', messages: [user(`q${n}`)] })
+        await expect(fakeLlm.complete({ purpose: 'never-recorded', messages: [user('other')] })).rejects.toThrow()
+
+        expect(listCaughtLlmRequests().map((c) => c.messages[0]!.content)).toEqual([
+            'q1',
+            'q2',
+            'q3',
+            'q4',
+            'q5',
+            'other',
+        ])
+        expect(listCaughtLlmRequests('never-recorded').map((c) => c.messages[0]!.content)).toEqual(['other'])
+        expect(listCaughtLlmRequests('nothing-sent-this')).toEqual([])
+    })
+
+    test('clear empties the catch', async () => {
+        const { fakeLlm, listCaughtLlmRequests, clearCaughtLlmRequests } = await import('./llm')
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [user('x')] })
+        expect(listCaughtLlmRequests()).toHaveLength(1)
+        clearCaughtLlmRequests()
+        expect(listCaughtLlmRequests()).toEqual([])
     })
 })
 
