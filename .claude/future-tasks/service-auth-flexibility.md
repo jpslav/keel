@@ -17,15 +17,22 @@ Three related gaps a machine caller (not a signed-in person) runs into:
    module family, following the existing mailgun-style verifier's shape (a dev secret in simulated
    mode, an env secret in real mode).
 
-3. **Every lookup assumes the caller already knows its tenant.** `packages/keel/src/db/tenant-lookup.ts`
-   and `packages/keel/src/db/org-lookup.ts` resolve a tenant/org by slug WITHIN a tenant a caller
-   already named. A caller authenticated by a shared secret that names no tenant at all, or by an
-   unverified claim naming only a slug (unique within a tenant, not globally), has no way to search
-   across every tenant to find which one contains the row it names. Need: a tenant-agnostic lookup
-   (every tenant id) and a slug lookup across every tenant's orgs, as the explicit "no tenant context
-   yet" counterpart to the existing scoped lookups.
+3. **No production-usable "no tenant yet" lookup exists for a service-auth caller specifically.**
+   `packages/keel/src/db/tenant-lookup.ts`'s `tenantIdForSlug` and `org-lookup.ts`'s `orgIdForSlug`
+   resolve WITHIN a tenant a caller already named. The query shape for "every tenant" already
+   exists, twice, inline — `packages/keel/src/db/schedules.ts` and `packages/keel/src/db/webhooks.ts`
+   each run their own `selectFrom('tenants').select('id').execute()`, because a background job runner
+   has no caller tenant either — but neither is a shared, callable function. And `org-lookup.ts`
+   already has `listOrgsForWorld` (every org across every tenant, joined to its tenant slug) — almost
+   exactly the cross-tenant slug search a service-auth caller needs — but its only caller
+   (`apps/showcase`'s simulator inbound route) gates it to simulated mode, so it isn't usable by a
+   real-mode caller today. Need: factor the existing every-tenant query into a shared function in
+   `tenant-lookup.ts`, and make an equivalent of `listOrgsForWorld` available to a real-mode,
+   no-tenant-context caller — extending two proven patterns, not inventing a new one.
 
 Evidence: `packages/keel/src/service-auth/webhook.ts` (hard-coded secret name),
 `packages/keel/src/service-auth/mailgun.ts` (the verifier shape a second scheme would follow),
 `packages/keel/src/db/tenant-lookup.ts` and `packages/keel/src/db/org-lookup.ts` (today's
-tenant-scoped-only lookups).
+tenant-scoped lookups, and `listOrgsForWorld`'s simulated-mode-only cross-tenant query),
+`packages/keel/src/db/schedules.ts` and `packages/keel/src/db/webhooks.ts` (today's two inline,
+un-shared "every tenant id" queries).

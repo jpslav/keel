@@ -12,10 +12,15 @@ Two related gaps in how `organizations` is modeled:
    not a hostile-isolation boundary — who may write stays an authorization-layer decision, not a
    grant-layer one).
 
-2. **The coverage proof can't express that.** Whatever checks RLS-exempt tables' privileges assumes
-   every exempt table is `SELECT`-only. Once one of them legitimately needs more, that blanket
-   assumption is wrong for that table specifically — the fix is recording, per exempt table, which
-   non-`SELECT` privileges (if any) `app_user` may hold, not loosening the check for every table.
+2. **The coverage proof can't express that.** `RLS_EXEMPT` itself only maps a table to a one-line
+   reason it's exempt — it carries no privilege information at all. The actual privilege check is a
+   separate catalog query (ACL rows where `privilege_type <> 'SELECT'`, including column-level
+   grants) applied UNIFORMLY to every exempt table, failing with "`app_user` holds
+   `<privilege>`... which SECURITY.md promises is SELECT-only" the moment any exempt table has any
+   non-`SELECT` grant at all. There is no per-table way to say "this one legitimately needs more."
+   Need: let a table in `RLS_EXEMPT` declare which non-`SELECT` privileges it's allowed to hold, so
+   the uniform SELECT-only check becomes the default for tables that don't declare an exception,
+   rather than an unconditional rule every exempt table must satisfy.
 
 **Separately, a related schema need:** nothing today lets another table hold a tenant-composite
 foreign key into `organizations` (referencing both its tenant and its id together) — only a
@@ -23,6 +28,7 @@ single-column id reference is possible. A product that wants that referential-in
 "this row's org really does belong to this row's tenant, enforced by Postgres" — needs a composite
 uniqueness constraint on `organizations` to reference.
 
-Evidence: `packages/keel/src/db/rls-coverage.ts` (the exemption/coverage shape this would need to
-grow a per-table privilege list), `packages/keel/src/db/migrations/0003_organizations.ts` (today's
-`SELECT`-only grant and the migration a write-grant follow-up would match).
+Evidence: `packages/keel/src/db/rls-coverage.ts` (`RLS_EXEMPT`'s reason-only shape, and the
+privilege-catalog query/assertion that would need to consult a per-table exception instead of
+flagging any non-`SELECT` grant unconditionally), `packages/keel/src/db/migrations/0003_organizations.ts`
+(today's `SELECT`-only grant and the migration a write-grant follow-up would match).
