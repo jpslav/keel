@@ -45,7 +45,7 @@ import {
     notificationCopy,
     resolveEnabledChannels,
 } from '../core/notifications'
-import { expandPreset, type PresetOperation } from '../core/presets'
+import { expandPreset, type FlagArgs, type InboundArgs, type InviteArgs, type PresetOperation } from '../core/presets'
 import { canManageOrg } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
@@ -56,7 +56,12 @@ import {
 } from '../core/webhook-events'
 import { webhookSignatureHeader } from '../core/webhook-signing'
 import { createDemoBuilderDriver, createDemoServiceDriver, type DemoServiceScope } from './actor-drivers'
-import type { DemoWorld, DemoWorldOptions } from './contracts'
+import type {
+    DemoWorld,
+    DemoWorldOptions,
+    StaticPresetOperationContext,
+    StaticPresetOperationHandler,
+} from './contracts'
 import { buildDigestEmailHtml, buildInviteEmailHtml } from './email-html'
 import { go, useHashRoute } from './hash-route'
 import type {
@@ -113,8 +118,12 @@ const INITIAL_FLAGS: Record<string, boolean> = {
 const DEFAULT_ACTIVE_ORG = organizations[0]!.slug
 
 /** One step of a demo-preset replay: the preset's own operations, then the two the replay adds — sitting
- *  down as the viewpoint, and announcing the load. */
-type ReplayStep = PresetOperation | { op: 'viewpoint'; personId: string } | { op: 'loaded'; title: string }
+ *  down as the viewpoint, and announcing the load. Tagged by `step`, not by `op`, because operation kinds
+ *  are an open registry: an app kind may be called anything, `viewpoint` included. */
+type ReplayStep =
+    | { step: 'operation'; operation: PresetOperation }
+    | { step: 'viewpoint'; personId: string }
+    | { step: 'loaded'; title: string }
 
 /** Truncating snippet used as a row's "title" in the digest (twin of the real handler's `snippet`). */
 function digestSnippet(body: string): string {
@@ -200,7 +209,7 @@ function seededMail(initial: DemoWorldOptions['initialMail']): MailItem[] {
 }
 
 export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
-    const { inboundHandlers = {}, digestBodies, onReset } = options
+    const { inboundHandlers = {}, digestBodies, onReset, presetOperations: appPresetOperationHalves = {} } = options
     const route = useHashRoute()
     const tEmail = useTranslations('email')
     const tSimulator = useTranslations('simulator')
@@ -264,6 +273,9 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     const [replay, setReplay] = useState<ReplayStep[] | null>(null)
     // Resolves the promise applyPreset handed out, once the queue drains.
     const replayDone = useRef<((completed: boolean) => void) | null>(null)
+    // The replay's named results (an operation's `as` → the twin id of what it created). A ref, not state:
+    // only replay steps read it, each in its own timer tick. Cleared by every reset, so by every load.
+    const presetRefs = useRef(new Map<string, string>())
     // Always-current mirror of `jobs` for the actor drivers: refs may not be written during render
     // (react-hooks/refs), so an effect keeps it in sync instead — the drivers read through the ref
     // rather than a stale closure, so they never need rebuilding when a tick fires.
@@ -758,12 +770,18 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
      * mail into a team you're not looking at is still attributed correctly.
      */
     function composeInbound(input: InboundComposeInput) {
+        intakeInbound(input)
+    }
+
+    /** composeInbound's body: answers what the handler twin created (`subjectId`, when it created
+     *  something), or null when no row was filed at all — an address naming no team. */
+    function intakeInbound(input: InboundComposeInput): { subjectId?: string } | null {
         const to = formatInboundRecipient(input.orgSlug, input.handler, DEMO_INBOUND_DOMAIN)
         const parsed = parseInboundRecipient(to)
         const seedOrg = parsed ? organizations.find((o) => o.slug === parsed.orgSlug) : null
         if (!parsed || !seedOrg) {
             pushNotice(tSimulator('noticeInboundSent', { status: tSimulator('inboundStatus_unmatched') }))
-            return
+            return null
         }
         const fromEmail = normalizeEmailAddress(input.from) || input.from.trim().toLowerCase()
         const bodyText = normalizeInboundBody(input.body)
@@ -774,6 +792,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         let handlerClaimed: string | null = null
         let error: string | null = null
         let actor = INBOUND_SYSTEM_ACTOR
+        let subjectId: string | undefined
 
         const handler = inboundHandlers[parsed.handler]
         if (!handler) {
@@ -791,6 +810,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             if (result.status === 'handled') {
                 status = 'handled'
                 actor = result.actorUserId
+                subjectId = result.subjectId
             } else {
                 error = result.reason
             }
@@ -822,6 +842,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
                 status: tSimulator(`inboundStatus_${status}` as 'inboundStatus_handled'),
             }),
         )
+        return subjectId === undefined ? {} : { subjectId }
     }
 
     // ── Invites and membership ────────────────────────────────────────────────────────────────────
@@ -1086,6 +1107,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         setReplay(null)
         replayDone.current?.(false)
         replayDone.current = null
+        presetRefs.current.clear()
         onReset?.()
         setNotices([])
         go('')
@@ -1094,55 +1116,108 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
 
     /**
      * Twin of the server's demo-preset replay (keel/server-lib/demo-presets.ts): reset to the seed, then
-     * replay the preset's operations through this world's own twins — the invite core, compose-inbound
-     * (and so the app's inbound handler twins), the flag store — and finally sit down as the preset's
-     * viewpoint. The preset is its `extends` chain flattened (`expandPreset`), base first. Resolves true
-     * once the world is ready; false for an id no preset has (or one whose chain is broken), or when the replay
-     * is abandoned (a reset mid-replay) or reaches a step this world cannot perform.
+     * replay the preset's operations through each kind's STATIC half — keel's below (the invite core,
+     * compose-inbound and so the app's inbound handler twins, the flag store), or the app's from
+     * `DemoWorldOptions.presetOperations` — and finally sit down as the preset's viewpoint. The preset is
+     * its `extends` chain flattened (`expandPreset`), base first. Resolves true once the world is ready;
+     * false for an id no preset has (or one whose chain is broken), or when the replay is abandoned (a
+     * reset mid-replay) or reaches a step this world cannot perform.
      *
      * The steps run ONE PER RENDER, from the effect below, rather than in a loop here. Every twin reads
      * the world through this render's closure (the duplicate check reads `invites`, the inbound twin
-     * reads the member list), so a loop would replay every step against the world as it stood BEFORE the
-     * reset. Draining a queue across commits gives each step the world its predecessors left, which is
-     * what the server gets for free by writing to disk between steps.
+     * reads the member list, an app twin reads its own rows), so a loop would replay every step against
+     * the world as it stood BEFORE the reset. Draining a queue across commits gives each step the world
+     * its predecessors left, which is what the server gets for free by writing to disk between steps.
      */
     function applyPreset(id: string): Promise<boolean> {
         const registered = presets.find((candidate) => candidate.id === id)
         const expanded = expandPreset(id, presets)
         if (!registered || !expanded) return Promise.resolve(false)
+        // Also clears the named results (presetRefs): a name means a step of THIS replay, never the last.
         resetWorld()
-        const steps: ReplayStep[] = [...expanded.operations]
-        if (expanded.viewpoint !== undefined) steps.push({ op: 'viewpoint', personId: expanded.viewpoint })
+        const steps: ReplayStep[] = expanded.operations.map((operation) => ({ step: 'operation', operation }))
+        if (expanded.viewpoint !== undefined) steps.push({ step: 'viewpoint', personId: expanded.viewpoint })
         // The notice names the preset that was asked for, not a base it happened to build on.
-        steps.push({ op: 'loaded', title: tRoot(registered.titleKey) })
+        steps.push({ step: 'loaded', title: tRoot(registered.titleKey) })
         setReplay(steps)
         return new Promise((resolve) => {
             replayDone.current = resolve
         })
     }
 
+    /** keel's static halves — the twins of keel/server-lib/preset-operations.ts. Rebuilt every render on
+     *  purpose: each reads the world through this render's closure (see applyPreset). */
+    const frameworkPresetOperationHalves = {
+        invite: ((args) => {
+            const inviter = allPeople.find((p) => p.id === args.by)
+            return inviter !== undefined && inviteInto(inviter, args.org, args.email, args.role) ? {} : false
+        }) satisfies StaticPresetOperationHandler<InviteArgs>,
+        inbound: ((args) => {
+            if (!findOrg(args.org)) return false
+            const filed = intakeInbound({
+                from: args.from,
+                orgSlug: args.org,
+                handler: args.handler,
+                subject: args.subject,
+                body: args.body,
+            })
+            // The row the handler twin opened, if it opened one — a declined email names nothing.
+            return filed ? { ref: filed.subjectId } : false
+        }) satisfies StaticPresetOperationHandler<InboundArgs>,
+        flag: ((args) => {
+            if (!(args.flag in INITIAL_FLAGS)) return false
+            setFlags((prev) => ({ ...prev, [args.flag]: args.enabled }))
+            return {}
+        }) satisfies StaticPresetOperationHandler<FlagArgs>,
+    }
+
+    /**
+     * The ONE static dispatcher, twin of the server's `performPresetOperation`: keel's halves composed
+     * with the app's (an app entry with keel's kind name replaces keel's), the step's arguments (all but
+     * `op` and `as`), then `as` bound to what it created. False for a kind with no static half, a half
+     * that cannot perform the step (or throws — an unresolved name does), and an `as` on a step that
+     * created nothing.
+     */
+    function performPresetOperation(operation: PresetOperation): boolean {
+        const halves: Record<string, StaticPresetOperationHandler> = {
+            ...frameworkPresetOperationHalves,
+            ...appPresetOperationHalves,
+        }
+        const { op, as, ...args } = operation
+        const half = Object.hasOwn(halves, op) ? halves[op] : undefined
+        if (!half) return false
+        const context: StaticPresetOperationContext = {
+            refs: {
+                resolve(name) {
+                    const bound = presetRefs.current.get(name)
+                    if (bound === undefined) throw new Error(`no earlier operation is named "${name}"`)
+                    return bound
+                },
+            },
+            findPerson: (personId) => allPeople.find((p) => p.id === personId),
+            recordAudit: (entry, scope) => appendAudit(entry, scope.tenantSlug, scope.orgSlug),
+            notifyMemberOf,
+            framework: frameworkPresetOperationHalves,
+        }
+        let result: { ref?: string } | false
+        try {
+            result = half(args, context)
+        } catch {
+            return false
+        }
+        if (result === false) return false
+        if (as === undefined) return true
+        if (result.ref === undefined) return false
+        presetRefs.current.set(as, result.ref)
+        return true
+    }
+
     /** Runs one replay step; false when the world cannot perform it — the twin of the server replay
      *  throwing. Only a preset that bypassed the conformance gate can get here. */
     function performReplayStep(step: ReplayStep): boolean {
-        switch (step.op) {
-            case 'invite': {
-                const inviter = allPeople.find((p) => p.id === step.by)
-                return inviter !== undefined && inviteInto(inviter, step.org, step.email, step.role)
-            }
-            case 'inbound':
-                if (!findOrg(step.org)) return false
-                composeInbound({
-                    from: step.from,
-                    orgSlug: step.org,
-                    handler: step.handler,
-                    subject: step.subject,
-                    body: step.body,
-                })
-                return true
-            case 'flag':
-                if (!(step.flag in INITIAL_FLAGS)) return false
-                setFlags((prev) => ({ ...prev, [step.flag]: step.enabled }))
-                return true
+        switch (step.step) {
+            case 'operation':
+                return performPresetOperation(step.operation)
             case 'viewpoint':
                 if (!allPeople.some((p) => p.id === step.personId)) return false
                 selectPerson(`person:${step.personId}`)

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
-import { welcome } from '../catalog'
+import { presets } from '../../src/app-config/presets'
+import { appMessage, welcome } from '../catalog'
 
 const indexUrl = `file://${path.resolve(__dirname, '../../dist-demo/index.html')}`
 
@@ -428,6 +429,10 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
     await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye')
     await expect(page.getByTestId('tickets-list')).toContainText('Refund stuck in pending for three days')
     await expect(page.getByTestId('tickets-list')).toContainText('Checkout times out for shoppers in the EU')
+    // The app's own operation kind, `ticket.assign`, replayed by its STATIC half: the ticket the refund
+    // email opened (named `refund` in the script) is Sam's.
+    const refund = page.getByTestId('ticket-item').filter({ hasText: 'Refund stuck in pending for three days' })
+    await expect(refund.getByTestId(/^ticket-assignee-/)).toHaveValue('Sam Rivera')
 
     // A change made by hand, which no preset script makes — the next load must wipe it.
     await page.getByTestId('flag-toggle-demo-banner').click()
@@ -459,3 +464,24 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
     })
     await expect(refused).toContainText('unmatched')
 })
+
+/**
+ * Every registered preset replays to the end in THIS world. The static demo replays a preset through the
+ * static half of each operation kind — keel's own, or the one the composition root supplies for an app
+ * kind (src/demo-static/app.tsx `presetOperations`) — and no unit test can see that map, since it is built
+ * at runtime. A kind without a static half settles the replay false, and the "Preset loaded" notice never
+ * appears, so this is the gate that a new kind shipped its static half. Asserted on the preset's title,
+ * resolved from the app catalog the way the shell resolves it.
+ */
+for (const preset of presets) {
+    test(`static shell: preset "${preset.id}" replays every operation to the end`, async ({ page }) => {
+        await page.goto(indexUrl)
+        await page.getByTestId('simulator-pill').click()
+        await page.getByTestId('simulator-tab-snapshots').click()
+        await page.getByTestId(`preset-load-${preset.id}`).click()
+        // Filtered, not the whole overlay: the steps' own notices (mail sent, inbound filed) show while
+        // the replay runs, and the load notice replaces them only once the last step has run.
+        const title = appMessage('en', preset.titleKey)
+        await expect(page.getByTestId('simulator-notice').filter({ hasText: title })).toBeVisible()
+    })
+}

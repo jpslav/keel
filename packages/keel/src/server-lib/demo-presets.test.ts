@@ -5,7 +5,10 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 
 // The server replay of a demo preset, against keel's OWN seam: the fixture registers `busy-harbor`
 // (packages/keel/test-fixture/app-config/presets.ts), one operation of every kind plus a viewpoint, and
-// `busy-harbor-lead`, which extends it with no operations of its own and a different viewpoint.
+// `busy-harbor-lead`, which extends it with no operations of its own and a different viewpoint. Its
+// script includes the fixture's OWN kind, `docket.flag`, acting on the docket its inbound email opened
+// (named `crane`), and its `flag` step runs the fixture's REPLACEMENT of keel's `flag` half
+// (test-fixture/app-config/preset-operations.ts).
 // Same throwaway-dir + mocked-cookie-jar setup as fake/auth.test.ts (the viewpoint is a cookie), and
 // next-intl's server translator is stubbed: the invite email's copy is not what is under test here. The
 // adapter registry is `server-only`, so it is replaced by the simulated-mode registry it would build —
@@ -40,7 +43,7 @@ vi.mock('next-intl/server', () => ({
 const BASE_URL = 'http://localhost:3000/api/simulator/presets'
 const INVITEE = 'new.hand@example.test'
 
-async function depotDocketLabels(): Promise<string[]> {
+async function harborTenantId(): Promise<string> {
     const { fakeDb } = await import('../adapters/fake/db')
     await fakeDb.ready()
     const tenant = await fakeDb
@@ -49,7 +52,14 @@ async function depotDocketLabels(): Promise<string[]> {
         .select('id')
         .where('slug', '=', 'harbor')
         .executeTakeFirstOrThrow()
-    const rows = await fakeDb.withTenant(tenant.id, (trx) => trx.selectFrom('dockets').select('label').execute())
+    return tenant.id
+}
+
+async function depotDocketLabels(): Promise<string[]> {
+    const { fakeDb } = await import('../adapters/fake/db')
+    const rows = await fakeDb.withTenant(await harborTenantId(), (trx) =>
+        trx.selectFrom('dockets').select('label').execute(),
+    )
     return rows.map((row) => row.label)
 }
 
@@ -77,6 +87,45 @@ describe('applyDemoPreset (server host)', () => {
         // viewpoint: THIS browser now sits at fixture-hand's desk
         expect((await fakeAuth.getCurrentUser())?.id).toBe('fixture-hand')
         expect(await readViewpointCookie()).toBe('person:fixture-hand')
+    })
+
+    test('a named result flows: the docket the inbound handler opened is the one the app kind flags', async () => {
+        const { applyDemoPreset } = await import('./demo-presets')
+        const { fakeDb } = await import('../adapters/fake/db')
+
+        await applyDemoPreset('busy-harbor', { baseUrl: BASE_URL })
+
+        const tenantId = await harborTenantId()
+        const dockets = await fakeDb.withTenant(tenantId, (trx) =>
+            trx.selectFrom('dockets').select(['id', 'label', 'status']).execute(),
+        )
+        const crane = dockets.find((docket) => docket.label === 'Crane four is stuck')
+        // `crane` named the row the fixture's support handler INSERTED (its uuid, via subjectId), and the
+        // fixture's `docket.flag` half resolved that name — so exactly that docket is flagged, by its `by`.
+        expect(crane?.status).toBe('flagged')
+        expect(dockets.filter((docket) => docket.status === 'flagged').map((docket) => docket.id)).toEqual([crane?.id])
+        const flagged = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select(['actor_user_id', 'subject_id'])
+                .where('action', '=', 'docket.flagged')
+                .execute(),
+        )
+        expect(flagged).toEqual([{ actor_user_id: 'fixture-lead', subject_id: crane?.id }])
+    })
+
+    test("an app half registered under keel's kind name replaces keel's: the fixture's `flag` is the one that ran", async () => {
+        const { applyDemoPreset } = await import('./demo-presets')
+        const { replacedFlagCalls } = await import('@app-config/preset-operations')
+        const { readFlags, setFlag } = await import('../adapters/fake/analytics')
+
+        replacedFlagCalls.length = 0
+        setFlag('jobs-held', false)
+        await applyDemoPreset('busy-harbor', { baseUrl: BASE_URL })
+
+        expect(replacedFlagCalls).toEqual([{ flag: 'jobs-held', enabled: true }])
+        // ...and it wrapped keel's half rather than dropping it, so the flag is still set
+        expect(readFlags()['jobs-held']).toBe(true)
     })
 
     test('a preset that extends another replays the base first, then sits the restorer down at its own viewpoint', async () => {

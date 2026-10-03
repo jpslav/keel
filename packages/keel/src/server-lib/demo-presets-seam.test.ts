@@ -1,12 +1,12 @@
 import { loadAppMessages } from '@app-config/messages'
 import { organizations, people } from '@app-config/seed'
-import { presets } from '@app-config/presets'
+import { appPresetOperations, presets } from '@app-config/presets'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { KNOWN_FLAGS } from '../adapters/fake/analytics'
-import { expandPreset, presetProblems } from '../core/presets'
+import { composePresetOperations, expandPreset, presetProblems } from '../core/presets'
 import { inboundHandlers } from '../inbound-email/handlers'
 import type { MessageTree } from '../i18n/messages'
 
@@ -18,7 +18,12 @@ import type { MessageTree } from '../i18n/messages'
  * seed and the registries it will replay against, and its copy to both catalogs, at build time.
  *
  * The world is DERIVED (seed people, seed orgs, the composed inbound registry, KNOWN_FLAGS), never
- * listed here, so the check cannot drift from what the replays actually consult.
+ * listed here, so the check cannot drift from what the replays actually consult. So is the operation
+ * registry: keel's kinds composed with the app's (`composePresetOperations(appPresetOperations)`), and
+ * held both ways to the server halves the replay dispatches to — a kind with a definition and no server
+ * half would pass this file's static check and then throw on the first replay. (The STATIC halves are
+ * supplied by each app's static composition root at runtime, where no unit test can see them; the static
+ * demo's e2e loads every registered preset instead.)
  *
  * The static check is not the whole proof: the last case REPLAYS every registered preset through the
  * server path (keel/server-lib/demo-presets.ts) against this app's real seed, migrations and handlers,
@@ -57,15 +62,37 @@ function resolve(tree: MessageTree, key: string): unknown {
     return key.split('.').reduce<unknown>((node, part) => (node as MessageTree | undefined)?.[part], tree)
 }
 
+const definitions = composePresetOperations(appPresetOperations)
+
 describe('registered demo presets', () => {
     it('describe only worlds the product could reach', () => {
-        const problems = presetProblems(presets, {
-            people: people.map((person) => ({ id: person.id, email: person.email, memberships: person.memberships })),
-            orgSlugs: organizations.map((org) => org.slug),
-            handlers: Object.keys(inboundHandlers),
-            flags: KNOWN_FLAGS,
-        })
+        const problems = presetProblems(
+            presets,
+            {
+                people: people.map((person) => ({
+                    id: person.id,
+                    email: person.email,
+                    memberships: person.memberships,
+                    restricted: person.restricted,
+                })),
+                orgSlugs: organizations.map((org) => org.slug),
+                handlers: Object.keys(inboundHandlers),
+                flags: KNOWN_FLAGS,
+            },
+            definitions,
+        )
         expect(problems).toEqual([])
+    })
+
+    it('use only operation kinds the registry defines', () => {
+        const used = new Set(presets.flatMap((preset) => (preset.operations ?? []).map((operation) => operation.op)))
+        expect([...used].filter((kind) => !Object.hasOwn(definitions, kind))).toEqual([])
+    })
+
+    it('have a server half for every defined operation kind, and no server half without a definition', async () => {
+        const { presetOperationHandlers } = await import('./demo-presets')
+        const defined = Object.keys(definitions).sort()
+        expect(Object.keys(presetOperationHandlers).sort()).toEqual(defined)
     })
 
     it('resolve their title and summary in BOTH catalogs', async () => {

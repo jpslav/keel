@@ -130,6 +130,7 @@
         "./server-lib/invite": "./src/server-lib/invite.ts",
         "./server-lib/notify": "./src/server-lib/notify.ts",
         "./server-lib/notify-deps": "./src/server-lib/notify-deps.ts",
+        "./server-lib/preset-operations": "./src/server-lib/preset-operations.ts",
         "./server-lib/sms": "./src/server-lib/sms.ts",
         "./server-lib/webhook-dispatch": "./src/server-lib/webhook-dispatch.ts",
         "./service-auth/mailgun": "./src/service-auth/mailgun.ts",
@@ -155,7 +156,8 @@
         "mailgun.js": "^13.3.0",
         "pg": "^8.22.0",
         "posthog-node": "^5.46.1",
-        "server-only": "^0.0.1"
+        "server-only": "^0.0.1",
+        "valibot": "^1.5.0"
     },
     "peerDependencies": {
         "@mantine/core": "^9.5.0",

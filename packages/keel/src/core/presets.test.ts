@@ -1,11 +1,15 @@
+import { appPresetOperations } from '@app-config/presets'
+import * as v from 'valibot'
 import { describe, expect, it } from 'vitest'
 import {
+    composePresetOperations,
     expandPreset,
     isReservedWorldStartName,
     presetProblems,
     resolveWorldStart,
     type DemoPreset,
     type PresetOperation,
+    type PresetOperationDefinition,
     type PresetWorld,
 } from './presets'
 
@@ -19,13 +23,22 @@ const WORLD: PresetWorld = {
                 { orgSlug: 'depot', role: 'admin' },
                 { orgSlug: 'annex', role: 'admin' },
             ],
+            restricted: false,
         },
-        { id: 'fixture-crew', email: 'cy.rigger@example.test', memberships: [{ orgSlug: 'depot', role: 'member' }] },
+        {
+            id: 'fixture-crew',
+            email: 'cy.rigger@example.test',
+            memberships: [{ orgSlug: 'depot', role: 'member' }],
+            restricted: false,
+        },
     ],
     orgSlugs: ['depot', 'annex', 'wharf'],
     handlers: ['support'],
     flags: ['demo-banner', 'jobs-held'],
 }
+
+// The registry the fixture's presets are checked against: keel's kinds plus the fixture's `docket.flag`.
+const DEFINITIONS = composePresetOperations(appPresetOperations)
 
 const BUSY: DemoPreset = {
     id: 'busy-harbor',
@@ -127,7 +140,7 @@ describe('expandPreset', () => {
 
 describe('presetProblems', () => {
     it('accepts a preset made only of things the product allows', () => {
-        expect(presetProblems([BUSY], WORLD)).toEqual([])
+        expect(presetProblems([BUSY], WORLD, DEFINITIONS)).toEqual([])
     })
 
     it('holds an invite to the rules the org screen enforces', () => {
@@ -145,7 +158,7 @@ describe('presetProblems', () => {
                 { op: 'invite', by: 'fixture-lead', org: 'wharf', email: 'nope', role: 'member' },
             ],
         }
-        const problems = presetProblems([preset], WORLD)
+        const problems = presetProblems([preset], WORLD, DEFINITIONS)
         expect(problems).toEqual([
             'preset "busy-harbor" operation 1 (invite): "fixture-crew" may not invite into "depot"',
             'preset "busy-harbor" operation 2 (invite): role "admin" cannot be granted by invite',
@@ -174,7 +187,7 @@ describe('presetProblems', () => {
                 { op: 'flag', flag: 'no-such-flag', enabled: true },
             ],
         }
-        expect(presetProblems([broken, { ...BUSY, id: 'Bad Id' }, BUSY, BUSY], WORLD)).toEqual([
+        expect(presetProblems([broken, { ...BUSY, id: 'Bad Id' }, BUSY, BUSY], WORLD, DEFINITIONS)).toEqual([
             'preset "reset": "reset" is reserved for the seeded world',
             'preset "reset": viewpoint "nobody" is not a seed person',
             'preset "reset" operation 1 (inbound): unknown org "no-such-org"',
@@ -195,11 +208,11 @@ describe('presetProblems', () => {
         }
 
         it('accepts a preset that adds only a viewpoint to a valid base', () => {
-            expect(presetProblems([BUSY, CHILD], WORLD)).toEqual([])
+            expect(presetProblems([BUSY, CHILD], WORLD, DEFINITIONS)).toEqual([])
         })
 
         it('rejects a base no preset registers, on the preset that names it', () => {
-            expect(presetProblems([{ ...CHILD, extends: 'no-such-base' }], WORLD)).toEqual([
+            expect(presetProblems([{ ...CHILD, extends: 'no-such-base' }], WORLD, DEFINITIONS)).toEqual([
                 'preset "busy-harbor-lead": extends unknown preset "no-such-base"',
             ])
         })
@@ -210,7 +223,7 @@ describe('presetProblems', () => {
             const self: DemoPreset = { id: 'self', titleKey: 'k', summaryKey: 'k', extends: 'self' }
             // `into` only leads into the a/b cycle, so it is not blamed for it
             const into: DemoPreset = { id: 'into', titleKey: 'k', summaryKey: 'k', extends: 'a' }
-            expect(presetProblems([a, b, self, into], WORLD)).toEqual([
+            expect(presetProblems([a, b, self, into], WORLD, DEFINITIONS)).toEqual([
                 'preset "a": extends chain has a cycle',
                 'preset "b": extends chain has a cycle',
                 'preset "self": extends chain has a cycle',
@@ -225,7 +238,7 @@ describe('presetProblems', () => {
                 ],
             }
             // the base's invite is operation 1 of the expanded list, the child's own is operation 4
-            expect(presetProblems([BUSY, child], WORLD)).toEqual([
+            expect(presetProblems([BUSY, child], WORLD, DEFINITIONS)).toEqual([
                 'preset "busy-harbor-lead" operation 4 (invite): "new.hand@example.test" is already a person or an invite',
             ])
         })
@@ -238,7 +251,7 @@ describe('presetProblems', () => {
             }
             const inheritsBoth: DemoPreset = { id: 'inherits', titleKey: 'k', summaryKey: 'k', extends: 'busy-harbor' }
             const overridesViewpoint: DemoPreset = { ...inheritsBoth, id: 'overrides', viewpoint: 'fixture-crew' }
-            expect(presetProblems([base, inheritsBoth, overridesViewpoint], WORLD)).toEqual([
+            expect(presetProblems([base, inheritsBoth, overridesViewpoint], WORLD, DEFINITIONS)).toEqual([
                 'preset "busy-harbor": viewpoint "nobody" is not a seed person',
                 'preset "busy-harbor" operation 1 (flag): unknown flag "no-such-flag"',
                 'preset "inherits": viewpoint "nobody" is not a seed person',
@@ -246,5 +259,134 @@ describe('presetProblems', () => {
                 'preset "overrides" operation 1 (flag): unknown flag "no-such-flag"',
             ])
         })
+    })
+})
+
+describe('presetProblems: the operation registry', () => {
+    /** A preset of one script, so each case reads as "these operations, these sentences". */
+    const scripted = (...operations: PresetOperation[]): DemoPreset => ({
+        id: 'scripted',
+        titleKey: 'k',
+        summaryKey: 'k',
+        operations,
+    })
+    /** An operation no TYPE allows — what a bad shape or an unregistered kind looks like at runtime. */
+    const untyped = (operation: Record<string, unknown>) => operation as unknown as PresetOperation
+    const CRANE_EMAIL: PresetOperation = {
+        op: 'inbound',
+        as: 'crane',
+        org: 'depot',
+        handler: 'support',
+        from: 'cy.rigger@example.test',
+        subject: 'Crane four is stuck',
+        body: 'B',
+    }
+
+    it("reports one sentence per schema issue, naming its path, and skips the kind's rules until the shape passes", () => {
+        const problems = presetProblems(
+            [
+                scripted(
+                    // no email; a role that is not a role at all; and a member who may not invite, which the
+                    // check would say — but the check never runs on arguments that failed the shape
+                    untyped({ op: 'invite', by: 'fixture-crew', org: 'depot', role: 'captain' }),
+                    untyped({ op: 'flag', flag: 'jobs-held', enabled: 'yes' }),
+                ),
+            ],
+            WORLD,
+            DEFINITIONS,
+        )
+        expect(problems).toEqual([
+            expect.stringMatching(/^preset "scripted" operation 1 \(invite\): email: \S/),
+            expect.stringMatching(/^preset "scripted" operation 1 \(invite\): role: \S/),
+            expect.stringMatching(/^preset "scripted" operation 2 \(flag\): enabled: \S/),
+        ])
+    })
+
+    it('refuses a kind nothing registers — an Object.prototype name included — and a schema that answers async', () => {
+        const asyncFlag: PresetOperationDefinition = {
+            kind: 'flag',
+            args: { '~standard': { version: 1, vendor: 'test', validate: async (value) => ({ value }) } },
+        }
+        const problems = presetProblems(
+            [
+                scripted(untyped({ op: 'docket.stamp', docket: 'crane' }), untyped({ op: 'constructor' }), {
+                    op: 'flag',
+                    flag: 'jobs-held',
+                    enabled: true,
+                }),
+            ],
+            WORLD,
+            composePresetOperations([asyncFlag]),
+        )
+        expect(problems).toEqual([
+            'preset "scripted" operation 1 (docket.stamp): no operation kind "docket.stamp"',
+            'preset "scripted" operation 2 (constructor): no operation kind "constructor"',
+            'preset "scripted" operation 3 (flag): schema for kind "flag" validated asynchronously; preset schemas must be synchronous',
+        ])
+    })
+
+    it("checks an app kind like keel's own: its schema, its rules, and the names it consumes", () => {
+        expect(
+            presetProblems(
+                [scripted(CRANE_EMAIL, { op: 'docket.flag', by: 'fixture-lead', org: 'depot', docket: 'crane' })],
+                WORLD,
+                DEFINITIONS,
+            ),
+        ).toEqual([])
+        // the fixture's `docket.flag` rule: the flagger is a member of the team (fixture-crew is not in annex)
+        expect(
+            presetProblems(
+                [scripted(CRANE_EMAIL, { op: 'docket.flag', by: 'fixture-crew', org: 'annex', docket: 'crane' })],
+                WORLD,
+                DEFINITIONS,
+            ),
+        ).toEqual(['preset "scripted" operation 2 (docket.flag): "fixture-crew" is not a member of "annex"'])
+    })
+
+    it("lets an app definition with keel's kind name REPLACE keel's", () => {
+        // the app's `flag` knows a rule keel's does not, and no longer knows keel's list of flags
+        const harborFlag: PresetOperationDefinition<'flag', { flag: string; enabled: boolean }> = {
+            kind: 'flag',
+            args: v.object({ flag: v.string(), enabled: v.boolean() }),
+            check: (args) => (args.flag === 'jobs-held' ? ['the harbor never holds its jobs'] : []),
+        }
+        const replaced = composePresetOperations([harborFlag])
+        expect(replaced.flag).toBe(harborFlag)
+        expect(
+            presetProblems(
+                [
+                    scripted(
+                        { op: 'flag', flag: 'jobs-held', enabled: true },
+                        { op: 'flag', flag: 'no-such-flag', enabled: true },
+                    ),
+                ],
+                WORLD,
+                replaced,
+            ),
+        ).toEqual(['preset "scripted" operation 1 (flag): the harbor never holds its jobs'])
+    })
+
+    it('gives each `as` name to one operation only, across the expanded script', () => {
+        const base = scripted(CRANE_EMAIL)
+        const child: DemoPreset = {
+            id: 'child',
+            titleKey: 'k',
+            summaryKey: 'k',
+            extends: 'scripted',
+            operations: [{ ...CRANE_EMAIL, subject: 'Crane five is stuck too' }],
+        }
+        expect(presetProblems([base, child], WORLD, DEFINITIONS)).toEqual([
+            'preset "child" operation 2 (inbound): "crane" is already the name of operation 1',
+        ])
+    })
+
+    it('requires every consumed name to be bound by an EARLIER operation — never bound, or bound only later', () => {
+        const flagCrane: PresetOperation = { op: 'docket.flag', by: 'fixture-lead', org: 'depot', docket: 'crane' }
+        expect(presetProblems([scripted(flagCrane)], WORLD, DEFINITIONS)).toEqual([
+            'preset "scripted" operation 1 (docket.flag): no earlier operation is named "crane"',
+        ])
+        expect(presetProblems([scripted(flagCrane, CRANE_EMAIL)], WORLD, DEFINITIONS)).toEqual([
+            'preset "scripted" operation 1 (docket.flag): "crane" is not named until operation 2, after this one',
+        ])
     })
 })

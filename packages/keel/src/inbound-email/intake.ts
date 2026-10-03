@@ -52,6 +52,8 @@ export interface IntakeOutcome {
     status: 'handled' | 'unmatched' | 'failed'
     handler: string | null
     reason?: string
+    /** On 'handled': the row the handler created, when its result named one (InboundHandlerResult). */
+    subjectId?: string | null
 }
 
 async function auditReceived(db: DbPort, org: ResolvedInboundOrg, emailId: string, actorUserId: string): Promise<void> {
@@ -123,7 +125,7 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         if (result.status === 'handled') {
             await setInboundStatus(db, org.tenantId, id, { status: 'handled', handler: parsed.handler, error: null })
             await auditReceived(db, org, id, result.actorUserId)
-            return { stored: true, id, status: 'handled', handler: parsed.handler }
+            return { stored: true, id, status: 'handled', handler: parsed.handler, subjectId: result.subjectId ?? null }
         }
         await setInboundStatus(db, org.tenantId, id, {
             status: 'unmatched',

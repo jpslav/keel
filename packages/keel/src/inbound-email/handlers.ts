@@ -33,8 +33,13 @@ export interface InboundContext {
  * separate outcome intake catches → 'failed' (the row is kept, the webhook still 200s). Handlers own
  * their own domain audit event, with the same verb the equivalent product route would record; intake
  * records the `inbound-email.received` intake event on top.
+ *
+ * `subjectId` is optional: the id of the row the handler created (the ticket an email opened), when it
+ * created one. Intake passes it through on its outcome, which is how a demo preset's `inbound` step can
+ * name what the email produced (`as`, keel/core/presets.ts) for a later step to act on.
  */
-export type InboundHandlerResult = { status: 'handled'; actorUserId: string } | { status: 'unmatched'; reason: string }
+export type InboundHandlerResult =
+    { status: 'handled'; actorUserId: string; subjectId?: string } | { status: 'unmatched'; reason: string }
 
 export type InboundHandler = (ctx: InboundContext) => Promise<InboundHandlerResult>
 
