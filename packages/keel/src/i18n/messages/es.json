@@ -98,6 +98,7 @@
         "mailToLine": "para {to}",
         "mailLinksHeading": "Enlaces en este mensaje",
         "peopleInvitedBadge": "invitado",
+        "peopleOrgRole": "{org} · {role}",
         "peopleHint": "Haz clic en una persona para iniciar sesión como ella; elegir a una persona invitada solo cambia qué mundo ves.",
         "snapshotsTab": "Instantáneas",
         "snapshotsResetHeading": "Reiniciar el mundo",

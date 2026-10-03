@@ -4,6 +4,15 @@
 
 ## The narrower, concrete gap: actors stop the moment you look away
 
+**SHIPPED 2026-10-03** (`feat/simulator-people-orgs-actor-keepalive`): `SimulatorExtraTab.keepMounted`,
+set on the showcase's Actors tab through `@app-config/simulator`. Lazy, then sticky — nothing mounts
+until the tab is first opened (so specs and tours still start in a quiet world), and from then on the
+content stays mounted, hidden, through tab switches and collapse; the collapsed panel keeps its
+hidden aside in the DOM at the same tree position, because an iframe that moves reloads. The rule is
+`packages/keel/src/components/simulator/tab-mount.ts`; the e2e proof is the last test in
+`apps/showcase/tests/e2e/destructive/actors.spec.ts`. The line references below describe the code as it
+was. Only the larger question that follows is still open.
+
 An actor's tick loop is a `setTimeout` chain owned by a mounted React component (`ActorShell`,
 `packages/keel/src/components/simulator/actor-shell.tsx`). Today it stops far more easily than
 "close the browser tab": `simulator-panel.tsx` renders a host-built tab's content only while that

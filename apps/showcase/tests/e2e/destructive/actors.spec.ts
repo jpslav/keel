@@ -258,8 +258,44 @@ test('the Actors tab autonomously drains both queues with no manual stepping', a
         )
         .toBe('completed/completed')
 
-    // Switching tabs unmounts the Actors tab → the frames leave the DOM and the actors stop.
+    // Once opened, the Actors tab is kept mounted (SimulatorExtraTab.keepMounted): switching to Jobs
+    // only HIDES the frames, so the actors keep working while you watch the queue drain. A marker on the
+    // frame's window proves it is the SAME document throughout — a reloaded (moved/remounted) iframe
+    // would also complete jobs, but it would come back without the marker.
+    const builderWindow = page.frames().find((frame) => frame.url().includes('/simulator/actors/partner-desk'))
+    expect(builderWindow, 'the partner-desk frame is attached').toBeTruthy()
+    await builderWindow!.evaluate(() => {
+        ;(window as unknown as { keepAliveMark?: boolean }).keepAliveMark = true
+    })
+    const stillSameDocument = () =>
+        builderWindow!.evaluate(() => (window as unknown as { keepAliveMark?: boolean }).keepAliveMark === true)
     await page.getByTestId('simulator-tab-jobs').click()
-    await expect(page.getByTestId('actor-frame-bundle-analyzer')).toHaveCount(0)
-    await expect(page.getByTestId('actor-frame-partner-desk')).toHaveCount(0)
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeAttached()
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeHidden()
+    const whileOnJobs = await submitExport(request) // still pinned to platform → the partner-desk's pool
+    await expect
+        .poll(async () => (await worldJob(request, whileOnJobs))?.status, {
+            message: 'a job submitted while the Jobs tab is showing still completes',
+            timeout: 60_000,
+        })
+        .toBe('completed')
+    expect(await stillSameDocument(), 'switching tabs did not reload the actor frame').toBe(true)
+
+    // Collapsing the panel doesn't stop them either — the hidden panel stays in the DOM to hold them.
+    await page.getByTestId('simulator-collapse').click()
+    await expect(page.getByTestId('simulator-pill')).toBeVisible()
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeAttached()
+    const whileCollapsed = await submitExport(request)
+    await expect
+        .poll(async () => (await worldJob(request, whileCollapsed))?.status, {
+            message: 'a job submitted while the panel is collapsed still completes',
+            timeout: 60_000,
+        })
+        .toBe('completed')
+    expect(await stillSameDocument(), 'collapsing did not reload the actor frame').toBe(true)
+
+    // And re-expanding brings back the very same frame, not a fresh one.
+    await openSimulatorPanel(page)
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeHidden() // still on the Jobs tab
+    expect(await stillSameDocument(), 're-expanding did not reload the actor frame').toBe(true)
 })

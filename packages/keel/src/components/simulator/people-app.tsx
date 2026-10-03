@@ -9,14 +9,19 @@ export interface Person {
     /** null for an invited-but-unregistered person — there's no account yet to hold a name. */
     name: string | null
     email: string
+    /** The person's role — rendered only when `orgs` is absent (an app that doesn't populate it). */
     role: string
+    /** Every org (product copy: "team") the person belongs to, with their role IN that org. When
+     *  present it replaces the single `role` chip — a multi-org person's role differs per org, so one
+     *  role alone misstates every membership but the first. */
+    orgs?: { orgSlug: string; role: string }[]
     tenantSlug: string
     status: 'active' | 'invited'
     hasAccount: boolean
     unreadMail: number
 }
 
-/** The panel-wide pill look for tiny metadata chips (role/tenant here, the header's invited
+/** The panel-wide pill look for tiny metadata chips (org·role/tenant here, the header's invited
  *  badge) — exported so the two stay in lockstep. */
 export const chipStyle = {
     border: '1px solid rgba(255,255,255,0.25)',
@@ -78,10 +83,26 @@ export function PeopleApp({
                                     </Text>
                                 ) : null}
                             </Stack>
-                            <Group gap={4} wrap="nowrap">
-                                <Text size="xs" c="gray.3" style={chipStyle}>
-                                    {person.role}
-                                </Text>
+                            {/* Wraps: a multi-org person carries one chip per membership, which at the
+                                panel's 300px minimum would otherwise squeeze the name column. */}
+                            <Group gap={4} wrap="wrap" justify="flex-end">
+                                {person.orgs && person.orgs.length > 0 ? (
+                                    person.orgs.map((org) => (
+                                        <Text
+                                            key={org.orgSlug}
+                                            size="xs"
+                                            c="gray.3"
+                                            style={chipStyle}
+                                            data-testid={`org-chip-${idPart}-${org.orgSlug}`}
+                                        >
+                                            {t('peopleOrgRole', { org: org.orgSlug, role: org.role })}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text size="xs" c="gray.3" style={chipStyle}>
+                                        {person.role}
+                                    </Text>
+                                )}
                                 <Text size="xs" c="gray.3" style={chipStyle}>
                                     {person.tenantSlug}
                                 </Text>

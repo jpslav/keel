@@ -3,7 +3,7 @@
 import { Box, Group, SegmentedControl, Stack, Text, UnstyledButton } from '@mantine/core'
 import { useLocale, useTranslations } from 'next-intl'
 import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react'
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 // LOCALES is imported relatively (not via '@') so the static-demo vite bundle resolves it the
 // same way it resolves the rest of this component tree.
 import { LOCALES } from '../../core/locale'
@@ -16,6 +16,7 @@ import { JobsApp, type ScheduleRowLike, type WorldClockLike, type WorldJobLike }
 import { MailApp, type MailItem } from './mail-app'
 import { MessagesApp, type SmsMessageRow } from './messages-app'
 import { ToursApp, type ToursAppProps } from './tours-app'
+import { tabMount } from './tab-mount'
 import { SnapshotsApp, type FeatureFlag, type Snapshot, type SnapshotAgreement } from './snapshots-app'
 
 const COLLAPSED_KEY = 'app-simulator-collapsed'
@@ -43,6 +44,10 @@ export interface SimulatorExtraTab {
     id: string
     label: string
     content: ReactNode
+    /** Keep the content mounted (hidden) once the tab has been opened, through tab switches and panel
+     *  collapse — for content that RUNS something, like the Actors tab's tick loops. Unset: the
+     *  content exists only while its tab is showing. See ./tab-mount. */
+    keepMounted?: boolean
 }
 
 // Panel width is a continuous drag (the seam on the panel's left edge), clamped to this range;
@@ -225,6 +230,18 @@ export function SimulatorPanel({
     // React has attached the click handlers. The SSR'd pill LOOKS clickable before hydration but
     // silently swallows clicks; Playwright waits for the stamp instead of racing that window.
     const [hydrated, setHydrated] = useState(false)
+    // keepMounted tabs that have been opened at least once (./tab-mount). Updated during render — the
+    // "adjust state while rendering" pattern — so the very render that first shows the tab records it.
+    const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<string>>(() => new Set())
+    if (!collapsed && !visitedTabs.has(activeTab) && extraTabs.some((tab) => tab.keepMounted && tab.id === activeTab)) {
+        setVisitedTabs(new Set(visitedTabs).add(activeTab))
+    }
+    const mountState = { activeTab, collapsed, visited: visitedTabs }
+    // A kept-mounted tab hidden behind the collapsed pill still needs its panel in the DOM, at the
+    // SAME tree position it had while expanded — an iframe that moves is an iframe that reloads.
+    const keepPanel = !collapsed || extraTabs.some((tab) => tabMount(tab, mountState) === 'hidden')
+    // A core tab's content shows only in an expanded panel (the hidden kept-alive panel holds nothing else).
+    const showing = (tab: string) => !collapsed && activeTab === tab
 
     const totalUnread = people.reduce((sum, person) => sum + person.unreadMail, 0)
     const badgeRef = useRef<HTMLDivElement | null>(null)
@@ -344,91 +361,89 @@ export function SimulatorPanel({
         onTabChange?.(tab)
     }
 
-    if (collapsed) {
-        return (
-            <>
-                {hydrated && !coachDismissed ? (
-                    <Box
-                        component="aside"
-                        aria-label={t('pillLabel')}
-                        data-testid="simulator-coachmark"
-                        style={{
-                            position: 'fixed',
-                            bottom: 132,
-                            right: 16,
-                            zIndex: 1000,
-                            maxWidth: 250,
-                            background: '#1a1b1e',
-                            color: '#f8f9fa',
-                            border: '1px solid #373a40',
-                            borderRadius: 10,
-                            padding: '10px 12px',
-                            boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
-                            // Visual-only: the bubble floats over app content, so it must never
-                            // swallow the app's clicks — only the dismiss button is interactive
-                            // (and opening the pill dismisses it too).
-                            pointerEvents: 'none',
-                        }}
-                    >
-                        <Group justify="space-between" wrap="nowrap" align="start" gap="xs">
-                            <Text size="xs" c="gray.2">
-                                {t('coachmark')}
-                            </Text>
-                            <UnstyledButton
-                                aria-label={t('coachmarkDismissAriaLabel')}
-                                data-testid="simulator-coachmark-dismiss"
-                                onClick={dismissCoach}
-                                style={{
-                                    color: '#f8f9fa',
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    lineHeight: 1,
-                                    pointerEvents: 'auto',
-                                }}
-                            >
-                                {t('coachmarkDismiss')}
-                            </UnstyledButton>
-                        </Group>
-                    </Box>
-                ) : null}
-                <UnstyledButton
-                    data-testid="simulator-pill"
-                    data-hydrated={hydrated ? 'true' : undefined}
-                    aria-label={t('pillAriaLabel')}
-                    onClick={toggle}
+    const pill = collapsed ? (
+        <>
+            {hydrated && !coachDismissed ? (
+                <Box
+                    component="aside"
+                    aria-label={t('pillLabel')}
+                    data-testid="simulator-coachmark"
                     style={{
                         position: 'fixed',
-                        bottom: 76,
+                        bottom: 132,
                         right: 16,
                         zIndex: 1000,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
+                        maxWidth: 250,
                         background: '#1a1b1e',
                         color: '#f8f9fa',
-                        borderRadius: 999,
-                        padding: '10px 18px',
                         border: '1px solid #373a40',
+                        borderRadius: 10,
+                        padding: '10px 12px',
                         boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
+                        // Visual-only: the bubble floats over app content, so it must never
+                        // swallow the app's clicks — only the dismiss button is interactive
+                        // (and opening the pill dismisses it too).
+                        pointerEvents: 'none',
                     }}
                 >
-                    <Text size="sm" fw={600} c="gray.0">
-                        {t('pillLabel')}
-                    </Text>
-                    {totalUnread > 0 ? (
-                        <Text
-                            ref={badgeRef}
-                            size="xs"
-                            fw={700}
-                            style={{ background: '#c92a2a', color: '#fff', borderRadius: 999, padding: '1px 8px' }}
-                        >
-                            {totalUnread}
+                    <Group justify="space-between" wrap="nowrap" align="start" gap="xs">
+                        <Text size="xs" c="gray.2">
+                            {t('coachmark')}
                         </Text>
-                    ) : null}
-                </UnstyledButton>
-            </>
-        )
-    }
+                        <UnstyledButton
+                            aria-label={t('coachmarkDismissAriaLabel')}
+                            data-testid="simulator-coachmark-dismiss"
+                            onClick={dismissCoach}
+                            style={{
+                                color: '#f8f9fa',
+                                fontSize: 12,
+                                fontWeight: 700,
+                                lineHeight: 1,
+                                pointerEvents: 'auto',
+                            }}
+                        >
+                            {t('coachmarkDismiss')}
+                        </UnstyledButton>
+                    </Group>
+                </Box>
+            ) : null}
+            <UnstyledButton
+                data-testid="simulator-pill"
+                data-hydrated={hydrated ? 'true' : undefined}
+                aria-label={t('pillAriaLabel')}
+                onClick={toggle}
+                style={{
+                    position: 'fixed',
+                    bottom: 76,
+                    right: 16,
+                    zIndex: 1000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: '#1a1b1e',
+                    color: '#f8f9fa',
+                    borderRadius: 999,
+                    padding: '10px 18px',
+                    border: '1px solid #373a40',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
+                }}
+            >
+                <Text size="sm" fw={600} c="gray.0">
+                    {t('pillLabel')}
+                </Text>
+                {totalUnread > 0 ? (
+                    <Text
+                        ref={badgeRef}
+                        size="xs"
+                        fw={700}
+                        style={{ background: '#c92a2a', color: '#fff', borderRadius: 999, padding: '1px 8px' }}
+                    >
+                        {totalUnread}
+                    </Text>
+                ) : null}
+            </UnstyledButton>
+        </>
+    ) : null
 
     // Host `extraTabs` slot in between Hooks and Errors — where Actors sat when it was hard-coded — so
     // visual order and the `simulator-tab-<id>` testids are preserved as app tabs register.
@@ -450,7 +465,7 @@ export function SimulatorPanel({
     // whose world this is, even before switching tabs.
     const person = people.find((person) => person.key === viewpoint) ?? null
 
-    return (
+    const panel = keepPanel ? (
         <Box
             component="aside"
             aria-label={t('panelTitle')}
@@ -466,7 +481,7 @@ export function SimulatorPanel({
                 top: 0,
                 height: '100vh',
                 alignSelf: 'flex-start',
-                display: 'flex',
+                display: collapsed ? 'none' : 'flex',
                 flexDirection: 'column',
                 background: '#1a1b1e',
                 color: '#f8f9fa',
@@ -588,7 +603,7 @@ export function SimulatorPanel({
                 tabIndex={0}
                 style={{ flex: 1, overflowY: 'auto', pointerEvents: dragging ? 'none' : undefined }}
             >
-                {activeTab === 'people' ? (
+                {showing('people') ? (
                     <>
                         {/* Either/or, never both: signed out, the hint has to explain that picking
                             anyone signs you in; signed in, it explains what clicking a row does. Both
@@ -600,28 +615,34 @@ export function SimulatorPanel({
                         <PeopleApp people={people} viewpoint={viewpoint} onSelect={onSelect} />
                     </>
                 ) : null}
-                {activeTab === 'mail' ? (
+                {showing('mail') ? (
                     <Stack gap="lg">
                         <InboundApp {...inbound} />
                         <MailApp {...mail} />
                     </Stack>
                 ) : null}
-                {activeTab === 'events' ? <EventsApp events={events} audit={audit} /> : null}
-                {activeTab === 'jobs' ? <JobsApp {...jobs} /> : null}
-                {activeTab === 'messages' ? <MessagesApp messages={messages} /> : null}
-                {activeTab === 'hooks' ? <HooksApp {...hooks} /> : null}
-                {/* App tabs render their host-built content here (between Hooks and Errors), each only
-                    while active — so a tab's live content (iframe / mounted node) unmounts with it. */}
-                {extraTabs.map((tab) =>
-                    activeTab === tab.id ? <Fragment key={tab.id}>{tab.content}</Fragment> : null,
-                )}
-                {activeTab === 'errors' ? (
+                {showing('events') ? <EventsApp events={events} audit={audit} /> : null}
+                {showing('jobs') ? <JobsApp {...jobs} /> : null}
+                {showing('messages') ? <MessagesApp messages={messages} /> : null}
+                {showing('hooks') ? <HooksApp {...hooks} /> : null}
+                {/* App tabs render their host-built content here (between Hooks and Errors). An ordinary
+                    tab's live content (iframe / mounted node) unmounts with it; a keepMounted one, once
+                    opened, stays put and is only hidden (./tab-mount). */}
+                {extraTabs.map((tab) => {
+                    const mount = tabMount(tab, mountState)
+                    return mount === 'none' ? null : (
+                        <Box key={tab.id} style={mount === 'hidden' ? { display: 'none' } : undefined}>
+                            {tab.content}
+                        </Box>
+                    )
+                })}
+                {showing('errors') ? (
                     <Box style={lightBoxStyle}>
                         <ErrorsApp runServerScenario={runServerErrorScenario} />
                     </Box>
                 ) : null}
-                {activeTab === 'snapshots' ? <SnapshotsApp {...snapshots} /> : null}
-                {activeTab === 'tours' && tours ? <ToursApp {...tours} /> : null}
+                {showing('snapshots') ? <SnapshotsApp {...snapshots} /> : null}
+                {showing('tours') && tours ? <ToursApp {...tours} /> : null}
             </Box>
             {/* Notices overlay the panel's bottom edge (absolute, not in flow) so a transient
                 confirmation never shoves the scroll body — no layout shift when one appears. */}
@@ -647,5 +668,12 @@ export function SimulatorPanel({
                 </Box>
             ) : null}
         </Box>
+    ) : null
+
+    return (
+        <>
+            {pill}
+            {panel}
+        </>
     )
 }

@@ -647,6 +647,7 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
             appSimulatorTabs.map((tab) => ({
                 id: tab.id,
                 label: t(tab.labelKey),
+                keepMounted: tab.keepMounted,
                 content: <ActorsApp slots={actorSlots} world={{ held: jobsData.held, counts: actorCounts }} />,
             })),
         [t, actorSlots, jobsData.held, actorCounts],

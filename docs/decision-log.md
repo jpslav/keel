@@ -1325,3 +1325,18 @@ read that as "keep the fixtures", and built their own world beside the starter's
   `.claude/future-tasks/init-app-blank-option.md`. The seed cannot go to zero and the Items slice can,
   but an app with no tables and no subjects has never been built here, and deleting Items deletes the
   RLS example the scaffolds cite.
+
+## Simulator People `orgs` mirrors `SeedMembership`; actor keep-alive is lazy, then sticky (2026-10-03, `feat/simulator-people-orgs-actor-keepalive`)
+
+- **`Person.orgs` is `{ orgSlug, role }[]`, not the `{ slug, role }` the task sketched.** It is
+  `SeedMembership`'s own shape, so both row builders pass `memberships` through untouched. Renaming the
+  key needs a call on the array, which trips a misdirected `react-hooks/purity` error in the static twin
+  (see build-notes). `role` stays on `Person` so an app that never sets `orgs` renders as before.
+- **`keepMounted` is lazy, then sticky, not always-on.** An always-on Actors tab would start its tick
+  loops at page load, so every spec and tour would begin in a world that is already moving. Nothing
+  mounts until the tab is first opened; from then on it stays mounted, hidden, through tab switches and
+  collapse. The collapsed panel keeps its hidden aside at the same tree position, because an iframe
+  that moves reloads. Replaced: "a host-built tab's content exists only while that tab is active".
+- **Actors off the page stay undecided.** Running an actor with no page open contradicts the stated
+  "client-side processes, in same-origin iframes" design and can never work on the `file://` host; it
+  stays open in `.claude/future-tasks/actors-as-independent-systems.md`.

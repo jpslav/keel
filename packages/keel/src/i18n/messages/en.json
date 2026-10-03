@@ -98,6 +98,7 @@
         "mailToLine": "to {to}",
         "mailLinksHeading": "Links in this message",
         "peopleInvitedBadge": "invited",
+        "peopleOrgRole": "{org} · {role}",
         "peopleHint": "Click a person to sign in as them; choosing an invited person only switches whose world you see.",
         "snapshotsTab": "Snapshots",
         "snapshotsResetHeading": "Reset the world",

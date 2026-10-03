@@ -15,13 +15,18 @@
 interface AppSimulatorTab {
     id: string
     labelKey: string
+    /** Once opened, keep the content running (hidden) through tab switches and collapse — the panel's
+     *  `SimulatorExtraTab.keepMounted`. */
+    keepMounted?: boolean
 }
 
 /**
  * The demo's one Simulator tab: Actors — in-page automations driving the real service/webhook surfaces
  * (see src/app-config/actors.ts). Rendered between Hooks and Errors via the panel's `extraTabs` prop.
  */
-export const tabs: AppSimulatorTab[] = [{ id: 'actors', labelKey: 'actorsTab' }]
+// keepMounted: the actors' tick loops live in this tab's content, so leaving the tab (to watch Jobs
+// drain, say) must not stop them.
+export const tabs: AppSimulatorTab[] = [{ id: 'actors', labelKey: 'actorsTab', keepMounted: true }]
 
 /** One app-registered Snapshots feature flag. `labelKey` is a FULLY-QUALIFIED path into the APP catalog
  *  (`namespace.key`) — a flag an app invents is app vocabulary, so its copy ships with the app. */
