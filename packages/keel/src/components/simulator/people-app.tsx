@@ -10,13 +10,17 @@ export interface Person {
     name: string | null
     email: string
     role: string
+    /** Every org (product copy: "team") the person belongs to, with their role IN that org. When
+     *  present it replaces the single `role` chip — a multi-org person's role differs per org, so one
+     *  role alone misstates every membership but the first. */
+    orgs?: { slug: string; role: string }[]
     tenantSlug: string
     status: 'active' | 'invited'
     hasAccount: boolean
     unreadMail: number
 }
 
-/** The panel-wide pill look for tiny metadata chips (role/tenant here, the header's invited
+/** The panel-wide pill look for tiny metadata chips (org·role/tenant here, the header's invited
  *  badge) — exported so the two stay in lockstep. */
 export const chipStyle = {
     border: '1px solid rgba(255,255,255,0.25)',
@@ -79,9 +83,23 @@ export function PeopleApp({
                                 ) : null}
                             </Stack>
                             <Group gap={4} wrap="nowrap">
-                                <Text size="xs" c="gray.3" style={chipStyle}>
-                                    {person.role}
-                                </Text>
+                                {person.orgs && person.orgs.length > 0 ? (
+                                    person.orgs.map((org) => (
+                                        <Text
+                                            key={org.slug}
+                                            size="xs"
+                                            c="gray.3"
+                                            style={chipStyle}
+                                            data-testid={`people-${idPart}-org-${org.slug}`}
+                                        >
+                                            {t('peopleOrgRole', { org: org.slug, role: org.role })}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text size="xs" c="gray.3" style={chipStyle}>
+                                        {person.role}
+                                    </Text>
+                                )}
                                 <Text size="xs" c="gray.3" style={chipStyle}>
                                     {person.tenantSlug}
                                 </Text>

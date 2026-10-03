@@ -317,6 +317,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
     const extraTabs: SimulatorExtraTab[] = appSimulatorTabs.map((tab) => ({
         id: tab.id,
         label: tSimulator(tab.labelKey),
+        keepMounted: tab.keepMounted,
         content: <ActorsApp slots={actorSlots} world={{ held: world.jobsHeld, counts: world.jobCounts }} />,
     }))
 
