@@ -1,10 +1,8 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the adapters.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-fakes-'))
+const tmp = makeTestTmpDir('app-fakes-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

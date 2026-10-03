@@ -40,6 +40,10 @@ Three kinds of thing live in this repo (see
   consumer, which is what makes the framework/app line falsifiable rather than merely asserted:
   anything keel reaches for that only exists because the showcase supplies it fails to compile there.
 - **The repo scaffold**: the verify gate, lint fences, CI, docs doctrine, infra draft. You keep it.
+  One rule in it reaches your own tests: a test that needs a scratch directory calls
+  `makeTestTmpDir()` / `makeTestTmpDirAsync()` from `tests/support/tmp-dir.ts`, never `mkdtemp` (lint
+  bans it), and `test:unit`, `test:coverage` and `test:contract` run through
+  `scripts/check-tmpdir-leak.mjs`, which fails the run if a directory made that way survives it.
 
 Apps live under `apps/` — one per product, each with its own `package.json`, configs and tests
 (ADR-0007). Root commands that operate on ALL apps (`pnpm verify`, `pnpm typecheck`, `pnpm lint`,

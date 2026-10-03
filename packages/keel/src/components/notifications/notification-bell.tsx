@@ -61,9 +61,11 @@ export function NotificationBell({
                                 position: 'absolute',
                                 top: -6,
                                 right: -8,
-                                background: '#c92a2a',
-                                color: '#fff',
-                                borderRadius: 999,
+                                background: 'var(--mantine-color-red-9)',
+                                color: 'var(--mantine-color-white)',
+                                // The theme's largest radius step, not '50%': a percentage radius turns
+                                // a two-digit count into an ellipse, while xl keeps a pill at any width.
+                                borderRadius: 'var(--mantine-radius-xl)',
                                 padding: '0 6px',
                                 lineHeight: '16px',
                             }}

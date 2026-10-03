@@ -1,12 +1,10 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import { orgIdForSlug } from './org-lookup'
 import { tenantIdForSlug } from './tenant-lookup'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing anything that touches pglite.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-audit-db-'))
+const tmp = makeTestTmpDir('app-audit-db-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

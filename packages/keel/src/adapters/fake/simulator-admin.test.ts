@@ -1,12 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the module (fake-adapters.test.ts /
 // simulator.test.ts pattern). closeFakeDb() no-ops here since these tests never spin up pglite —
 // resetWorld/saveSnapshot/restoreSnapshot only touch it if some earlier code in THIS process already did.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-simulator-admin-'))
+const tmp = makeTestTmpDir('app-simulator-admin-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

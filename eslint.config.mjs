@@ -190,6 +190,52 @@ const keelPublicSurfaceRule = {
     },
 }
 
+// ---------------------------------------------------------------------------------------------
+// NO RAW mkdtemp IN TESTS. A test that calls `mkdtemp`/`mkdtempSync` itself leaves the directory
+// behind on every run, and enough runs filled a dev machine's temp filesystem past 100GB. Tests make
+// scratch directories through tests/support/tmp-dir.ts, which queues the removal. Its own rule id,
+// not a `no-restricted-syntax` selector: that rule's config merges by key, so a later block that
+// re-declares it for overlapping files REPLACES this one without a word (the merge trap above).
+//
+// Deliberately narrow: it matches the call by the NAME it is made under — bare `mkdtempSync(…)`,
+// `fs.mkdtempSync(…)`, `fsp.mkdtemp(…)`, `await mkdtemp(…)` — and not a renamed import
+// (`import { mkdtemp as m }`) or a computed key. No lint rule chases an arbitrary alias; the
+// per-run TMPDIR sweep in scripts/check-tmpdir-leak.mjs is what bounds the damage if one slips by.
+/** @type {import('eslint').Rule.RuleModule} */
+const keelNoDirectMkdtempRule = {
+    meta: {
+        type: 'problem',
+        docs: { description: 'Tests make scratch directories through tests/support/tmp-dir.ts, never a raw mkdtemp.' },
+        schema: [],
+        messages: {
+            direct:
+                '`{{name}}()` leaves its directory behind on every test run. Use makeTestTmpDir() / ' +
+                'makeTestTmpDirAsync() from tests/support/tmp-dir.ts, which removes the directory when the ' +
+                'test file finishes — or, in a Playwright spec, testInfo.outputPath(), which Playwright ' +
+                'clears at the start of every run.',
+        },
+    },
+    create(context) {
+        const report = (node, name) => context.report({ node, messageId: 'direct', data: { name } })
+        return {
+            'CallExpression[callee.type="Identifier"][callee.name=/^mkdtemp(Sync)?$/]': (node) =>
+                report(node, node.callee.name),
+            'CallExpression[callee.type="MemberExpression"][callee.computed=false][callee.property.name=/^mkdtemp(Sync)?$/]':
+                (node) => report(node, node.callee.property.name),
+        }
+    },
+}
+
+// ONE plugin object, shared by every block that registers `keel/*` rules. Flat config checks plugin
+// identity across overlapping blocks, so two inline `{ keel: { rules: … } }` literals matching the
+// same file would be a "Cannot redefine plugin" error the moment a file matched both.
+const keelPlugin = {
+    rules: {
+        'public-surface': keelPublicSurfaceRule,
+        'no-direct-mkdtemp': keelNoDirectMkdtempRule,
+    },
+}
+
 /** @type {import('eslint').Linter.Config[]} */
 const eslintConfig = [
     {
@@ -461,10 +507,26 @@ const eslintConfig = [
     // appears (imports there are relative), so this also catches a self-import through the alias.
     {
         files: ['**/*.{js,jsx,mjs,cjs,ts,tsx}'],
-        plugins: { keel: { rules: { 'public-surface': keelPublicSurfaceRule } } },
+        plugins: { keel: keelPlugin },
         rules: { 'keel/public-surface': 'error' },
+    },
+    // No raw mkdtemp in tests (see keelNoDirectMkdtempRule). `**/*.test.{ts,tsx}` covers every unit and
+    // contract test, packages/keel/test-fixture included; `apps/*/tests/**` adds the Playwright specs
+    // and their support files, which are `.spec.ts` or plain helpers and which no leak guard wraps; the
+    // fixture glob is named anyway (FIXTURE_FILES_GLOB, as every framework-invariant gate here does) so
+    // a future non-`.test` helper added there is covered too. tests/support/tmp-dir.ts is the one place the raw call is
+    // meant to live — it matches neither glob, and is ignored explicitly so that stays true if either
+    // glob is ever widened.
+    {
+        files: ['**/*.test.{ts,tsx}', 'apps/*/tests/**/*.{ts,tsx}', FIXTURE_FILES_GLOB],
+        ignores: ['tests/support/tmp-dir.ts'],
+        plugins: { keel: keelPlugin },
+        rules: { 'keel/no-direct-mkdtemp': 'error' },
     },
     prettierConfig,
 ]
 
 export default eslintConfig
+
+// For eslint.config.mjs's own rule tests only — flat config reads the default export and nothing else.
+export const keelNoDirectMkdtempRuleForTests = keelNoDirectMkdtempRule

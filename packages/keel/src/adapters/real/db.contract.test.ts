@@ -1,10 +1,8 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import EmbeddedPostgres from 'embedded-postgres'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DbPort } from '../../ports/db'
 import { createRealDb } from './db'
@@ -31,7 +29,7 @@ beforeAll(async () => {
     if (!serverUrl) {
         const port = portFor('contractPg')
         embedded = new EmbeddedPostgres({
-            databaseDir: mkdtempSync(path.join(tmpdir(), 'keel-contract-pg-')),
+            databaseDir: makeTestTmpDir('keel-contract-pg-'),
             user: 'postgres',
             password: 'postgres',
             port,

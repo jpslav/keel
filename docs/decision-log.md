@@ -1388,3 +1388,40 @@ read that as "keep the fixtures", and built their own world beside the starter's
   and with no `date` columns in its proofs that difference is harmless today. Watched failing:
   removing the `date` override, then the `date[]` override, from the real adapter turns the `keel`
   contract project red, and removing pglite's turns the pglite suite red.
+
+## Per-person cloud workspaces: a recipe, not a port (2026-10-03, `upstream-mechanical-bundle`)
+
+A future task proposed a `workspace` port generic over the backend, with its adapter selection gated
+independently of `APP_MODE`. It is resolved the other way, as `docs/recipes/workspace-coder.md`.
+
+- **Fails both vendor-code tests.** Almost no instance provisions per-person dev environments
+  (universality), and an authenticated REST vendor behind a polled long-running operation is a class
+  the LLM, email and webhook-dispatch adapters already teach (new-class).
+- **The implementation it was drawn from broke doctrine twice**: it chose its adapter from the
+  backend's own env vars rather than `APP_MODE`, and it let product vocabulary into the adapter
+  registry. Writing the plan down, rather than lifting the code, is what keeps both out.
+- **The one legitimate need survives as an explicit override.** A real backend inside an otherwise
+  simulated demo is allowed only as a named, fail-closed switch with its costs stated in the recipe —
+  never an adapter that turns itself on because its env vars happen to be present.
+
+## What a derived app's mechanical changes did NOT bring back (2026-10-03, `upstream-mechanical-bundle`)
+
+A derived app's change list was mined for small, mechanical items worth taking back into keel. Four of
+them were declined, each for the same reason: keel has no caller for them, and dead exports fail the
+gate (`knip`) as surely as dead vendor code fails the doctrine.
+
+- **`BadRequestError` / `ConflictError` in `packages/keel/src/ports/errors.ts`.** The derived app throws
+  them from adapters keel does not ship (a workspace backend — now `docs/recipes/workspace-coder.md`,
+  which tells an adopter to export their own typed conflict from that port) and maps them in its own
+  respond helper. The nearest keel candidate is the fake storage adapter's path-escape refusal, but
+  making that a 400 would give the fake a failure mode the real S3 adapter does not have, which is the
+  opposite of what a fake is for. Revisit when a real keel adapter has a caller-input failure to report.
+- **Optional `themePrimaryColor` / `themeRadius` on `SeedTenant`.** `getTenantTheme`
+  (`packages/keel/src/theme.ts`) already falls back when they are missing, but every keel seed world —
+  both apps and the fixture — sets both, so optional fields would be a contract widened for nobody.
+- **A `label` prop on the user menu.** Generic presentation (text and a chevron beside the avatar),
+  not a framework invariant made visible; it fails the component test in
+  `docs/development-approach.md`, and no keel shell draws a name in its top bar.
+- **Out of scope by choice, not by test:** stopping the invite flow from emailing admins (a product
+  decision), a caller-named org for `sendInvite` and the live-org list it needs, a fake-person helper,
+  and a package licence file.

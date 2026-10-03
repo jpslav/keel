@@ -1227,3 +1227,66 @@ pass got no exclusion list; prior claims were handed to it as hypotheses to re-d
   terminates), and rendering the cursor from `created_at` (the walk stops after 3 of 6 rows). That
   needs a row that is oldest by one column and newest by the other, and a tie wider than the page
   size.
+
+## Test temp directories are cleaned up by construction (2026-10-03)
+
+Twenty-three test files made a scratch directory with a raw `mkdtempSync` and never removed it, so every
+`pnpm test:unit` left roughly that many directories (several of them holding a pglite data dir) in
+`$TMPDIR`. Run often enough across worktrees, that has filled a developer's temp filesystem past
+100GB without anything ever failing.
+
+- **One helper, `tests/support/tmp-dir.ts`.** `makeTestTmpDir(prefix)` / `makeTestTmpDirAsync(prefix)`
+  create the directory, write an EMPTY SIBLING marker file (`<dir>.keel-test-tmp`), and queue both for
+  removal. The marker is a sibling and not a file inside the directory because some tests assert the
+  exact contents of their directory (`atomic-write.test.ts` lists it). The directory is removed first
+  and the marker second, in one `try`, so a directory that cannot be deleted keeps its marker and the
+  leak guard still sees it. The suffix lives in `tests/support/tmp-dir-marker.mjs` because the guard is
+  plain node and cannot import a `.ts` file.
+- **The `afterAll` is registered at the module's top level, and the functions register nothing.**
+  Vitest silently drops a hook registered at run time from inside another hook, so a helper that
+  registered its own cleanup on first use would leak exactly when a test file called it from a
+  `beforeAll` — no error, just no cleanup. Registering nothing in the functions is what makes them
+  callable from module scope, `beforeAll`, `beforeEach` or a test body. Vitest isolates each test file
+  (`isolate` is left at its default), so the module and its one hook exist once per file. `afterAll`
+  hooks run in reverse registration order; this was checked rather than assumed, by logging from
+  `db/jobs.test.ts`'s own `afterAll` and from the helper's — the file's own hook ran first, the
+  directory removal second, so a handle closed in a test's own `afterAll` is closed before its
+  directory goes.
+- **`scripts/check-tmpdir-leak.mjs` runs `vitest` with `TMPDIR` pointed at a fresh per-run directory**
+  (`test:unit`, `test:coverage`, `test:contract`), counts the marker files left in it, and deletes it
+  whether or not the run passed. The per-run directory is the point. The obvious design — count markers
+  in the shared tmpdir before and after — reports a leak whenever a second worktree runs its tests in
+  the same window, and this repo is worked from several worktrees at once; with a private tmpdir the
+  count is exactly this run's. It also bounds the damage from a leak the lint rule cannot see (an
+  aliased `mkdtemp`, a vendor library that makes its own temp dir): that directory lands in the per-run
+  directory, which is removed, so it cannot accumulate across runs. A failing child's exit status wins;
+  a clean child with surviving markers exits 1 and names them.
+  One macOS constraint to know: `tsx` (used by `adopter-identity.test.ts`) opens a unix socket under
+  `$TMPDIR`, and a socket path is limited to about 104 characters. The run-directory name is kept short
+  for that reason; a long `TMPDIR` of your own can reproduce `listen EINVAL` in that test.
+- **`keel/no-direct-mkdtemp` is its own rule id**, not a `no-restricted-syntax` selector — that rule's
+  config merges by key, and a later block re-declaring it for overlapping files replaces the earlier
+  selectors without a word (the trap this file's lint config already documents). It matches the call by
+  name, bare or as a member (`fs.mkdtempSync`, `fsp.mkdtemp`), over `**/*.test.{ts,tsx}`,
+  `apps/*/tests/**` and `packages/keel/test-fixture/**`. The second covers the Playwright specs and
+  their helpers, which `test:e2e` runs outside any leak guard; the helper registers a vitest hook and
+  cannot run there, so the message also names Playwright's own `testInfo.outputPath()`, which Playwright
+  clears at the start of every run. The third is named explicitly, as every framework-invariant gate
+  is, so a non-`.test` fixture helper is covered. It does not see a renamed import or a computed key;
+  the guard above is what covers those. Both `keel/*` rules now share ONE plugin object, since flat
+  config compares plugin identity across overlapping blocks. The rule is exported from
+  `eslint.config.mjs` for `tests/lint/no-direct-mkdtemp.test.ts` — in the alias-free `repo` vitest
+  project, since it pins repo tooling rather than framework code — which pins what it matches.
+- **Seen to fail, both gates.** A bare `mkdtempSync(...)`, an `fs.mkdtempSync(...)` in a test file, a
+  bare call in a `test-fixture/*.test.ts`, one in a non-test `test-fixture/*.ts` and one in an
+  `apps/showcase/tests/e2e/*.spec.ts` each turned
+  `pnpm lint` red with `keel/no-direct-mkdtemp` ("`mkdtempSync()` leaves its directory behind on every
+  test run. Use makeTestTmpDir() / makeTestTmpDirAsync() ..."). With the helper's directory removal
+  made to throw, `pnpm test:unit packages/keel/src/db/audit.test.ts` passed its tests and then exited 1
+  with `check-tmpdir-leak: 1 test temp dir(s) outlived the run: app-audit-db-xfn0R5.keel-test-tmp`.
+  Restored, two full `pnpm test:unit` runs reported 0 unremoved and left no `keel-test-run-*` behind.
+  Worth knowing from that run: the helper's `console.error` for the failed removal appeared under
+  `--reporter=verbose` but not under vitest's default reporter, so the guard — not that log line — is
+  what makes a failed removal visible.
+- **`scripts/e2e-profile.mjs` is left alone**: it already `rmSync`s its scratch directory, and it is a
+  script, outside the rule's scope (test files).
