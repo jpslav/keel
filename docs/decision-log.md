@@ -1372,3 +1372,25 @@ independently of `APP_MODE`. It is resolved the other way, as `docs/recipes/work
 - **The one legitimate need survives as an explicit override.** A real backend inside an otherwise
   simulated demo is allowed only as a named, fail-closed switch with its costs stated in the recipe —
   never an adapter that turns itself on because its env vars happen to be present.
+
+## What a derived app's mechanical changes did NOT bring back (2026-10-03, `upstream-mechanical-bundle`)
+
+A derived app's change list was mined for small, mechanical items worth taking back into keel. Four of
+them were declined, each for the same reason: keel has no caller for them, and dead exports fail the
+gate (`knip`) as surely as dead vendor code fails the doctrine.
+
+- **`BadRequestError` / `ConflictError` in `packages/keel/src/ports/errors.ts`.** The derived app throws
+  them from adapters keel does not ship (a workspace backend — now `docs/recipes/workspace-coder.md`,
+  which tells an adopter to export their own typed conflict from that port) and maps them in its own
+  respond helper. The nearest keel candidate is the fake storage adapter's path-escape refusal, but
+  making that a 400 would give the fake a failure mode the real S3 adapter does not have, which is the
+  opposite of what a fake is for. Revisit when a real keel adapter has a caller-input failure to report.
+- **Optional `themePrimaryColor` / `themeRadius` on `SeedTenant`.** `getTenantTheme`
+  (`packages/keel/src/theme.ts`) already falls back when they are missing, but every keel seed world —
+  both apps and the fixture — sets both, so optional fields would be a contract widened for nobody.
+- **A `label` prop on the user menu.** Generic presentation (text and a chevron beside the avatar),
+  not a framework invariant made visible; it fails the component test in
+  `docs/development-approach.md`, and no keel shell draws a name in its top bar.
+- **Out of scope by choice, not by test:** stopping the invite flow from emailing admins (a product
+  decision), a caller-named org for `sendInvite` and the live-org list it needs, a fake-person helper,
+  and a package licence file.
