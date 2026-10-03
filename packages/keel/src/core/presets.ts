@@ -54,7 +54,7 @@ export interface DemoPreset {
 }
 
 /** The one world start every host has: the seeded world, with no script on top. */
-export const RESET_WORLD_START = 'reset'
+const RESET_WORLD_START = 'reset'
 
 /** The name pattern a saved snapshot uses (simulator-admin.ts) — presets share the namespace a tour's
  *  `snapshot` field resolves in, so they share its shape too. */
