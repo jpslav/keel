@@ -3,6 +3,7 @@
 import { Group, Stack, Text, UnstyledButton } from '@mantine/core'
 import { useTranslations } from 'next-intl'
 import { useState } from 'react'
+import { peopleDimensions } from './people-dimensions'
 
 export interface Person {
     key: string
@@ -13,7 +14,8 @@ export interface Person {
     role: string
     /** Every org (product copy: "team") the person belongs to, with their role IN that org. When
      *  present it replaces the single `role` chip — a multi-org person's role differs per org, so one
-     *  role alone misstates every membership but the first. */
+     *  role alone misstates every membership but the first. The org NAME shows only when the rows span
+     *  more than one org (./people-dimensions); in a one-team world each chip is just the role. */
     orgs?: { orgSlug: string; role: string }[]
     tenantSlug: string
     status: 'active' | 'invited'
@@ -46,6 +48,7 @@ export function PeopleApp({
     // Rows carry a persistent border + faint fill so they read as buttons at rest; hover lifts the
     // non-active fill (local state — no global CSS), the active row stays brightest.
     const [hoveredKey, setHoveredKey] = useState<string | null>(null)
+    const { showTenant, showOrg } = peopleDimensions(people)
     return (
         <Stack gap={6} data-testid="simulator-people">
             {people.map((person) => {
@@ -86,7 +89,7 @@ export function PeopleApp({
                             {/* Wraps: a multi-org person carries one chip per membership, which at the
                                 panel's 300px minimum would otherwise squeeze the name column. */}
                             <Group gap={4} wrap="wrap" justify="flex-end">
-                                {person.orgs && person.orgs.length > 0 ? (
+                                {person.orgs && person.orgs.length > 0 && showOrg ? (
                                     person.orgs.map((org) => (
                                         <Text
                                             key={org.orgSlug}
@@ -100,12 +103,14 @@ export function PeopleApp({
                                     ))
                                 ) : (
                                     <Text size="xs" c="gray.3" style={chipStyle}>
-                                        {person.role}
+                                        {person.orgs?.[0]?.role ?? person.role}
                                     </Text>
                                 )}
-                                <Text size="xs" c="gray.3" style={chipStyle}>
-                                    {person.tenantSlug}
-                                </Text>
+                                {showTenant ? (
+                                    <Text size="xs" c="gray.3" style={chipStyle} data-testid={`tenant-chip-${idPart}`}>
+                                        {person.tenantSlug}
+                                    </Text>
+                                ) : null}
                                 {person.status === 'invited' ? (
                                     <Text size="xs" c="gray.3" style={chipStyle} data-testid="people-invited-badge">
                                         {t('peopleInvitedBadge')}

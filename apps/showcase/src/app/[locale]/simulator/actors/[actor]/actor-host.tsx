@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { type ActorLog, builderTick, type ServiceMemory, serviceTick } from 'keel/components/simulator/actor-runtime'
 import { ActorShell } from 'keel/components/simulator/actor-shell'
 import type { ActorId } from '@app-config/actors'
+import { actorsHeldFlag } from '@app-config/simulator'
 import { createBuilderDriver, createServiceDriver } from './drivers'
 
 /**
@@ -38,6 +39,15 @@ export function ActorHost({ actor }: { actor: ActorId }) {
         [actor, t],
     )
 
+    // The world's hold on its counterparties (the `actors-held` Snapshots flag), asked before every
+    // autonomous tick — the frame is its own document, so it reads the persisted flag, not panel state.
+    const held = useCallback(async () => {
+        const res = await fetch('/api/simulator/flags')
+        if (!res.ok) throw new Error(`flags → ${res.status}`)
+        const { flags } = (await res.json()) as { flags: Record<string, boolean> }
+        return flags[actorsHeldFlag] ?? false
+    }, [])
+
     const [mounted, setMounted] = useState(false)
     const [startPaused, setStartPaused] = useState(false)
 
@@ -55,7 +65,7 @@ export function ActorHost({ actor }: { actor: ActorId }) {
     // inside the dashboard's own <main>, so only this full-page host adds the wrapper.
     return (
         <main style={{ minHeight: '100vh' }}>
-            <ActorShell actor={actor} tick={tick} startPaused={startPaused} />
+            <ActorShell actor={actor} tick={tick} startPaused={startPaused} held={held} />
         </main>
     )
 }

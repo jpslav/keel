@@ -33,7 +33,7 @@ import { TicketsCard, type TicketItem } from '../components/tickets-card'
 import { WelcomeScreen } from '../components/welcome-screen'
 import { staffOrgSlug } from '../app-config/abilities'
 import { actors, analyzerOrgSlug } from '../app-config/actors'
-import { tabs as appSimulatorTabs } from '../app-config/simulator'
+import { actorsHeldFlag, tabs as appSimulatorTabs } from '../app-config/simulator'
 import { type EscalationStatus, escalationMachine } from '../domain/escalations'
 import { TICKET_PAGE_SIZE, nextTicketRef, type TicketStatus, ticketMachine } from '../domain/tickets'
 
@@ -296,6 +296,8 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
         (log: ActorLog) => builderTick(builderDriver([analyzerOrgSlug], log), log, tSimulator),
         [builderDriver, tSimulator],
     )
+    // The world's hold on its counterparties — the same `actors-held` flag the server host reads.
+    const actorsHeld = world.featureFlags.find((f) => f.flag === actorsHeldFlag)?.enabled ?? false
     const actorSlots: ActorSlot[] = actors.map(({ id, titleKey, descriptionKey }) => ({
         id,
         title: tActors(titleKey),
@@ -306,6 +308,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
                 actor={id}
                 inline
                 startPaused={false}
+                held={() => actorsHeld}
                 tick={id === 'bundle-analyzer' ? serviceTickFn : builderTickFn}
             />
         ),

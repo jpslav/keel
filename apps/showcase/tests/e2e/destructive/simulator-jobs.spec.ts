@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { openSimulatorPanel } from '../support/simulator'
+import { setWorldFlag } from '../support/world-flags'
 
 /**
  * Destructive: this spec flips the persisted `jobs-held` world flag ON (a full-page reload in the
@@ -11,15 +12,7 @@ import { openSimulatorPanel } from '../support/simulator'
  * Simulator continuity so the world is left exactly as found.
  */
 
-const flagsFile = path.resolve(__dirname, '../../../.data/analytics/flags.json')
 const simulatorState = path.resolve(__dirname, '../../../.data/simulator/state.json')
-
-function setJobsHeld(enabled: boolean) {
-    const flags = existsSync(flagsFile) ? (JSON.parse(readFileSync(flagsFile, 'utf8')) as Record<string, boolean>) : {}
-    flags['jobs-held'] = enabled
-    mkdirSync(path.dirname(flagsFile), { recursive: true })
-    writeFileSync(flagsFile, JSON.stringify(flags, null, 2))
-}
 
 function clearSimulatorState() {
     try {
@@ -32,11 +25,14 @@ function clearSimulatorState() {
 // Start from a known-off flag (a prior aborted run could have left it ON — then the toggle click
 // would turn it OFF instead of ON) and no stale continuity, and leave both that way afterwards.
 test.beforeAll(() => {
-    setJobsHeld(false)
+    setWorldFlag('jobs-held', false)
+    // The actors run from page load and would claim a held job before this spec drives it by hand.
+    setWorldFlag('actors-held', true)
     clearSimulatorState()
 })
 test.afterAll(() => {
-    setJobsHeld(false)
+    setWorldFlag('jobs-held', false)
+    setWorldFlag('actors-held', false)
     clearSimulatorState()
 })
 
