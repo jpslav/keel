@@ -2,7 +2,8 @@ import { isSimulated } from 'keel/adapters/index'
 import { KNOWN_FLAGS, readFlags, setFlag } from 'keel/adapters/fake/analytics'
 import { withPortErrors } from '../../respond'
 
-/** The current value of every known flag — what an actor frame asks before each autonomous tick. */
+/** The current value of every known flag: the read-out of the world's switches. An actor frame asks
+ *  /api/simulator/actors/held instead, which also answers that actor's own hold. */
 export async function GET(): Promise<Response> {
     if (!isSimulated) return new Response(null, { status: 404 })
     return withPortErrors(async () => {

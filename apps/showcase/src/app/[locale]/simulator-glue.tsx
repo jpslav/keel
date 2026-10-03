@@ -628,12 +628,13 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
     }
 
     // A refused or failed load is SAID, never just un-busied: the server may have reset the world before
-    // the step that failed, so what this page still shows is not what `.data/` now holds. No reload, so a
-    // tour that asked for the preset can still record the miss.
+    // the step that failed, so what this page still shows is not what `.data/` now holds — and the notice
+    // says exactly that (`noticePresetFailedStale`, not the static host's wording, whose screen IS the
+    // world). No reload, so a tour that asked for the preset can still record the miss.
     function presetFailed(id: string): false {
         setBusyPreset(null)
         const preset = presets.find((p) => p.id === id)
-        pushNotice(t('noticePresetFailed', { name: preset ? tRoot(preset.titleKey) : id }))
+        pushNotice(t('noticePresetFailedStale', { name: preset ? tRoot(preset.titleKey) : id }))
         return false
     }
 

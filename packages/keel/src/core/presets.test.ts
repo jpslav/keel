@@ -327,6 +327,15 @@ describe('presetProblems: the operation registry', () => {
         ])
     })
 
+    it('refuses an argument the kind does not take: a misspelling is a gate failure, not silently dropped', () => {
+        const problems = presetProblems(
+            [scripted(untyped({ op: 'flag', flag: 'jobs-held', enabled: true, enabeld: false }))],
+            WORLD,
+            DEFINITIONS,
+        )
+        expect(problems).toEqual([expect.stringMatching(/^preset "scripted" operation 1 \(flag\): enabeld: \S/)])
+    })
+
     it('refuses a kind nothing registers — an Object.prototype name included — and a schema that answers async', () => {
         const asyncFlag: PresetOperationDefinition = {
             kind: 'flag',

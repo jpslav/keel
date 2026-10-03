@@ -17,7 +17,7 @@ export type DocketFlagOperation = PresetOperationOf<'docket.flag', DocketFlagArg
 
 export const docketFlag: PresetOperationDefinition<'docket.flag', DocketFlagArgs> = {
     kind: 'docket.flag',
-    args: v.object({ by: v.string(), org: v.string(), docket: v.string() }),
+    args: v.strictObject({ by: v.string(), org: v.string(), docket: v.string() }),
     check(args, world) {
         const member = world.people.some(
             (person) => person.id === args.by && person.memberships.some((m) => m.orgSlug === args.org),

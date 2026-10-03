@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
  * - a target that no longer exists. The lint rule matches on KEYS, so deleting or renaming a
  *   published module leaves an entry that points at nothing and still lets the import pass lint.
  * - a catch-all pattern. `"./*": "./src/*.ts"` is what the map used to be, and re-adding it would
- *   publish all 149 modules again while every check in the repo stayed green — the exact regression
+ *   publish every module in the package again while every check in the repo stayed green — the exact regression
  *   this surface exists to prevent, and the one nothing else can see.
  */
 // Resolved from the repo root (vitest's cwd) rather than from import.meta.url, which the happy-dom

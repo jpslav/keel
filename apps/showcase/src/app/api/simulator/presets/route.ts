@@ -1,5 +1,6 @@
 import { isSimulated } from 'keel/adapters/index'
 import { LOCALES } from 'keel/core/locale'
+import { WORLD_START_NAME_PATTERN } from 'keel/core/presets'
 import { applyDemoPreset } from 'keel/server-lib/demo-presets'
 import { withPortErrors } from '../../respond'
 
@@ -13,7 +14,10 @@ export async function POST(request: Request): Promise<Response> {
     if (!isSimulated) return new Response(null, { status: 404 })
     return withPortErrors(async () => {
         const { name, locale } = (await request.json()) as { name?: unknown; locale?: unknown }
-        if (typeof name !== 'string') return Response.json({ error: 'name is required' }, { status: 400 })
+        // The same name shape a saved snapshot takes, checked at the boundary before the registry is asked.
+        if (typeof name !== 'string' || !WORLD_START_NAME_PATTERN.test(name)) {
+            return Response.json({ error: 'invalid name' }, { status: 400 })
+        }
         if (typeof locale !== 'string' || !(LOCALES as readonly string[]).includes(locale)) {
             return Response.json({ error: 'unknown locale' }, { status: 400 })
         }

@@ -305,7 +305,7 @@ a vendor the app calls _out_ to (Clerk, S3, Mailgun, Anthropic) — a world buil
 has nothing that calls back _in_, so an async workflow just sits at `queued` with nobody to advance it.
 Simulator's **Actors** tab closes that gap: simulated counterparties (a bundle analyzer, a partner desk)
 run as independent client-side processes, in same-origin iframes, autonomous by default with pause/step
-(mounted from page load and kept running whatever the panel shows — the world's `actors-held` flag pauses them),
+(mounted from page load and kept running whatever the panel shows — the world's `actors-held` flag pauses them all, and a demo preset's `actor.hold` pauses one),
 and they talk to the app only over the surfaces a genuine counterparty would use — `/api/service/*` polls
 and `/api/webhooks/*` POSTs, real inbound requests, never an in-process shortcut. A handful of mode-gated
 `/api/simulator/actors/*` routes give them a god's-eye work queue and produce the artifact a completion
@@ -335,7 +335,7 @@ someone and let them press Start.
 **Presets: starting points every host can load ✅.** A saved snapshot is a binary copy of `.data/`, so it
 restores only where there is a server to copy it into. A **demo preset** is the other representation —
 the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag, holding one
-Simulator actor, and whatever kinds the app adds, each naming its actor and team) and an optional viewpoint — which each host replays its own way: the
+Simulator actor, and whatever kinds the app adds; each one that acts as someone or in a team names them) and an optional viewpoint — which each host replays its own way: the
 server through the same code the product runs (`keel/server-lib/demo-presets.ts`, sharing
 `sendOrgInvite` with the org route and the intake with the inbound webhook), the `file://` twin through
 its in-memory world, one step per commit so each step sees the world its predecessor left. So a preset

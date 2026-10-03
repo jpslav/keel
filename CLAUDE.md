@@ -106,7 +106,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   because `@app-config/*` is a bare specifier and a single alias can only name one app, PLUS a `keel`
   project that runs the packages' suites against the framework's own seam
   (**`packages/keel/test-fixture`** — see below). keel's seam-conformance tests (i18n partition/parity,
-  the pglite RLS suite) run under every app project as well, and that is what proves the seam against
+  the pglite RLS suite, the demo-presets check) run under every app project as well, and that is what proves the seam against
   real apps rather than only against the fixture. E2E
   lives in `apps/*/tests/e2e/` (showcase on :3000, starter on :3100). In a LINKED WORKTREE both ports
   are derived per checkout by `scripts/ports.mjs`, so parallel agent sessions don't adopt each other's

@@ -31,7 +31,7 @@ half registers on its own server-only seam module and never on `presets.ts`. Aft
 2. **The definition** (`definition.ts`), copying
    `apps/showcase/src/app-config/presets/operations/ticket-assign/definition.ts`:
     - export the args interface and `export type <Kind>Operation = PresetOperationOf<'<kind>', <Args>>`;
-    - `args`: the SHAPE, as a Valibot `v.object(...)` (any Standard Schema library works; it must
+    - `args`: the SHAPE, as a Valibot `v.strictObject(...)`, so a misspelled argument fails the gate rather than being dropped (any Standard Schema library works; it must
       validate synchronously). Types only — a value the product would refuse is a rule, not a shape;
     - `check(args, world, earlier)`: the rules the product's route would enforce, as plain sentences.
       Ask the SAME question the route's `authorize(...)` asks, through `defineAbilitiesFor`

@@ -10,11 +10,11 @@ an adopter keeps and the framework's falsifier, and its route tree shows it: the
 protected dashboard, `api/auth/{dev-signin,org,signout}` and one entity's route. It has none of the wiring
 the showcase uses to reach capabilities keel ships screens for:
 
-| Capability          | keel ships                                              | Wiring that exists only in `apps/showcase`                                                                                      |
-| ------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Inviting someone    | `OrgScreen`, `sendOrgInvite` (`keel/server-lib/invite`) | `apps/showcase/src/app/[locale]/(protected)/org/` and `apps/showcase/src/app/api/org/invite/route.ts`                           |
-| Accepting an invite | the accept-invite screen                                | `apps/showcase/src/app/[locale]/accept-invite/` and `apps/showcase/src/app/api/auth/accept-invite/route.ts`                     |
-| The Simulator panel | the panel, every tab, the replay code                   | `apps/showcase/src/app/[locale]/simulator-glue.tsx` (782 lines) and 32 route files under `apps/showcase/src/app/api/simulator/` |
+| Capability          | keel ships                                              | Wiring that exists only in `apps/showcase`                                                                                            |
+| ------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Inviting someone    | `OrgScreen`, `sendOrgInvite` (`keel/server-lib/invite`) | `apps/showcase/src/app/[locale]/(protected)/org/` and `apps/showcase/src/app/api/org/invite/route.ts`                                 |
+| Accepting an invite | the accept-invite screen                                | `apps/showcase/src/app/[locale]/accept-invite/` and `apps/showcase/src/app/api/auth/accept-invite/route.ts`                           |
+| The Simulator panel | the panel, every tab, the replay code                   | `apps/showcase/src/app/[locale]/simulator-glue.tsx` (about 800 lines) and 32 route files under `apps/showcase/src/app/api/simulator/` |
 
 So **the Simulator is not reachable from the starter's own `pnpm dev`**: the glue the layout dynamic-imports
 in simulated mode exists only in the showcase (`apps/showcase/src/app/[locale]/layout.tsx`). Presets, tours

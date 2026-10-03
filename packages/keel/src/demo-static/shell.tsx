@@ -2,7 +2,7 @@ import { findOrg, findTenant, type SeedPerson } from '@app-config/seed'
 import { presets } from '@app-config/presets'
 import { Badge, Group } from '@mantine/core'
 import { useTranslations } from 'next-intl'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import { AcceptancesSection } from '../components/agreements/acceptances-section'
 import { AgreementAdvisoryBanner } from '../components/agreements/agreement-advisory-banner'
 import { AgreementGate } from '../components/agreements/agreement-gate'
@@ -101,9 +101,16 @@ export function DemoShell({
     // The preset a load is replaying for. Static replays run one step per commit, so a load takes several
     // renders; while it does, the Snapshots tab disables the other world rewrites, as the server host does.
     const [busyPreset, setBusyPreset] = useState<string | null>(null)
+    // Only the LATEST load may clear it: a second load (or a tour starting from a preset) resets the
+    // world, which settles the first load's promise — and that settle must not mark the world idle while
+    // the second one is still replaying.
+    const loadSeq = useRef(0)
     function loadPreset(id: string): Promise<boolean> {
+        const mine = (loadSeq.current += 1)
         setBusyPreset(id)
-        return world.applyPreset(id).finally(() => setBusyPreset(null))
+        return world.applyPreset(id).finally(() => {
+            if (loadSeq.current === mine) setBusyPreset(null)
+        })
     }
 
     const tours = useTours({
