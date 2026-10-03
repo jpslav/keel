@@ -11,8 +11,8 @@ _engine_ is framework (`packages/keel/src/demo-static/tour/` — driver, engine 
 
 1. **Register** in `apps/showcase/src/app-config/tours.ts`: add a `TourDefinition`
    (`keel/demo-static/tour/contracts`) with `id`, `titleKey`, `summaryKey`, usually `snapshot: 'reset'`
-   or the id of a demo preset (`presets` in `apps/showcase/src/app-config/presets.ts`) when the story
-   should open mid-shift — both work on every host; a saved snapshot's name works only on a server and
+   or the id of a demo preset (`presets` in `apps/showcase/src/app-config/presets.ts`, written with
+   `/new-preset`) when the story should open mid-shift — both work on every host; a saved snapshot's name works only on a server and
    fails the `file://` walkthrough gate. Then its steps. `apps/starter` registers `[]` — with no tours the panel renders no Tours tab at all,
    so leave that off-switch intact.
 2. **Narration** goes in the APP catalog (`apps/showcase/messages/{en,es}.json`, `tours` namespace),

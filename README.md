@@ -93,6 +93,12 @@ screens over in-memory fakes, Simulator included. You can email it to someone an
 the whole product from disk, or press **Simulator → Tours → Start** and be walked through it. It is also the most demanding proof that the ports boundary really holds: if
 anything reached past a port, it could not build.
 
+**Demoing it.** Two clicks get you into the story, on `pnpm dev` and in the single-file demo alike.
+**Simulator → Snapshots → Start from a preset → Load** resets the world to a scripted starting point and
+signs you in as the right person; **Simulator → Tours → Start** hands the wheel to a narrated walkthrough,
+which may itself begin from a preset. [docs/runbooks/demo.md](docs/runbooks/demo.md) is the story to tell;
+`/new-preset` and `/new-tour` are how you write your own.
+
 ## Architecture in one paragraph
 
 Vendor SDKs live only in [packages/keel/src/adapters/](packages/keel/src/adapters/) (lint-enforced);
