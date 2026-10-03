@@ -124,7 +124,17 @@
         "ticketStep12": "Now the decision itself. Press Next to accept the escalation, and watch what leaves the building when she does.",
         "ticketStep13": "The decision is queued for the endpoint that asked to hear about it. Nothing has been sent yet, which is the truth about outbound work: it waits its turn. Press Next to let the world make the attempt.",
         "ticketStep14": "Delivered, and <b>signed</b>: the envelope that went over the wire, the signature a receiver checks it against, the attempt count. Make this endpoint fail from here and you can watch the retries back off and give up.",
-        "ticketStep15": "That is the loop. Mail becomes work, work gets handed over, an outside process does its part, and the decision leaves as a fact other systems can trust. Everything you just watched is yours to click now, and the jobs are still held: the knob is in <b>Snapshots</b>."
+        "ticketStep15": "That is the loop. Mail becomes work, work gets handed over, an outside process does its part, and the decision leaves as a fact other systems can trust. Everything you just watched is yours to click now, and the jobs are still held: the knob is in <b>Snapshots</b>.",
+        "inviteTitle": "Joining the desk, from a preset",
+        "inviteSummary": "Starts mid-shift from the mid-demo preset and walks a pending invite until the newcomer is a member. About two minutes.",
+        "inviteStep1": "This tour did not start from the seed. It loaded the <b>mid-demo</b> preset: Dana's desk partway through a shift, with two emails already turned into tickets. A preset is a script the world replays, so it loads the same way here and on a server.",
+        "inviteStep2": "The same preset invited a new teammate, Jordan, who has not joined yet — the People tab lists them as invited. Press Next to <b>sit at Jordan's desk</b>.",
+        "inviteStep3": "Jordan has no account, so the product shows the signed-out welcome page while the panel follows them. Their inbox already holds the <b>invite</b>, unread.",
+        "inviteStep4": "The invite carries a link to the accept page. Press Next to <b>follow it</b>.",
+        "inviteStep5": "The accept page names the team Jordan is joining. A name is all it takes — press Next to <b>join the desk</b>.",
+        "inviteStep6": "Accepting signed Jordan straight in, as a <b>member</b> of the Frontline Desk.",
+        "inviteStep7": "Back in the People tab, Jordan is an <b>active person</b> now, no longer an invite.",
+        "inviteStep8": "Every preset lives in the <b>Snapshots</b> tab. Load one before a demo and you start inside the story, on whichever host you happen to be running."
     },
     "presets": {
         "freshTitle": "Fresh desk",

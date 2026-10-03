@@ -15,9 +15,10 @@ import type { ScheduleRowLike, WorldJobLike } from 'keel/components/simulator/jo
 import type { MailItem } from 'keel/components/simulator/mail-app'
 import type { SmsMessageRow } from 'keel/components/simulator/messages-app'
 import type { FeatureFlag, Snapshot, SnapshotAgreement } from 'keel/components/simulator/snapshots-app'
+import { resolveWorldStart } from 'keel/core/presets'
 import { useTours } from 'keel/demo-static/tour/use-tours'
 import { actors } from '@app-config/actors'
-import { tabs as appSimulatorTabs } from '@app-config/simulator'
+import { presets, tabs as appSimulatorTabs } from '@app-config/simulator'
 
 interface Summary {
     viewpoint: string | null
@@ -123,6 +124,8 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
     // The app's own copy namespace, for things the panel renders but the framework does not name —
     // today, the registered actors' card titles.
     const tActors = useTranslations('actors')
+    // Root translator: a demo preset's title is a fully-qualified key into the app catalog.
+    const tRoot = useTranslations()
     const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY)
     const [expanded, setExpanded] = useState(false)
     const [activeTab, setActiveTab] = useState<SimulatorTab>('people')
@@ -138,17 +141,22 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
     const [hooksData, setHooksData] = useState<HooksResponse>(EMPTY_HOOKS)
     const [snapshotsBusy, setSnapshotsBusy] = useState(false)
     const [busySnapshot, setBusySnapshot] = useState<string | null>(null)
+    const [busyPreset, setBusyPreset] = useState<string | null>(null)
     const [agreementsData, setAgreementsData] = useState<AgreementsResponse>(EMPTY_AGREEMENTS)
     const [busyAgreement, setBusyAgreement] = useState<string | null>(null)
     const [notices, setNotices] = useState<SimulatorNotice[]>([])
     const noticeSeq = useRef(0)
     const prevUnread = useRef<Map<string, number> | null>(null)
-    // Scripted walkthroughs (@app-config/tours, read by the engine itself). The one snapshot this host
-    // can put the world into for a tour is the same reset the Snapshots tab offers — and since that
-    // reloads the page, the engine's resume marker is what carries the tour across it.
+    // Scripted walkthroughs (@app-config/tours, read by the engine itself). A tour's starting world
+    // resolves the same way on every host (keel/core/presets.ts): reset, then a registered demo preset,
+    // then — this host only — a saved snapshot. Each of those reloads the page, so the engine's resume
+    // marker is what carries the tour across it.
     const tours = useTours({
         onSnapshot: (snapshot) => {
-            if (snapshot === 'reset') handleReset()
+            const start = resolveWorldStart(snapshot, presets)
+            if (start.kind === 'reset') handleReset()
+            else if (start.kind === 'preset') handleLoadPreset(start.preset.id)
+            else handleRestoreSnapshot(start.name)
         },
     })
 
@@ -259,6 +267,8 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                 if (parsed.kind === 'restore' && parsed.name) {
                     pushNotice(t('noticeSnapshotRestored', { name: parsed.name }))
                 }
+                const preset = parsed.kind === 'preset' ? presets.find((p) => p.id === parsed.name) : undefined
+                if (preset) pushNotice(t('noticePresetLoaded', { name: tRoot(preset.titleKey) }))
             } catch {
                 // stale/garbled marker — nothing to confirm
             }
@@ -581,6 +591,26 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
         })
     }
 
+    // Load a demo preset: the server resets the world, replays the preset and signs THIS browser in as
+    // its viewpoint (keel/server-lib/demo-presets.ts), then answers where to land — a full reload, like
+    // a restore, because the world underneath every RSC just changed.
+    function handleLoadPreset(id: string) {
+        setBusyPreset(id)
+        void fetch('/api/simulator/presets', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: id, locale }),
+        }).then(async (response) => {
+            if (response.ok) {
+                const { redirectTo } = (await response.json()) as { redirectTo: string }
+                window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'preset', name: id }))
+                window.location.assign(redirectTo)
+                return
+            }
+            setBusyPreset(null)
+        })
+    }
+
     function handleDeleteSnapshot(name: string) {
         setBusySnapshot(name)
         void fetch('/api/simulator/snapshots/delete', {
@@ -727,6 +757,8 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                     agreements: agreementsData.agreements,
                     onBumpAgreement: handleBumpAgreement,
                     busyAgreement,
+                    onLoadPreset: handleLoadPreset,
+                    busyPreset,
                 }}
                 tours={tours.tab}
             />

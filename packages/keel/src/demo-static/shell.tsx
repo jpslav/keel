@@ -1,4 +1,5 @@
 import { findOrg, findTenant, type SeedPerson } from '@app-config/seed'
+import { presets } from '@app-config/simulator'
 import { Badge, Group } from '@mantine/core'
 import { useTranslations } from 'next-intl'
 import type { ReactNode } from 'react'
@@ -22,6 +23,7 @@ import { ProfileScreen } from '../components/profile-screen'
 import { WebhookEndpointsCard } from '../components/webhook-endpoints-card'
 import { type Locale, LOCALES } from '../core/locale'
 import { unreadCount } from '../core/notifications'
+import { resolveWorldStart } from '../core/presets'
 import { canManageOrg, ROLES } from '../core/roles'
 import { WEBHOOK_EVENT_KINDS } from '../core/webhook-events'
 import { scrubEvent } from '../observability/scrub'
@@ -91,12 +93,17 @@ export function DemoShell({
     const t = useTranslations('shell')
     const { person, tenant, org, activeOrgSlug, name, route } = world
     // Scripted walkthroughs. The engine reads the app's registered tours off the seam itself, so an
-    // app gets the Tours tab (and the ghost cursor) by registering a tour and nothing else. `'reset'`
-    // is the one snapshot this host has — restoring it here is in-memory and instant, so unlike the
-    // server host the tour never has to survive a reload to start.
+    // app gets the Tours tab (and the ghost cursor) by registering a tour and nothing else. This host
+    // can start a tour from `'reset'` or from any registered demo preset — both are in-memory and
+    // instant, so unlike the server host the tour never has to survive a reload to start. A SAVED
+    // snapshot lives in a server's `.data/`, which this host does not have: answering false records the
+    // tour's start as a miss, so a tour that only works on a server fails the `file://` walkthrough gate.
     const tours = useTours({
-        onSnapshot: (snapshot) => {
-            if (snapshot === 'reset') world.resetWorld()
+        onSnapshot: async (snapshot) => {
+            const start = resolveWorldStart(snapshot, presets)
+            if (start.kind === 'reset') world.resetWorld()
+            if (start.kind === 'preset') return world.applyPreset(start.preset.id)
+            return start.kind === 'reset'
         },
     })
 
@@ -407,6 +414,7 @@ export function DemoShell({
                     })),
                     onBumpAgreement: world.bumpAgreement,
                     busyAgreement: null,
+                    onLoadPreset: (id) => void world.applyPreset(id),
                 }}
                 tours={tours.tab}
             />

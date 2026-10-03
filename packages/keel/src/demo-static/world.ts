@@ -1,4 +1,4 @@
-import { flags as appSimulatorFlags } from '@app-config/simulator'
+import { flags as appSimulatorFlags, presets } from '@app-config/simulator'
 import {
     agreements as seedAgreements,
     findOrg,
@@ -44,6 +44,7 @@ import {
     notificationCopy,
     resolveEnabledChannels,
 } from '../core/notifications'
+import type { PresetOperation } from '../core/presets'
 import { canManageOrg } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
@@ -109,6 +110,10 @@ const INITIAL_FLAGS: Record<string, boolean> = {
 }
 
 const DEFAULT_ACTIVE_ORG = organizations[0]!.slug
+
+/** One step of a demo-preset replay: the preset's own operations, then the two the replay adds — sitting
+ *  down as the viewpoint, and announcing the load. */
+type ReplayStep = PresetOperation | { op: 'viewpoint'; personId: string } | { op: 'loaded'; title: string }
 
 /** Truncating snippet used as a row's "title" in the digest (twin of the real handler's `snippet`). */
 function digestSnippet(body: string): string {
@@ -254,6 +259,10 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     // Continuity twin (ADR-0006): the real app persists this to .data/simulator/state.json; with no
     // server an in-memory map keyed by person id stands in for it.
     const continuityMap = useRef(new Map<string, { route: string; org: string }>())
+    // The demo-preset replay queue (see applyPreset): the steps still to run, drained one per render.
+    const [replay, setReplay] = useState<ReplayStep[] | null>(null)
+    // Resolves the promise applyPreset handed out, once the queue drains.
+    const replayDone = useRef<(() => void) | null>(null)
     // Always-current mirror of `jobs` for the actor drivers: refs may not be written during render
     // (react-hooks/refs), so an effect keeps it in sync instead — the drivers read through the ref
     // rather than a stale closure, so they never need rebuilding when a tick fires.
@@ -816,45 +825,62 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
 
     // ── Invites and membership ────────────────────────────────────────────────────────────────────
 
-    /** Twin of POST /api/org/invite: refuse a duplicate address (the real API's 409), mint the invite,
-     *  land its email in the catch-store, and notify the team's OTHER admins. */
-    async function sendInvite({ email, role }: { email: string; role: string }) {
-        setInviteError(null)
+    /**
+     * Twin of `sendOrgInvite` (keel/server-lib/invite.ts) — what happens once an invite is allowed: mint
+     * it, land its email in the catch-store, audit it, and notify the team's OTHER admins. The inviter and
+     * the team are explicit because the demo-preset replay names both; the org screen passes whoever is
+     * signed in. Answers false for the duplicate the real API refuses with a 409.
+     */
+    function inviteInto(inviter: SeedPerson, orgSlug: string, email: string, role: string): boolean {
         const taken = [...allPeople.map((p) => p.email), ...invites.map((i) => i.email)]
-        if (taken.some((existing) => existing.toLowerCase() === email.toLowerCase())) {
-            setInviteError(tOrg('inviteDuplicate'))
-            throw new Error('duplicate')
-        }
+        if (taken.some((existing) => existing.toLowerCase() === email.toLowerCase())) return false
+        const target = findOrg(orgSlug) ?? org
         // crypto.randomUUID keeps twin ids collision-free (and symmetric with the fake adapter) — a
         // length-based id could be reused after an accept shrinks the list, making a stale email link
         // accept the WRONG invite.
         const id = crypto.randomUUID()
         const html = buildInviteEmailHtml(
             {
-                heading: tEmail('inviteHeading', { org: org.name }),
-                body: tEmail('inviteBody', { inviter: name, org: org.name, role }),
+                heading: tEmail('inviteHeading', { org: target.name }),
+                body: tEmail('inviteBody', { inviter: inviter.name, org: target.name, role }),
                 button: tEmail('inviteButton'),
                 linkFallback: tEmail('inviteLinkFallback'),
             },
             `#/accept-invite/${id}`,
         )
-        setInvites((prev) => [...prev, { id, email, role, orgSlug: org.slug }])
+        setInvites((prev) => [...prev, { id, email, role, orgSlug: target.slug }])
         setEmails((prev) => [
             {
                 id: `email-${prev.length}`,
                 to: email,
-                subject: tEmail('inviteSubject', { org: org.name }),
+                subject: tEmail('inviteSubject', { org: target.name }),
                 html,
                 at: new Date().toISOString(),
             },
             ...prev,
         ])
-        logEvent('org_invite_sent', { tenant: tenant.slug, org: org.slug, role })
-        logAudit('membership.invited', 'Membership', id)
+        logEvent('org_invite_sent', { tenant: target.tenantSlug, org: target.slug, role })
+        appendAudit(
+            { action: 'membership.invited', subjectType: 'Membership', subjectId: id, actorUserId: inviter.id },
+            target.tenantSlug,
+            target.slug,
+        )
         // Notify the inviting team's OTHER admins (the invitee has no account yet, so they can't hold
         // an in-app row — see the decision log).
-        notifyAdminsOf(activeOrgSlug, 'org.invited', { email, role, orgName: org.name }, person?.id)
+        notifyAdminsOf(target.slug, 'org.invited', { email, role, orgName: target.name }, inviter.id)
         pushNotice(tSimulator('noticeNewMail', { email }))
+        return true
+    }
+
+    /** Twin of POST /api/org/invite: the signed-in person invites into the active team. */
+    async function sendInvite({ email, role }: { email: string; role: string }) {
+        setInviteError(null)
+        if (!person) return
+        // The display name honours an unsaved profile edit, like the rest of the signed-in header.
+        if (!inviteInto({ ...person, name }, activeOrgSlug, email, role)) {
+            setInviteError(tOrg('inviteDuplicate'))
+            throw new Error('duplicate')
+        }
     }
 
     /** Twin of the accept-invite route: mint the person, consume the invite, sign them in, and record
@@ -1051,11 +1077,89 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         setMailScope('person')
         setMailSeenAt({})
         continuityMap.current.clear()
+        // A reset abandons any preset replay still in flight (and settles whoever was waiting on it).
+        setReplay(null)
+        replayDone.current?.()
+        replayDone.current = null
         onReset?.()
         setNotices([])
         go('')
         pushNotice(tSimulator('noticeWorldReset'))
     }
+
+    /**
+     * Twin of the server's demo-preset replay (keel/server-lib/demo-presets.ts): reset to the seed, then
+     * replay the preset's operations through this world's own twins — the invite core, compose-inbound
+     * (and so the app's inbound handler twins), the flag store — and finally sit down as the preset's
+     * viewpoint. Resolves once the world is ready; answers false for an id no preset has.
+     *
+     * The steps run ONE PER RENDER, from the effect below, rather than in a loop here. Every twin reads
+     * the world through this render's closure (the duplicate check reads `invites`, the inbound twin
+     * reads the member list), so a loop would replay every step against the world as it stood BEFORE the
+     * reset. Draining a queue across commits gives each step the world its predecessors left, which is
+     * what the server gets for free by writing to disk between steps.
+     */
+    function applyPreset(id: string): Promise<boolean> {
+        const preset = presets.find((candidate) => candidate.id === id)
+        if (!preset) return Promise.resolve(false)
+        resetWorld()
+        const steps: ReplayStep[] = [...preset.operations]
+        if (preset.viewpoint !== undefined) steps.push({ op: 'viewpoint', personId: preset.viewpoint })
+        steps.push({ op: 'loaded', title: tRoot(preset.titleKey) })
+        setReplay(steps)
+        return new Promise((resolve) => {
+            replayDone.current = () => resolve(true)
+        })
+    }
+
+    function performReplayStep(step: ReplayStep) {
+        switch (step.op) {
+            case 'invite': {
+                const inviter = allPeople.find((p) => p.id === step.by)
+                if (inviter) inviteInto(inviter, step.org, step.email, step.role)
+                return
+            }
+            case 'inbound':
+                composeInbound({
+                    from: step.from,
+                    orgSlug: step.org,
+                    handler: step.handler,
+                    subject: step.subject,
+                    body: step.body,
+                })
+                return
+            case 'flag':
+                setFlags((prev) => ({ ...prev, [step.flag]: step.enabled }))
+                return
+            case 'viewpoint':
+                selectPerson(`person:${step.personId}`)
+                return
+            case 'loaded':
+                // The steps' own notices (new mail, inbound filed…) would bury the one that matters.
+                setNotices([])
+                pushNotice(tSimulator('noticePresetLoaded', { name: step.title }))
+                return
+        }
+    }
+
+    useEffect(() => {
+        if (!replay) return
+        // One step per commit (see applyPreset), run off a zero-delay timer: each step's own state updates
+        // commit before the next one runs, and the cleanup means an abandoned queue (a reset mid-replay)
+        // never fires a stale step.
+        const id = setTimeout(() => {
+            const [step, ...rest] = replay
+            if (step) performReplayStep(step)
+            setReplay(rest.length > 0 ? rest : null)
+            if (rest.length === 0) {
+                replayDone.current?.()
+                replayDone.current = null
+            }
+        }, 0)
+        return () => clearTimeout(id)
+        // Keyed on the queue alone: the step functions are re-created every render by design.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [replay])
 
     return {
         route,
@@ -1202,5 +1306,6 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         setFeatureFlag: (flag, enabled) => setFlags((prev) => ({ ...prev, [flag]: enabled })),
         demoBannerOn: flags['demo-banner'] ?? false,
         resetWorld,
+        applyPreset,
     }
 }

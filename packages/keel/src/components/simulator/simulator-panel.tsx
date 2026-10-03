@@ -127,6 +127,8 @@ export interface SnapshotsAppProps {
     agreements?: SnapshotAgreement[]
     onBumpAgreement?: (id: string) => void
     busyAgreement?: string | null
+    onLoadPreset?: (id: string) => void
+    busyPreset?: string | null
 }
 
 export interface JobsAppProps {

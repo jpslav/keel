@@ -221,4 +221,7 @@ export interface DemoWorld {
     setFeatureFlag: (flag: string, enabled: boolean) => void
     demoBannerOn: boolean
     resetWorld: () => void
+    /** Load a registered demo preset (keel/core/presets.ts): reset, replay its operations, sit down as its
+     *  viewpoint. Resolves once the world is ready — false when no preset has that id. */
+    applyPreset: (id: string) => Promise<boolean>
 }
