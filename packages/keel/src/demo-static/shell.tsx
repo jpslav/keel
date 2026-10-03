@@ -2,7 +2,7 @@ import { findOrg, findTenant, type SeedPerson } from '@app-config/seed'
 import { presets } from '@app-config/presets'
 import { Badge, Group } from '@mantine/core'
 import { useTranslations } from 'next-intl'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { AcceptancesSection } from '../components/agreements/acceptances-section'
 import { AgreementAdvisoryBanner } from '../components/agreements/agreement-advisory-banner'
 import { AgreementGate } from '../components/agreements/agreement-gate'
@@ -98,11 +98,19 @@ export function DemoShell({
     // instant, so unlike the server host the tour never has to survive a reload to start. A SAVED
     // snapshot lives in a server's `.data/`, which this host does not have: answering false records the
     // tour's start as a miss, so a tour that only works on a server fails the `file://` walkthrough gate.
+    // The preset a load is replaying for. Static replays run one step per commit, so a load takes several
+    // renders; while it does, the Snapshots tab disables the other world rewrites, as the server host does.
+    const [busyPreset, setBusyPreset] = useState<string | null>(null)
+    function loadPreset(id: string): Promise<boolean> {
+        setBusyPreset(id)
+        return world.applyPreset(id).finally(() => setBusyPreset(null))
+    }
+
     const tours = useTours({
         onSnapshot: async (snapshot) => {
             const start = resolveWorldStart(snapshot, presets)
             if (start.kind === 'reset') world.resetWorld()
-            if (start.kind === 'preset') return world.applyPreset(start.preset.id)
+            if (start.kind === 'preset') return loadPreset(start.preset.id)
             return start.kind === 'reset'
         },
     })
@@ -414,7 +422,8 @@ export function DemoShell({
                     })),
                     onBumpAgreement: world.bumpAgreement,
                     busyAgreement: null,
-                    onLoadPreset: (id) => void world.applyPreset(id),
+                    onLoadPreset: (id) => void loadPreset(id),
+                    busyPreset,
                 }}
                 tours={tours.tab}
             />

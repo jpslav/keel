@@ -162,6 +162,22 @@ describe('applyDemoPreset (server host)', () => {
         expect((await fakeAuth.getCurrentUser())?.id).toBe('fixture-lead')
     })
 
+    test('two loads at once each get a whole world: the second waits for the first instead of wiping it mid-script', async () => {
+        const { applyDemoPreset } = await import('./demo-presets')
+        const { fakeAuth } = await import('../adapters/fake/auth')
+
+        // Without the world lock around reset AND script, the second load's reset lands between the first
+        // load's steps — closing the database under it, or leaving a half-replayed world behind.
+        await Promise.all([
+            applyDemoPreset('busy-harbor', { baseUrl: BASE_URL }),
+            applyDemoPreset('busy-harbor', { baseUrl: BASE_URL }),
+        ])
+
+        const invited = (await fakeAuth.listMembers('depot')).filter((member) => member.status === 'invited')
+        expect(invited.map((member) => member.email)).toEqual([INVITEE])
+        expect((await depotDocketLabels()).filter((label) => label === 'Crane four is stuck')).toHaveLength(1)
+    })
+
     test('replaying is idempotent: the reset underneath means a second load is the same world, not twice it', async () => {
         const { applyDemoPreset } = await import('./demo-presets')
         const { fakeAuth } = await import('../adapters/fake/auth')

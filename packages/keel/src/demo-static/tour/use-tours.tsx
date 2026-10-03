@@ -175,8 +175,14 @@ export function useTours(
         // Snapshot first: a tour begins from a world it can describe, not from wherever the last person
         // clicked. On a server host this reloads, and the resume marker takes over.
         writeResumeMarker({ tourId, idx: 0 })
-        if (target.snapshot && onSnapshot && (await onSnapshot(target.snapshot)) === false) {
-            addMiss({ action: 'snapshot', target: target.snapshot })
+        if (target.snapshot && onSnapshot) {
+            // A host that could not produce the world answers false; one whose request failed outright
+            // (a network error, a throw) is the same miss, never an unhandled rejection that leaves the
+            // resume marker pointing at a tour that never began.
+            const produced = await Promise.resolve()
+                .then(() => onSnapshot(target.snapshot!))
+                .catch(() => false as const)
+            if (produced === false) addMiss({ action: 'snapshot', target: target.snapshot })
         }
         goto(tourId, 0)
     }
