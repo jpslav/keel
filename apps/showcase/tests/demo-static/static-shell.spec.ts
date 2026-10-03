@@ -283,6 +283,9 @@ test('static shell exports tickets as an instant job (no download) and mirrors t
     // reload), export again → the new job stays queued, and "Run pending" steps it to completed.
     await page.getByTestId('simulator-tab-snapshots').click()
     await page.getByTestId('flag-toggle-jobs-held').click()
+    // Hold the actors too: the inline analyzer runs from page load and serves Dana's org, so it would
+    // finish the held export itself and this test would stop proving that Run pending does.
+    await page.getByTestId('flag-toggle-actors-held').click()
 
     // The dashboard export card is still mounted in the main pane behind the panel — export again.
     await page.getByTestId('export-run').click()

@@ -233,9 +233,12 @@ export function SimulatorPanel({
     // Kept-mounted content (actor frames) mounts only once the host page has loaded — see ./tab-mount.
     const [pageLoaded, setPageLoaded] = useState(false)
     useEffect(() => {
-        // Syncing with an external event (the window's load), so setting state here is the point.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (document.readyState === 'complete') return setPageLoaded(true)
+        if (document.readyState === 'complete') {
+            // Syncing with an external event (the window's load), so setting state here is the point.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setPageLoaded(true)
+            return
+        }
         const onLoad = () => setPageLoaded(true)
         window.addEventListener('load', onLoad, { once: true })
         return () => window.removeEventListener('load', onLoad)

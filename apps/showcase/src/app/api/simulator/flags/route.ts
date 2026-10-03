@@ -2,12 +2,6 @@ import { isSimulated } from 'keel/adapters/index'
 import { KNOWN_FLAGS, readFlags, setFlag } from 'keel/adapters/fake/analytics'
 import { withPortErrors } from '../../respond'
 
-/**
- * Toggles a feature flag persisted at .data/analytics/flags.json — one of the Snapshots tab's world
- * knobs. Same simulated-mode-only gate as the rest of /api/simulator/*; no auth required (mode, not
- * role — and not even a session: the knobs stay reachable signed-out, like reset). Formerly
- * /api/dev/flags; see docs/decision-log.md.
- */
 /** The current value of every known flag — what an actor frame asks before each autonomous tick. */
 export async function GET(): Promise<Response> {
     if (!isSimulated) return new Response(null, { status: 404 })
@@ -17,6 +11,12 @@ export async function GET(): Promise<Response> {
     })
 }
 
+/**
+ * Toggles a feature flag persisted at .data/analytics/flags.json — one of the Snapshots tab's world
+ * knobs. Same simulated-mode-only gate as the rest of /api/simulator/*; no auth required (mode, not
+ * role — and not even a session: the knobs stay reachable signed-out, like reset). Formerly
+ * /api/dev/flags; see docs/decision-log.md.
+ */
 export async function POST(request: Request): Promise<Response> {
     if (!isSimulated) return new Response(null, { status: 404 })
     return withPortErrors(async () => {

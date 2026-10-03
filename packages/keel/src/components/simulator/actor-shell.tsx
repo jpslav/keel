@@ -116,7 +116,9 @@ export function ActorShell({ actor, tick, startPaused, held, intervalMs, inline 
         heldRef.current = held
     }, [held])
     const autonomousTick = useCallback(async () => {
-        const isHeld = await Promise.resolve(heldRef.current?.() ?? false).catch(() => false)
+        // An async wrapper turns a synchronous throw into a rejection, so both count as "not held".
+        const isHeld = await (async () => (await heldRef.current?.()) ?? false)().catch(() => false)
+        if (!mountedRef.current) return
         setWorldHeld(isHeld)
         if (!isHeld) await runTickRef.current()
     }, [])
