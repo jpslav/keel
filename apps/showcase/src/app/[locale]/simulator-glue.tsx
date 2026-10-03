@@ -100,6 +100,12 @@ const POST_NOTICE_KEY = 'app-simulator-post-notice'
 type SimulatorTab =
     'people' | 'mail' | 'messages' | 'events' | 'jobs' | 'hooks' | 'actors' | 'errors' | 'snapshots' | 'tours'
 
+/** A promise that never settles: what a world-start handler answers once it has started a full reload
+ *  (see handleReset). Nothing should run after it on a document that is being replaced. */
+function untilReload(): Promise<never> {
+    return new Promise<never>(() => {})
+}
+
 /**
  * Suppression gate: the actor iframes (/[locale]/simulator/actors/<actor>) render inside this same
  * [locale] layout, but they are self-contained process frames — the panel and its polling must NOT
@@ -154,9 +160,9 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
     const tours = useTours({
         onSnapshot: (snapshot) => {
             const start = resolveWorldStart(snapshot, presets)
-            if (start.kind === 'reset') handleReset()
-            else if (start.kind === 'preset') handleLoadPreset(start.preset.id)
-            else handleRestoreSnapshot(start.name)
+            if (start.kind === 'reset') return handleReset()
+            if (start.kind === 'preset') return handleLoadPreset(start.preset.id)
+            return handleRestoreSnapshot(start.name)
         },
     })
 
@@ -546,17 +552,22 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
         window.location.assign(nextPath + search + hash)
     }
 
-    function handleReset() {
+    // The three world-start handlers (reset, restore, preset) answer a promise a tour start can await:
+    // it resolves false when the server refused, and on success it never settles, because the page is
+    // reloading. Awaiting it keeps the tour from showing step 1 on a document that is about to be
+    // replaced — a Next pressed in that window would be lost to the reload.
+    function handleReset(): Promise<boolean> {
         setSnapshotsBusy(true)
-        void fetch('/api/simulator/reset', { method: 'POST' }).then((response) => {
+        return fetch('/api/simulator/reset', { method: 'POST' }).then((response) => {
             if (response.ok) {
                 window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'reset' }))
                 // Hard reload of a wiped world (per design invariant) — no point resetting
                 // snapshotsBusy, this tab is about to be torn down along with everything else.
                 window.location.assign(`/${locale}`)
-                return
+                return untilReload()
             }
             setSnapshotsBusy(false)
+            return false
         })
     }
 
@@ -575,9 +586,9 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
         })
     }
 
-    function handleRestoreSnapshot(name: string) {
+    function handleRestoreSnapshot(name: string): Promise<boolean> {
         setBusySnapshot(name)
-        void fetch('/api/simulator/snapshots/restore', {
+        return fetch('/api/simulator/snapshots/restore', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ name }),
@@ -585,18 +596,19 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
             if (response.ok) {
                 window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'restore', name }))
                 window.location.assign(`/${locale}`)
-                return
+                return untilReload()
             }
             setBusySnapshot(null)
+            return false
         })
     }
 
     // Load a demo preset: the server resets the world, replays the preset and signs THIS browser in as
     // its viewpoint (keel/server-lib/demo-presets.ts), then answers where to land — a full reload, like
     // a restore, because the world underneath every RSC just changed.
-    function handleLoadPreset(id: string) {
+    function handleLoadPreset(id: string): Promise<boolean> {
         setBusyPreset(id)
-        void fetch('/api/simulator/presets', {
+        return fetch('/api/simulator/presets', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ name: id, locale }),
@@ -605,9 +617,10 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                 const { redirectTo } = (await response.json()) as { redirectTo: string }
                 window.sessionStorage.setItem(POST_NOTICE_KEY, JSON.stringify({ kind: 'preset', name: id }))
                 window.location.assign(redirectTo)
-                return
+                return untilReload()
             }
             setBusyPreset(null)
+            return false
         })
     }
 
@@ -746,9 +759,9 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                 runServerErrorScenario={handleServerErrorScenario}
                 snapshots={{
                     snapshots: snapshotsData.snapshots,
-                    onReset: handleReset,
+                    onReset: () => void handleReset(),
                     onSave: handleSaveSnapshot,
-                    onRestore: handleRestoreSnapshot,
+                    onRestore: (name) => void handleRestoreSnapshot(name),
                     onDelete: handleDeleteSnapshot,
                     busy: snapshotsBusy,
                     busySnapshot,
@@ -757,7 +770,7 @@ function SimulatorGlueInner({ locale, children }: { locale: string; children: Re
                     agreements: agreementsData.agreements,
                     onBumpAgreement: handleBumpAgreement,
                     busyAgreement,
-                    onLoadPreset: handleLoadPreset,
+                    onLoadPreset: (id) => void handleLoadPreset(id),
                     busyPreset,
                 }}
                 tours={tours.tab}
