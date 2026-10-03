@@ -125,5 +125,13 @@
         "ticketStep13": "The decision is queued for the endpoint that asked to hear about it. Nothing has been sent yet, which is the truth about outbound work: it waits its turn. Press Next to let the world make the attempt.",
         "ticketStep14": "Delivered, and <b>signed</b>: the envelope that went over the wire, the signature a receiver checks it against, the attempt count. Make this endpoint fail from here and you can watch the retries back off and give up.",
         "ticketStep15": "That is the loop. Mail becomes work, work gets handed over, an outside process does its part, and the decision leaves as a fact other systems can trust. Everything you just watched is yours to click now, and the jobs are still held: the knob is in <b>Snapshots</b>."
+    },
+    "presets": {
+        "freshTitle": "Fresh desk",
+        "freshSummary": "The seeded world, signed in as Dana at the Frontline Desk.",
+        "midDemoTitle": "Mid-demo",
+        "midDemoSummary": "Two new tickets in the queue and a teammate whose invite is waiting unread.",
+        "multiTenantTitle": "Both sites busy",
+        "multiTenantSummary": "Queues at Northwind and Pinebrook, a pending invite, one refused email, SLA highlighting on. Signed in at Pinebrook."
     }
 }

@@ -3,13 +3,15 @@
  * ADR-0012). The framework panel (packages/keel/src/components/simulator/simulator-panel.tsx) owns its subsystem
  * tabs (people, mail, messages, events, jobs, hooks, errors, snapshots) and its two feature flags
  * (demo-banner, jobs-held — KNOWN_FLAGS in packages/keel/src/adapters/fake/analytics.ts); the app registers its OWN
- * Simulator tabs + flags HERE. A real adopter replaces this file (its own tabs/flags, or none). PURE
- * TypeScript, no framework imports — shared by the server glue and the static-demo twin.
+ * Simulator tabs + flags + demo presets HERE. A real adopter replaces this file (its own, or none). PURE
+ * TypeScript, no framework value imports (the preset contract is type-only) — shared by the server glue and the static-demo twin.
  *
  * labelKey is resolved by the HOST glue from the `simulator` i18n namespace (matching how the panel
  * labels its own tabs): the seam carries the key, the host translates it and supplies the ReactNode
  * content, so the panel stays router-/data-blind (ADR-0006).
  */
+
+import type { DemoPreset } from 'keel/core/presets'
 
 /** One app-registered Simulator tab. The host translates `labelKey` and supplies the tab's content. */
 interface AppSimulatorTab {
@@ -46,3 +48,98 @@ interface AppSimulatorFlag {
  * the product, not just the panel.
  */
 export const flags: AppSimulatorFlag[] = [{ id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' }]
+
+/** The weekday-morning emails both busy presets open with. Simulated content, so one language — like the
+ *  seed corpus and the tour's typed email (see tours.ts). */
+const MORNING_INBOUND = [
+    {
+        from: 'marisol.vega@example.test',
+        subject: 'Refund stuck in pending for three days',
+        body: 'A customer was promised a refund on Monday and it still shows as pending. Can someone on the desk check whether it was ever sent?',
+    },
+    {
+        from: 'sam.rivera@example.test',
+        subject: 'Checkout times out for shoppers in the EU',
+        body: 'Several EU customers report the payment step spinning until it times out. US checkouts look fine.',
+    },
+] as const
+
+/**
+ * DEMO PRESETS (keel/core/presets.ts): named starting points every host can restore — the Snapshots
+ * tab lists them, and a tour may name one as its `snapshot`. A preset is the seed plus a script of
+ * world operations, replayed by the server through its fake adapters and by the `file://` twin through
+ * its in-memory world, so "restore mid-demo" works wherever the demo runs, which a saved `.data/`
+ * snapshot never can.
+ *
+ * Every operation is one the product would allow (keel's seam-conformance suite holds them to it):
+ * Dana manages the Frontline Desk and the Platform Team, so she does the inviting; tickets arrive the
+ * way the desk's real front door receives them, as email from a member.
+ */
+export const presets: DemoPreset[] = [
+    {
+        // The seeded desk, already signed in: "reset" plus the one click every demo starts with.
+        id: 'fresh',
+        titleKey: 'presets.freshTitle',
+        summaryKey: 'presets.freshSummary',
+        viewpoint: 'person-admin',
+        operations: [],
+    },
+    {
+        // A shift in progress: two new tickets in the queue and a teammate who has not joined yet — whose
+        // invite is sitting unread in their inbox, ready to be accepted on camera.
+        id: 'mid-demo',
+        titleKey: 'presets.midDemoTitle',
+        summaryKey: 'presets.midDemoSummary',
+        viewpoint: 'person-admin',
+        operations: [
+            ...MORNING_INBOUND.map((mail) => ({ op: 'inbound' as const, org: 'frontline', handler: 'support', ...mail })),
+            { op: 'invite', by: 'person-admin', org: 'frontline', email: 'jordan.ellis@example.test', role: 'member' },
+        ],
+    },
+    {
+        // Both sites at once. Pinebrook is the quiet tenant in the seed; here it has a queue of its own,
+        // and one email the desk refused — Riley is restricted, so the intake files it 'unmatched'
+        // instead of opening a ticket, which is the email-authoring rule visible in the inbound list.
+        id: 'multi-tenant',
+        titleKey: 'presets.multiTenantTitle',
+        summaryKey: 'presets.multiTenantSummary',
+        viewpoint: 'person-guest',
+        operations: [
+            ...MORNING_INBOUND.map((mail) => ({ op: 'inbound' as const, org: 'frontline', handler: 'support', ...mail })),
+            {
+                op: 'inbound',
+                org: 'platform',
+                handler: 'support',
+                from: 'dana.okoye@example.test',
+                subject: 'Webhook retries piling up after the deploy',
+                body: 'Since the 14:00 deploy the partner webhook retry queue keeps growing. Platform, can you take a look?',
+            },
+            { op: 'invite', by: 'person-admin', org: 'platform', email: 'priya.shah@example.test', role: 'staff' },
+            {
+                op: 'inbound',
+                org: 'support-crew',
+                handler: 'support',
+                from: 'gale.bennett@example.test',
+                subject: 'Booking confirmations arrive twice',
+                body: 'Guests are getting two confirmation emails for every booking since yesterday.',
+            },
+            {
+                op: 'inbound',
+                org: 'support-crew',
+                handler: 'support',
+                from: 'gale.bennett@example.test',
+                subject: 'Gift card balance shows zero',
+                body: 'A guest says their gift card balance reads zero at checkout but the card was never used.',
+            },
+            {
+                op: 'inbound',
+                org: 'support-crew',
+                handler: 'support',
+                from: 'riley.chen@example.test',
+                subject: 'Can I reopen my old ticket?',
+                body: 'I would like to reopen the ticket about my reservation from last month.',
+            },
+            { op: 'flag', flag: 'sla-breach-banner', enabled: true },
+        ],
+    },
+]

@@ -125,5 +125,13 @@
         "ticketStep13": "La decisión está en cola para el destino que pidió enterarse. Todavía no se ha enviado nada, que es la verdad del trabajo saliente: espera su turno. Pulsa Siguiente para que el mundo haga el intento.",
         "ticketStep14": "Entregada y <b>firmada</b>: el sobre que viajó por la red, la firma con la que el receptor lo comprueba, el número de intento. Haz fallar este destino desde aquí y verás los reintentos espaciarse y rendirse.",
         "ticketStep15": "Ese es el ciclo. El correo se convierte en trabajo, el trabajo cambia de manos, un proceso externo hace su parte y la decisión sale como un hecho del que otros sistemas pueden fiarse. Todo lo que has visto puedes pulsarlo tú, y los trabajos siguen retenidos: la palanca está en <b>Instantáneas</b>."
+    },
+    "presets": {
+        "freshTitle": "Mesa recién abierta",
+        "freshSummary": "El mundo sembrado, con la sesión de Dana iniciada en el Frontline Desk.",
+        "midDemoTitle": "A mitad de la demo",
+        "midDemoSummary": "Dos tickets nuevos en la cola y una compañera cuya invitación espera sin leer.",
+        "multiTenantTitle": "Ambos sitios ocupados",
+        "multiTenantSummary": "Colas en Northwind y Pinebrook, una invitación pendiente, un correo rechazado y el resaltado de SLA activo. Sesión iniciada en Pinebrook."
     }
 }
