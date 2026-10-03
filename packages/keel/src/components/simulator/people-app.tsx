@@ -13,7 +13,7 @@ export interface Person {
     /** Every org (product copy: "team") the person belongs to, with their role IN that org. When
      *  present it replaces the single `role` chip — a multi-org person's role differs per org, so one
      *  role alone misstates every membership but the first. */
-    orgs?: { slug: string; role: string }[]
+    orgs?: { orgSlug: string; role: string }[]
     tenantSlug: string
     status: 'active' | 'invited'
     hasAccount: boolean
@@ -86,13 +86,13 @@ export function PeopleApp({
                                 {person.orgs && person.orgs.length > 0 ? (
                                     person.orgs.map((org) => (
                                         <Text
-                                            key={org.slug}
+                                            key={org.orgSlug}
                                             size="xs"
                                             c="gray.3"
                                             style={chipStyle}
-                                            data-testid={`people-${idPart}-org-${org.slug}`}
+                                            data-testid={`people-${idPart}-org-${org.orgSlug}`}
                                         >
-                                            {t('peopleOrgRole', { org: org.slug, role: org.role })}
+                                            {t('peopleOrgRole', { org: org.orgSlug, role: org.role })}
                                         </Text>
                                     ))
                                 ) : (

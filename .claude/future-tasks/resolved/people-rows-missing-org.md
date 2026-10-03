@@ -1,6 +1,6 @@
 # Simulator People rows show no organization
 
-**Priority:** P2 · **Status:** open
+**Priority:** P2 · **Status:** CLOSED 2026-10-03 (`feat/simulator-people-orgs-actor-keepalive`)
 
 The `Person` row type in `packages/keel/src/components/simulator/people-app.tsx` carries `role` and
 `tenantSlug` but nothing naming an organization/team, so a row's only group-identity cue is the
@@ -34,3 +34,18 @@ tenant"), `apps/showcase/src/app/api/simulator/summary/route.ts:36` and
 `packages/keel/src/demo-static/world.ts:939` (both row builders truncating to `memberships[0].role`),
 `packages/keel/src/seed/contracts.ts` (`SeedMembership { orgSlug, role }`, the shape a per-org `Person`
 field would mirror).
+
+## Resolution
+
+`Person` gained an optional `orgs?: { orgSlug: string; role: string }[]` — `SeedMembership`'s own
+shape, so the server row builder passes `person.memberships` straight through and the static twin does
+the same; an invited row carries its one `{ orgSlug, role }`. When `orgs` is present the People row
+renders one `org · role` chip per membership (catalog key `simulator.peopleOrgRole`) in place of the
+lone `role` chip; `role` stays on the type so an app that never populates `orgs` renders as before.
+Proven by `simulator-panel.spec.ts` ("people rows show every org membership…"): Sam Rivera now reads
+`frontline · staff` and `platform · member`.
+
+The field mirrors `SeedMembership` rather than the `{ slug, role }` sketched above for a measured
+reason: in the static twin, any CALL on `p.memberships` inside `useDemoWorld` (an inline `.map`, or a
+module-level helper taking it) made the React compiler's `react-hooks/purity` rule flag an unrelated
+`Date.now()` in `startJob`, ~400 lines away. Passing the array through untouched does not.

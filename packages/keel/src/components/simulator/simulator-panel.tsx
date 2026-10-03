@@ -465,213 +465,215 @@ export function SimulatorPanel({
     // whose world this is, even before switching tabs.
     const person = people.find((person) => person.key === viewpoint) ?? null
 
-    return (
-        <>
-            {pill}
-            {keepPanel ? (
-                <Box
-                    component="aside"
-                    aria-label={t('panelTitle')}
-                    data-testid="simulator-panel"
-                    data-hydrated={hydrated ? 'true' : undefined}
-                    style={{
-                        width,
-                        flexShrink: 0,
-                        // Sticky so the panel stays docked while a long main pane scrolls (the inner
-                        // content box below is the scroll container for the panel's own overflow). Sticky
-                        // is a positioned value, so the absolute resize seam anchors to this box.
-                        position: 'sticky',
-                        top: 0,
-                        height: '100vh',
-                        alignSelf: 'flex-start',
-                        display: collapsed ? 'none' : 'flex',
-                        flexDirection: 'column',
-                        background: '#1a1b1e',
-                        color: '#f8f9fa',
-                        borderLeft: '1px solid #373a40',
-                    }}
-                >
-                    {/* Draggable resize seam on the panel's left edge — a focusable separator so keyboard
+    const panel = keepPanel ? (
+        <Box
+            component="aside"
+            aria-label={t('panelTitle')}
+            data-testid="simulator-panel"
+            data-hydrated={hydrated ? 'true' : undefined}
+            style={{
+                width,
+                flexShrink: 0,
+                // Sticky so the panel stays docked while a long main pane scrolls (the inner
+                // content box below is the scroll container for the panel's own overflow). Sticky
+                // is a positioned value, so the absolute resize seam anchors to this box.
+                position: 'sticky',
+                top: 0,
+                height: '100vh',
+                alignSelf: 'flex-start',
+                display: collapsed ? 'none' : 'flex',
+                flexDirection: 'column',
+                background: '#1a1b1e',
+                color: '#f8f9fa',
+                borderLeft: '1px solid #373a40',
+            }}
+        >
+            {/* Draggable resize seam on the panel's left edge — a focusable separator so keyboard
                 users can size the panel too (arrows step, Home/End jump, double-click resets). */}
-                    <Box
-                        role="separator"
-                        tabIndex={0}
-                        aria-orientation="vertical"
-                        aria-label={t('widthLabel')}
-                        aria-valuenow={width}
-                        aria-valuemin={MIN_WIDTH}
-                        aria-valuemax={MAX_WIDTH}
-                        data-testid="simulator-resize"
-                        onPointerDown={onSeamPointerDown}
-                        onPointerMove={onSeamPointerMove}
-                        onPointerUp={endSeamDrag}
-                        onPointerCancel={endSeamDrag}
-                        onKeyDown={onSeamKeyDown}
-                        onDoubleClick={resetWidth}
-                        onMouseEnter={() => setSeamActive(true)}
-                        onMouseLeave={() => setSeamActive(false)}
-                        onFocus={() => setSeamActive(true)}
-                        onBlur={() => setSeamActive(false)}
-                        style={{
-                            position: 'absolute',
-                            top: 0,
-                            bottom: 0,
-                            left: -3,
-                            width: 7,
-                            zIndex: 3,
-                            cursor: 'col-resize',
-                            touchAction: 'none',
-                            background: seamActive || dragging ? 'rgba(77,171,247,0.6)' : 'transparent',
-                        }}
-                    />
-                    <Stack gap="xs" p="sm" style={{ borderBottom: '1px solid #373a40' }}>
-                        <Group justify="space-between" wrap="nowrap" gap="xs">
-                            <Text fw={700} c="gray.0">
-                                {t('panelTitle')}
-                            </Text>
-                            <Group gap="xs" wrap="nowrap">
-                                {onLocaleChange ? (
-                                    <SegmentedControl
-                                        aria-label={t('localeLabel')}
-                                        data-testid="simulator-locale"
-                                        size="xs"
-                                        value={locale}
-                                        data={[...LOCALES]}
-                                        onChange={(value) => onLocaleChange(value)}
-                                    />
-                                ) : null}
-                                <UnstyledButton
-                                    data-testid="simulator-collapse"
-                                    aria-label={t('collapseAriaLabel')}
-                                    onClick={toggle}
-                                    style={{
-                                        fontSize: 12,
-                                        fontWeight: 600,
-                                        color: '#f8f9fa',
-                                        border: '1px solid #373a40',
-                                        borderRadius: 6,
-                                        padding: '4px 10px',
-                                    }}
-                                >
-                                    {t('collapseButton')}
-                                </UnstyledButton>
-                            </Group>
-                        </Group>
-                        {/* role="group" so the aria-label is permitted (ARIA prohibits naming a generic
-                    div — the a11y sweep's axe pass enforces that). */}
-                        <Group
-                            gap="xs"
-                            wrap="nowrap"
-                            role="group"
-                            data-testid="simulator-person"
-                            aria-label={t('personChipLabel')}
-                            style={{ minWidth: 0 }}
+            <Box
+                role="separator"
+                tabIndex={0}
+                aria-orientation="vertical"
+                aria-label={t('widthLabel')}
+                aria-valuenow={width}
+                aria-valuemin={MIN_WIDTH}
+                aria-valuemax={MAX_WIDTH}
+                data-testid="simulator-resize"
+                onPointerDown={onSeamPointerDown}
+                onPointerMove={onSeamPointerMove}
+                onPointerUp={endSeamDrag}
+                onPointerCancel={endSeamDrag}
+                onKeyDown={onSeamKeyDown}
+                onDoubleClick={resetWidth}
+                onMouseEnter={() => setSeamActive(true)}
+                onMouseLeave={() => setSeamActive(false)}
+                onFocus={() => setSeamActive(true)}
+                onBlur={() => setSeamActive(false)}
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    left: -3,
+                    width: 7,
+                    zIndex: 3,
+                    cursor: 'col-resize',
+                    touchAction: 'none',
+                    background: seamActive || dragging ? 'rgba(77,171,247,0.6)' : 'transparent',
+                }}
+            />
+            <Stack gap="xs" p="sm" style={{ borderBottom: '1px solid #373a40' }}>
+                <Group justify="space-between" wrap="nowrap" gap="xs">
+                    <Text fw={700} c="gray.0">
+                        {t('panelTitle')}
+                    </Text>
+                    <Group gap="xs" wrap="nowrap">
+                        {onLocaleChange ? (
+                            <SegmentedControl
+                                aria-label={t('localeLabel')}
+                                data-testid="simulator-locale"
+                                size="xs"
+                                value={locale}
+                                data={[...LOCALES]}
+                                onChange={(value) => onLocaleChange(value)}
+                            />
+                        ) : null}
+                        <UnstyledButton
+                            data-testid="simulator-collapse"
+                            aria-label={t('collapseAriaLabel')}
+                            onClick={toggle}
+                            style={{
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: '#f8f9fa',
+                                border: '1px solid #373a40',
+                                borderRadius: 6,
+                                padding: '4px 10px',
+                            }}
                         >
-                            <Text size="xs" c="gray.4" truncate>
-                                {person ? (person.name ?? person.email) : t('personChipSignedOut')}
-                            </Text>
-                            {person?.status === 'invited' ? (
-                                <Text size="xs" c="gray.3" style={{ ...chipStyle, flexShrink: 0 }}>
-                                    {t('peopleInvitedBadge')}
-                                </Text>
-                            ) : null}
-                        </Group>
-                    </Stack>
-                    <Group gap={4} p="xs" wrap="wrap" style={{ borderBottom: '1px solid #373a40' }}>
-                        {tabs.map((tab) => (
-                            <UnstyledButton
-                                key={tab.id}
-                                data-testid={`simulator-tab-${tab.id}`}
-                                onClick={() => selectTab(tab.id)}
-                                style={{
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    color: '#f8f9fa',
-                                    background: activeTab === tab.id ? 'rgba(255,255,255,0.12)' : 'transparent',
-                                    borderRadius: 6,
-                                    padding: '6px 8px',
-                                }}
-                            >
-                                {tab.label}
-                            </UnstyledButton>
-                        ))}
+                            {t('collapseButton')}
+                        </UnstyledButton>
                     </Group>
-                    {/* The sticky aside is viewport-height, so this box really scrolls — it needs to be
+                </Group>
+                {/* role="group" so the aria-label is permitted (ARIA prohibits naming a generic
+                    div — the a11y sweep's axe pass enforces that). */}
+                <Group
+                    gap="xs"
+                    wrap="nowrap"
+                    role="group"
+                    data-testid="simulator-person"
+                    aria-label={t('personChipLabel')}
+                    style={{ minWidth: 0 }}
+                >
+                    <Text size="xs" c="gray.4" truncate>
+                        {person ? (person.name ?? person.email) : t('personChipSignedOut')}
+                    </Text>
+                    {person?.status === 'invited' ? (
+                        <Text size="xs" c="gray.3" style={{ ...chipStyle, flexShrink: 0 }}>
+                            {t('peopleInvitedBadge')}
+                        </Text>
+                    ) : null}
+                </Group>
+            </Stack>
+            <Group gap={4} p="xs" wrap="wrap" style={{ borderBottom: '1px solid #373a40' }}>
+                {tabs.map((tab) => (
+                    <UnstyledButton
+                        key={tab.id}
+                        data-testid={`simulator-tab-${tab.id}`}
+                        onClick={() => selectTab(tab.id)}
+                        style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: '#f8f9fa',
+                            background: activeTab === tab.id ? 'rgba(255,255,255,0.12)' : 'transparent',
+                            borderRadius: 6,
+                            padding: '6px 8px',
+                        }}
+                    >
+                        {tab.label}
+                    </UnstyledButton>
+                ))}
+            </Group>
+            {/* The sticky aside is viewport-height, so this box really scrolls — it needs to be
                 keyboard-focusable (scrollable-region-focusable) for arrow-key scrolling. While
                 dragging the seam, pointerEvents:none lets the capture ride over the mail iframe. */}
-                    <Box
-                        p="sm"
-                        role="region"
-                        aria-label={t('panelTitle')}
-                        tabIndex={0}
-                        style={{ flex: 1, overflowY: 'auto', pointerEvents: dragging ? 'none' : undefined }}
-                    >
-                        {showing('people') ? (
-                            <>
-                                {/* Either/or, never both: signed out, the hint has to explain that picking
+            <Box
+                p="sm"
+                role="region"
+                aria-label={t('panelTitle')}
+                tabIndex={0}
+                style={{ flex: 1, overflowY: 'auto', pointerEvents: dragging ? 'none' : undefined }}
+            >
+                {showing('people') ? (
+                    <>
+                        {/* Either/or, never both: signed out, the hint has to explain that picking
                             anyone signs you in; signed in, it explains what clicking a row does. Both
                             carry the same invited-row caveat, because selecting an invited person is a
                             viewpoint change and not a sign-in (see world.ts's `invited:` branch). */}
-                                <Text size="xs" c="gray.5" mb="sm">
-                                    {signedIn ? t('peopleHint') : t('signedOutHint')}
-                                </Text>
-                                <PeopleApp people={people} viewpoint={viewpoint} onSelect={onSelect} />
-                            </>
-                        ) : null}
-                        {showing('mail') ? (
-                            <Stack gap="lg">
-                                <InboundApp {...inbound} />
-                                <MailApp {...mail} />
-                            </Stack>
-                        ) : null}
-                        {showing('events') ? <EventsApp events={events} audit={audit} /> : null}
-                        {showing('jobs') ? <JobsApp {...jobs} /> : null}
-                        {showing('messages') ? <MessagesApp messages={messages} /> : null}
-                        {showing('hooks') ? <HooksApp {...hooks} /> : null}
-                        {/* App tabs render their host-built content here (between Hooks and Errors). An ordinary
+                        <Text size="xs" c="gray.5" mb="sm">
+                            {signedIn ? t('peopleHint') : t('signedOutHint')}
+                        </Text>
+                        <PeopleApp people={people} viewpoint={viewpoint} onSelect={onSelect} />
+                    </>
+                ) : null}
+                {showing('mail') ? (
+                    <Stack gap="lg">
+                        <InboundApp {...inbound} />
+                        <MailApp {...mail} />
+                    </Stack>
+                ) : null}
+                {showing('events') ? <EventsApp events={events} audit={audit} /> : null}
+                {showing('jobs') ? <JobsApp {...jobs} /> : null}
+                {showing('messages') ? <MessagesApp messages={messages} /> : null}
+                {showing('hooks') ? <HooksApp {...hooks} /> : null}
+                {/* App tabs render their host-built content here (between Hooks and Errors). An ordinary
                     tab's live content (iframe / mounted node) unmounts with it; a keepMounted one, once
                     opened, stays put and is only hidden (./tab-mount). */}
-                        {extraTabs.map((tab) => {
-                            const mount = tabMount(tab, mountState)
-                            return mount === 'none' ? null : (
-                                <Box key={tab.id} style={mount === 'hidden' ? { display: 'none' } : undefined}>
-                                    {tab.content}
-                                </Box>
-                            )
-                        })}
-                        {showing('errors') ? (
-                            <Box style={lightBoxStyle}>
-                                <ErrorsApp runServerScenario={runServerErrorScenario} />
-                            </Box>
-                        ) : null}
-                        {showing('snapshots') ? <SnapshotsApp {...snapshots} /> : null}
-                        {showing('tours') && tours ? <ToursApp {...tours} /> : null}
-                    </Box>
-                    {/* Notices overlay the panel's bottom edge (absolute, not in flow) so a transient
-                confirmation never shoves the scroll body — no layout shift when one appears. */}
-                    {notices.length > 0 ? (
-                        <Box
-                            role="status"
-                            p="xs"
-                            style={{
-                                position: 'absolute',
-                                bottom: 0,
-                                left: 0,
-                                right: 0,
-                                zIndex: 2,
-                                background: '#1a1b1e',
-                                borderTop: '1px solid #373a40',
-                            }}
-                        >
-                            {notices.map((notice) => (
-                                <Text key={notice.id} size="xs" c="yellow.3" data-testid="simulator-notice">
-                                    {notice.text}
-                                </Text>
-                            ))}
+                {extraTabs.map((tab) => {
+                    const mount = tabMount(tab, mountState)
+                    return mount === 'none' ? null : (
+                        <Box key={tab.id} style={mount === 'hidden' ? { display: 'none' } : undefined}>
+                            {tab.content}
                         </Box>
-                    ) : null}
+                    )
+                })}
+                {showing('errors') ? (
+                    <Box style={lightBoxStyle}>
+                        <ErrorsApp runServerScenario={runServerErrorScenario} />
+                    </Box>
+                ) : null}
+                {showing('snapshots') ? <SnapshotsApp {...snapshots} /> : null}
+                {showing('tours') && tours ? <ToursApp {...tours} /> : null}
+            </Box>
+            {/* Notices overlay the panel's bottom edge (absolute, not in flow) so a transient
+                confirmation never shoves the scroll body — no layout shift when one appears. */}
+            {notices.length > 0 ? (
+                <Box
+                    role="status"
+                    p="xs"
+                    style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        zIndex: 2,
+                        background: '#1a1b1e',
+                        borderTop: '1px solid #373a40',
+                    }}
+                >
+                    {notices.map((notice) => (
+                        <Text key={notice.id} size="xs" c="yellow.3" data-testid="simulator-notice">
+                            {notice.text}
+                        </Text>
+                    ))}
                 </Box>
             ) : null}
+        </Box>
+    ) : null
+
+    return (
+        <>
+            {pill}
+            {panel}
         </>
     )
 }
