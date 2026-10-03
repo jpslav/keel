@@ -1,14 +1,12 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { InvalidTransitionError } from 'keel/core/state-machine'
 import type { DbPort } from 'keel/ports/db'
 
 const MISSING_ID = '00000000-0000-0000-0000-000000000000'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing anything that touches pglite.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-tickets-db-'))
+const tmp = makeTestTmpDir('app-tickets-db-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

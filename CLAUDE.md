@@ -110,6 +110,11 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   are derived per checkout by `scripts/ports.mjs`, so parallel agent sessions don't adopt each other's
   dev server; `SHOWCASE_PORT`/`STARTER_PORT`/`LADLE_PORT`/`CONTRACT_PG_PORT` override it (the last
   also isolates `pnpm test:contract` between worktrees), and `print-port.mjs` reports it.
+- **A test that needs a scratch directory calls `makeTestTmpDir()` / `makeTestTmpDirAsync()`**
+  (`tests/support/tmp-dir.ts`) — never `mkdtemp`/`mkdtempSync`, which `keel/no-direct-mkdtemp` bans in test
+  files. The helper removes the directory when the file finishes; `test:unit`, `test:coverage` and
+  `test:contract` run through `scripts/check-tmpdir-leak.mjs`, which fails the run if one survives. Do not
+  call `vitest run` directly in a new script that is meant to gate — route it through that script.
 - **E2E `workers` stays 1.** Every worker shares one `.data` behind one dev server, so parallelism buys
   flakes, not speed (measured; the old "10GB VM / OOM" reason was wrong). Parallelism belongs where the
   worlds are separate: across apps locally, across CI shards. Read

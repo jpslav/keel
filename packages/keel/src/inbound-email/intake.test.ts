@@ -1,12 +1,10 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import { DEMO_INBOUND_DOMAIN, formatInboundRecipient } from '../core/inbound-email'
 
 // Point fake-adapter state at a throwaway dir BEFORE importing pglite-backed modules (the webhooks.test
 // precedent). Simulated mode is the default, so intake runs against the seeded fake db + fake auth.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-inbound-intake-'))
+const tmp = makeTestTmpDir('app-inbound-intake-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })
