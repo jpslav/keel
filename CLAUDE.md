@@ -77,7 +77,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The
   primitive opens `withTenant` itself and re-runs your whole scoped query on every page, so page two
   cannot be scoped differently from page one; the cursor is client input, parsed by a total function
-  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Worked example:
+  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Its optional
+  `orderBy` column is fixed per route (a cursor names no column), never client-chosen. Worked example:
   `apps/showcase/src/domain/db/tickets.ts` + `apps/showcase/src/app/api/tickets/route.ts`, with the
   index in `apps/showcase/src/app-config/db/migrations/1004_tickets_keyset_index.ts` and proofs in both
   RLS suites.

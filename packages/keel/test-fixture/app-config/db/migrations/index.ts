@@ -1,6 +1,7 @@
 import type { Migration } from 'kysely/migration'
 import * as m1001 from './1001_dockets'
 import * as m1002 from './1002_dockets_due_on'
+import * as m1003 from './1003_dockets_last_touched_at'
 
 /**
  * The APP's migrations (the seam side of keel/db/migrations, ADR-0012). Numbering convention: framework
@@ -15,4 +16,5 @@ import * as m1002 from './1002_dockets_due_on'
 export const appMigrations: Record<string, Migration> = {
     '1001_dockets': m1001,
     '1002_dockets_due_on': m1002,
+    '1003_dockets_last_touched_at': m1003,
 }

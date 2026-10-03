@@ -26,6 +26,8 @@ interface DocketsTable {
     created_at: Generated<string>
     /** A calendar day (`date`, 1002), so a string like `'2026-10-03'` — both db adapters parse it as one. */
     due_on: string | null
+    /** A second NOT NULL `timestamptz` (1003) — the alternate ordering key `keysetPage`'s `orderBy` is proven on. */
+    last_touched_at: Generated<string>
 }
 
 /** The app's tables, merged into the framework `DB` interface (keel/db/schema.ts `extends AppTables`). */
