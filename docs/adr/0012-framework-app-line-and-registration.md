@@ -314,3 +314,15 @@ pnpm verify` exits 0 end to end.
   cannot tell you the framework still works without it.
 - Deferred deliberately: self-fetching tab components promoted into the framework (they would force the
   static twin to fake `fetch`), and per-capability package splits (a publish-time question, ADR-0013).
+
+## Addendum — 2026-10-03: the fixture gets its own contract database
+
+The Decision says `vitest.contract.config.ts` is untouched and the fixture "must not go near the contract
+database". The first half no longer holds; the reasoning behind the second half still does. The fixture
+now has a contract run of its own: a `keel` project in that config, aliased at the fixture seam, whose
+harness creates a separate `keel_contract` database on the same server. It never touches the contract
+app's database, so the "two 1001+ sets over one database" failure the Decision guarded against cannot
+occur. The trigger was an engine-parity proof (a `date` column, `docs/decision-log.md` 2026-10-03) that is
+only worth anything on real Postgres. The Consequences' "contract runner stays single-app" is now "one app
+plus the framework's own seam". A second APP still needs its own project and database, and
+`.claude/future-tasks/contract-suite-single-app.md` stays open for that.

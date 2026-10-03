@@ -1,4 +1,4 @@
-import { PGlite } from '@electric-sql/pglite'
+import type { PGlite } from '@electric-sql/pglite'
 import { Kysely, type Transaction } from 'kysely'
 import { migrateToLatest } from '../../db/migrate'
 import type { DB } from '../../db/schema'
@@ -7,7 +7,7 @@ import { runWithTenant } from '../../db/with-tenant'
 import type { DbPort } from '../../ports/db'
 import { dataDir } from './data-dir'
 import { fakeEmail } from './email'
-import { PGliteDialect } from './pglite-dialect'
+import { openPglite, PGliteDialect } from './pglite-dialect'
 import { fakeStorage } from './storage'
 
 // Survive Next dev hot-reload: keep the single pglite instance on globalThis. The raw client is
@@ -20,7 +20,7 @@ const globalStore = globalThis as unknown as {
 function instance() {
     if (!globalStore.__appFakeDb) {
         // Persisted under .data so dev data survives restarts; delete .data/pglite to reset.
-        const client = new PGlite(dataDir('pglite'))
+        const client = openPglite(dataDir('pglite'))
         const db = new Kysely<DB>({ dialect: new PGliteDialect(client) })
         // Seeding is a FAKE-mode concern (real deployments migrate but never seed), so the fake
         // adapters are the natural place to hand the seeder the storage and email it needs to furnish

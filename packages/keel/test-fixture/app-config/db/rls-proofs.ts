@@ -9,8 +9,8 @@ import { runWithTenant } from 'keel/db/with-tenant'
  * per-table privilege grants.
  *
  * keel/db/rls-proof-runner.ts composes this with the framework half and runs the union, so these
- * assertions execute wherever that runner does — for the fixture, that is the pglite suite. Kept in
- * lockstep with ./migrations.
+ * assertions execute wherever that runner does — for the fixture, the pglite suite AND real Postgres
+ * (keel/adapters/real/db.contract.test.ts). Kept in lockstep with ./migrations.
  */
 export const appRlsProofs: RlsProofSuite = async ({
     db,
@@ -91,4 +91,34 @@ export const appRlsProofs: RlsProofSuite = async ({
         deleteRejected = /permission denied/.test(String(error))
     }
     expect(deleteRejected).toBe(true)
+
+    // ---- dockets.due_on: a `date` arrives as the wire string on BOTH engines (1002) ----
+    //
+    // Not an isolation proof — an engine-parity one, riding this suite because it is the one that runs on
+    // pglite and on real Postgres alike. Left to their defaults the two drivers disagree on the SAME row:
+    // `pg` builds a `Date` at local midnight (the previous day, read as UTC, anywhere east of UTC) and
+    // pglite one at UTC midnight. Both adapters hand back the string instead; a `Date` from either fails
+    // the `toBe` below in every timezone, so a dropped parser is caught on whichever engine dropped it.
+    // The array read covers `date[]`, which `pg` parses separately from `date`.
+    const [dueDocket] = await db
+        .insertInto('dockets')
+        .values({
+            tenant_id: alphaTenantId,
+            org_id: alphaOrgId,
+            label: 'dated docket',
+            body: 'body',
+            created_by_user_id: 'proof-user',
+            due_on: '2026-10-03',
+        })
+        .returning('id')
+        .execute()
+    const dated = await runWithTenant(db, alphaTenantId, (trx) =>
+        trx
+            .selectFrom('dockets')
+            .select(['due_on', sql<string[]>`ARRAY[due_on, due_on + 1]`.as('due_window')])
+            .where('id', '=', dueDocket!.id)
+            .executeTakeFirstOrThrow(),
+    )
+    expect(dated.due_on).toBe('2026-10-03')
+    expect(JSON.stringify(dated.due_window)).toBe('["2026-10-03","2026-10-04"]')
 }

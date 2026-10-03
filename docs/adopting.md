@@ -239,7 +239,7 @@ declaration.
 vocabulary — its seed slugs, its `tickets` table, its `export-tickets` job kind, its route tree — so
 deleting the demo took `pnpm test:unit` and `pnpm typecheck` down with it. The framework now carries a
 seam of its own, `packages/keel/test-fixture`: a conforming `@app-config/*` registration with its own
-two-tenant seed world, one table and migration, one job/webhook/notification kind, an inbound handler,
+two-tenant seed world, one table and its migrations, one job/webhook/notification kind, an inbound handler,
 and a route tree that exists only to be read by the authorization scan. The root TypeScript program
 resolves `@app-config/*` there, and `vitest.config.ts` runs keel's suite in a `keel` project pointed at
 it. Nothing in that fixture is deletable by adoption, and its vocabulary is deliberately none of the
