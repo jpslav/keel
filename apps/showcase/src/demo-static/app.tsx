@@ -189,10 +189,10 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
     const [demoEscalations, setDemoEscalations] = useState<DemoEscalation[]>(initialEscalations)
     const [demoAttachments, setDemoAttachments] = useState<DemoAttachment[]>(initialAttachments)
     // Actors-tab twin (ADR-0006 FULL parity): the analyzer's claimed-id memory held OUTSIDE the
-    // ActorShell (which unmounts whenever the Actors tab isn't active — see the panel's conditional tab
-    // render), so a tab switch away and back doesn't just self-heal via the next poll, it survives with
-    // no gap. A world reset must clear it explicitly since nothing else would (it isn't part of the
-    // jobs list) — hence the onReset below.
+    // ActorShell. The shell itself is lazy (nothing exists until the Actors tab is first opened) and then
+    // kept mounted (`keepMounted`), so the memory no longer has to outlive tab switches — it lives here so
+    // the twin owns it alongside the world it describes. A world reset must clear it explicitly since
+    // nothing else would (it isn't part of the jobs list) — hence the onReset below.
     const serviceMemoryRef = useRef<ServiceMemory>({ claimed: new Set() })
 
     /**

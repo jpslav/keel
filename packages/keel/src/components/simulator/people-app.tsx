@@ -9,6 +9,7 @@ export interface Person {
     /** null for an invited-but-unregistered person — there's no account yet to hold a name. */
     name: string | null
     email: string
+    /** The person's role — rendered only when `orgs` is absent (an app that doesn't populate it). */
     role: string
     /** Every org (product copy: "team") the person belongs to, with their role IN that org. When
      *  present it replaces the single `role` chip — a multi-org person's role differs per org, so one
@@ -82,7 +83,9 @@ export function PeopleApp({
                                     </Text>
                                 ) : null}
                             </Stack>
-                            <Group gap={4} wrap="nowrap">
+                            {/* Wraps: a multi-org person carries one chip per membership, which at the
+                                panel's 300px minimum would otherwise squeeze the name column. */}
+                            <Group gap={4} wrap="wrap" justify="flex-end">
                                 {person.orgs && person.orgs.length > 0 ? (
                                     person.orgs.map((org) => (
                                         <Text
