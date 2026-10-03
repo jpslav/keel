@@ -90,7 +90,7 @@ export function PeopleApp({
                                             size="xs"
                                             c="gray.3"
                                             style={chipStyle}
-                                            data-testid={`people-${idPart}-org-${org.orgSlug}`}
+                                            data-testid={`org-chip-${idPart}-${org.orgSlug}`}
                                         >
                                             {t('peopleOrgRole', { org: org.orgSlug, role: org.role })}
                                         </Text>

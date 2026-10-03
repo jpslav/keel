@@ -35,8 +35,8 @@ test('people rows show every org membership, each with its own role', async ({ p
     // memberships[0]) misstated the second membership and hid that it existed at all.
     await signInAs(page, 'person-member')
     await openSimulatorPanel(page)
-    await expect(page.getByTestId('people-person-staff-org-frontline')).toHaveText('frontline · staff')
-    await expect(page.getByTestId('people-person-staff-org-platform')).toHaveText('platform · member')
+    await expect(page.getByTestId('org-chip-person-staff-frontline')).toHaveText('frontline · staff')
+    await expect(page.getByTestId('org-chip-person-staff-platform')).toHaveText('platform · member')
 })
 
 test('continuity round-trip: switching people and back restores route and active org', async ({ page }) => {
