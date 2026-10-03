@@ -1485,3 +1485,39 @@ read that as "keep the fixtures", and built their own world beside the starter's
   each other both ways under every app. Static halves are built at runtime by the composition root, out
   of a unit test's sight, so the static-shell e2e loads every registered preset and waits for its
   "Preset loaded" notice: a kind with no static half settles the replay false and the notice never comes.
+
+## Holding one actor is a preset operation kind, answered per actor (2026-10-03, `preset-actor-holds`)
+
+The Simulator's actors have had ONE hold, the app's world-wide `actors-held` flag. A demo preset can now
+hold a single counterparty (`{ op: 'actor.hold', actor: 'partner-desk', held: true }`), which `multi-tenant`
+uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
+
+- **An operation kind, not a field on `DemoPreset`.** A `holds: [...]` field would have been a second
+  mechanism beside the script, with its own replay path on each host and no place in the ordered, named,
+  recordable list a preset already is. As a kind it reuses all of it: the same conformance gate, the same
+  `extends` composition (a child can release what its base held), and the same two halves. It also
+  prepares the next step. Per-actor scenario settings (an actor that fails a given share of its calls,
+  say) become more fields on the SAME per-actor world state this slice adds, and more operation kinds
+  or arguments over it, rather than another channel.
+- **World state is a per-actor map.** Server: `readActorHolds`/`setActorHold` in the fake Simulator state
+  (`keel/adapters/fake/simulator`), persisted at `.data/simulator/actor-holds.json`. That directory is
+  already a LIVE_DIR, so reset, save and restore cover it with no new code, and a test proves each. Static:
+  `actorHolds` in the in-memory world, cleared by `resetWorld` and exposed on `DemoWorld`.
+- **The server host asks one question per tick.** The actor frame used to fetch every flag from
+  `GET /api/simulator/flags` and pick `actors-held` out. It now calls `GET /api/simulator/actors/held?actor=<id>`,
+  which answers `{ held }` for exactly that actor: the world-wide flag OR its own hold. The flags route stays
+  (its POST is how the Snapshots tab and the specs flip a flag; its GET, the read-out of every flag, has no
+  caller left in this repo, and was kept rather than removed in a slice about something else). The static host computes the same OR in memory
+  (`actorsHeld || actorHolds[id]`).
+- **The framework still does not value-import the actor registry at runtime.** keel's `actor.hold` `check`
+  needs the registered ids, so `PresetWorld` gains `actors`, derived in the seam-conformance suite from the
+  seam's `actors` list. That is a value read by a TEST only, but it means `@app-config/actors` is no longer
+  type-only: the starter registers `actors = []` and the fixture one actor, `fixture-tug` (ADR-0012
+  addendum). Neither host's half validates the id at replay, since neither could without that import; an
+  unknown id would write a hold nothing reads, and the gate rejects the preset first.
+- **Deferred: an Actors-tab toggle.** A per-actor hold switch in the Snapshots or Actors tab is a natural
+  follow-up (it would call a route that writes the same file, and the static twin would set `actorHolds`).
+  Not built here: the slice's job was the preset path, and a toggle needs its own copy in both catalogs and
+  its own specs.
+- **Measured:** the showcase's `dist-demo/index.html` went from 942,766 to 942,996 bytes (+230; budget
+  950,000), the starter's from 853,371 to 853,483 (+112).

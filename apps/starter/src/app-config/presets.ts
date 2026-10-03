@@ -4,7 +4,7 @@
  * tour can still start from `'reset'`, the one world start every host has. Add one file per preset and
  * list it here (see `apps/showcase/src/app-config/presets.ts`).
  *
- * No operation kinds of its own either: a preset here can use keel's (`invite`, `inbound`, `flag`). Add
+ * No operation kinds of its own either: a preset here can use keel's (`invite`, `inbound`, `flag`; `actor.hold` needs an actor, and this app registers none). Add
  * one with `/new-preset-operation`, which registers its definition below and its server half in
  * `./preset-operations.ts`.
  */

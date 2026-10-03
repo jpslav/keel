@@ -1,8 +1,9 @@
 import { organizations, people } from '@app-config/seed'
 import { auth, db } from '../adapters/index'
 import { KNOWN_FLAGS, setFlag } from '../adapters/fake/analytics'
+import { setActorHold } from '../adapters/fake/simulator'
 import { DEMO_INBOUND_DOMAIN, formatInboundRecipient } from '../core/inbound-email'
-import type { FlagArgs, FrameworkPresetOperation, InboundArgs, InviteArgs } from '../core/presets'
+import type { ActorHoldArgs, FlagArgs, FrameworkPresetOperation, InboundArgs, InviteArgs } from '../core/presets'
 import { orgIdForSlug } from '../db/org-lookup'
 import { tenantIdForSlug } from '../db/tenant-lookup'
 import { intakeInboundEmail } from '../inbound-email/intake'
@@ -11,9 +12,10 @@ import { sendOrgInvite } from './invite'
 
 /**
  * The SERVER halves of keel's own demo-preset operation kinds (keel/core/presets.ts) — what `invite`,
- * `inbound` and `flag` DO when the server replays a preset, through the same server code the product
+ * `inbound`, `flag` and `actor.hold` DO when the server replays a preset, through the same server code the product
  * runs: `sendOrgInvite` for an invite, the framework intake (and the app's registered handler) for an
- * inbound email, the fake analytics store for a flag. keel/server-lib/demo-presets.ts composes these with
+ * inbound email, the fake analytics store for a flag, the Simulator's per-actor hold file for `actor.hold`.
+ * keel/server-lib/demo-presets.ts composes these with
  * the app's halves (`@app-config/preset-operations`) and dispatches each step to one.
  *
  * Published because an app's own server halves are written against this module: the handler and context
@@ -95,9 +97,18 @@ const flag: ServerPresetOperationHandler<FlagArgs> = async (args) => {
     setFlag(args.flag, args.enabled)
 }
 
+// An actor id the registry lacks is not checked here (the framework does not value-import the app's actor
+// list, ADR-0012): it would write a hold nothing reads, and the seam-conformance gate (`presetProblems`)
+// rejects the preset that names it.
+const actorHold: ServerPresetOperationHandler<ActorHoldArgs> = async (args) => {
+    setActorHold(args.actor, args.held)
+}
+
 /** keel's server halves, by kind — one for every framework kind (`satisfies` makes that exhaustive). An
  *  app entry of the same kind replaces one (keel/server-lib/demo-presets.ts). */
-export const frameworkPresetOperationHandlers = { invite, inbound, flag } satisfies Record<
-    FrameworkPresetOperation['op'],
-    ServerPresetOperationHandler
->
+export const frameworkPresetOperationHandlers = {
+    invite,
+    inbound,
+    flag,
+    'actor.hold': actorHold,
+} satisfies Record<FrameworkPresetOperation['op'], ServerPresetOperationHandler>

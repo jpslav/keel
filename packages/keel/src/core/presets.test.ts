@@ -35,6 +35,7 @@ const WORLD: PresetWorld = {
     orgSlugs: ['depot', 'annex', 'wharf'],
     handlers: ['support'],
     flags: ['demo-banner', 'jobs-held'],
+    actors: ['fixture-tug'],
 }
 
 // The registry the fixture's presets are checked against: keel's kinds plus the fixture's `docket.flag`.
@@ -166,6 +167,30 @@ describe('presetProblems', () => {
             'preset "busy-harbor" operation 5 (invite): "z@example.test" is already a person or an invite',
             'preset "busy-harbor" operation 6 (invite): "fixture-lead" may not invite into "wharf"',
             'preset "busy-harbor" operation 6 (invite): "nope" is not an email address',
+        ])
+    })
+
+    it('holds an actor.hold to the registered actors: a known id passes, an unknown one is named', () => {
+        const preset = (actor: string): DemoPreset => ({
+            ...BUSY,
+            operations: [{ op: 'actor.hold', actor, held: true }],
+        })
+        expect(presetProblems([preset('fixture-tug')], WORLD, DEFINITIONS)).toEqual([])
+        expect(presetProblems([preset('no-such-actor')], WORLD, DEFINITIONS)).toEqual([
+            'preset "busy-harbor" operation 1 (actor.hold): unknown actor "no-such-actor"',
+        ])
+        // a release is as much an operation on a registered actor as a hold is
+        expect(
+            presetProblems(
+                [{ ...BUSY, operations: [{ op: 'actor.hold', actor: 'fixture-tug', held: false }] }],
+                WORLD,
+                DEFINITIONS,
+            ),
+        ).toEqual([])
+        // the shape is checked before the rule: a non-boolean `held` is a schema sentence, never "unknown actor"
+        const misshapen = { op: 'actor.hold', actor: 'fixture-tug', held: 'yes' } as unknown as PresetOperation
+        expect(presetProblems([{ ...BUSY, operations: [misshapen] }], WORLD, DEFINITIONS)).toEqual([
+            expect.stringMatching(/^preset "busy-harbor" operation 1 \(actor\.hold\): held: \S/),
         ])
     })
 

@@ -15,7 +15,7 @@
  * order here is the order the Snapshots tab shows. PURE TypeScript — shared by the server glue and the
  * static-demo twin, which is why nothing here may reach a server half.
  *
- * The app's own OPERATION KINDS register here too, beside keel's `invite`/`inbound`/`flag`: one directory
+ * The app's own OPERATION KINDS register here too, beside keel's `invite`/`inbound`/`flag`/`actor.hold`: one directory
  * per kind under `./presets/operations/`, whose `definition.ts` is listed in `appPresetOperations` and
  * typed into `AppPresetOperation`. Its server half registers on the server-only `./preset-operations.ts`
  * and its static half in the static composition root (src/demo-static/app.tsx) — `/new-preset-operation`

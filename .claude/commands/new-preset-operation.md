@@ -6,7 +6,7 @@ Add a demo-preset operation kind for: $ARGUMENTS
 
 A demo preset (`packages/keel/src/core/presets.ts`) is the seed plus a script of world operations that
 every host replays: the server through the same code the product runs, the `file://` demo through its
-in-memory twin. keel ships three kinds — `invite`, `inbound`, `flag`. An app adds its own (the showcase's
+in-memory twin. keel ships four kinds — `invite`, `inbound`, `flag`, `actor.hold`. An app adds its own (the showcase's
 `ticket.assign` is the worked example), and an app kind with keel's kind NAME replaces keel's.
 
 Every kind is **three files that never import each other's halves**, in
@@ -75,7 +75,7 @@ To make a preset follow YOUR version of `invite` (a customized invite flow), reg
 keel's name. Start from keel's own three parts and keep the name:
 
 - **Definition**: copy keel's from `packages/keel/src/core/presets.ts` (`inviteOperation`,
-  `inboundOperation`, `flagOperation`) into `.../operations/<kind>/definition.ts`, keeping `kind`
+  `inboundOperation`, `flagOperation`, `actorHoldOperation`) into `.../operations/<kind>/definition.ts`, keeping `kind`
   identical, and register it in `appPresetOperations`. If your version keeps keel's argument shape,
   leave `AppPresetOperation` alone (keel's `FrameworkPresetOperation` already types that name); if it
   changes the shape, add yours to the union. Change the rules to match your route.

@@ -55,6 +55,28 @@ export function recordLastPath(personId: string, path: string): void {
     updatePersonState(`person:${personId}`, { lastPath: path })
 }
 
+/**
+ * Per-actor holds: which Simulator actors the world has individually held, by actor id (`true` = held).
+ * The persisted twin of the static world's `actorHolds`, in `.data/simulator/` so reset, save and restore
+ * cover it with the rest of the Simulator's state (simulator-admin.ts LIVE_DIRS). An actor frame is its
+ * own document and asks the server, before every autonomous tick, whether it is held — this file and the
+ * app's world-wide flag are the two things that answer. A manual Step ignores both.
+ */
+function actorHoldsFile(): string {
+    return path.join(dataDir('simulator'), 'actor-holds.json')
+}
+
+export function readActorHolds(): Record<string, boolean> {
+    const file = actorHoldsFile()
+    return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, boolean>) : {}
+}
+
+/** Holds or releases one actor (last write wins). Does not check that `actor` is registered: the actor
+ *  registry is not a framework value import (ADR-0012), and demo presets are held to it at build time. */
+export function setActorHold(actor: string, held: boolean): void {
+    writeJsonAtomicSync(actorHoldsFile(), { ...readActorHolds(), [actor]: held })
+}
+
 function isPersonKey(value: string | undefined): value is PersonKey {
     return value !== undefined && (value.startsWith('person:') || value.startsWith('invited:'))
 }

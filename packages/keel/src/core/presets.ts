@@ -25,8 +25,8 @@ import type { StandardSchemaV1, StandardSchemaV1Issue } from './standard-schema'
  * invite, into a role that may be granted). A preset can therefore only describe a world someone could
  * have clicked together; it is a shortcut to that world, never a back door into a different one.
  *
- * **The operation KINDS are a registry, not a closed list.** keel contributes `invite`, `inbound` and
- * `flag` (`frameworkPresetOperations` below); an app contributes its own on the same seam module
+ * **The operation KINDS are a registry, not a closed list.** keel contributes `invite`, `inbound`, `flag`
+ * and `actor.hold` (`frameworkPresetOperations` below); an app contributes its own on the same seam module
  * (`appPresetOperations`, typed by its `AppPresetOperation` union), and an app entry with keel's kind name
  * REPLACES keel's (`composePresetOperations`). Each kind is three parts that never share a module: this
  * pure DEFINITION (the argument schema, the product rules, the named results it consumes), a SERVER half
@@ -76,11 +76,21 @@ export interface FlagArgs {
     enabled: boolean
 }
 
+/** Holds (or releases) ONE registered Simulator actor — the per-actor counterpart of an app's world-wide
+ *  hold flag. A held actor keeps its schedule but does nothing on its own (a manual Step still works),
+ *  so a preset can start a world where one counterparty has gone quiet while the others keep working. */
+export interface ActorHoldArgs {
+    /** A registered Simulator actor id (`@app-config/actors`). */
+    actor: string
+    held: boolean
+}
+
 /** keel's own operation kinds, as preset authors write them. */
 export type FrameworkPresetOperation =
     | PresetOperationOf<'invite', InviteArgs>
     | PresetOperationOf<'inbound', InboundArgs>
     | PresetOperationOf<'flag', FlagArgs>
+    | PresetOperationOf<'actor.hold', ActorHoldArgs>
 
 /** Every operation a preset may contain: keel's kinds plus the app's, composed like job kinds (ADR-0012).
  *  The app half is a TYPE on its seam module, `never` when it registers none. */
@@ -210,6 +220,8 @@ export interface PresetWorld {
     handlers: string[]
     /** Known Snapshots feature flags. */
     flags: string[]
+    /** Registered Simulator actor ids. */
+    actors: string[]
 }
 
 /**
@@ -295,6 +307,12 @@ const flagOperation: PresetOperationDefinition<'flag', FlagArgs> = {
     check: (args, world) => (world.flags.includes(args.flag) ? [] : [`unknown flag "${args.flag}"`]),
 }
 
+const actorHoldOperation: PresetOperationDefinition<'actor.hold', ActorHoldArgs> = {
+    kind: 'actor.hold',
+    args: v.object({ actor: v.string(), held: v.boolean() }),
+    check: (args, world) => (world.actors.includes(args.actor) ? [] : [`unknown actor "${args.actor}"`]),
+}
+
 /** keel's own operation kinds. An app may replace any of them by registering a definition of the same
  *  `kind` in its `appPresetOperations` (`/new-preset-operation --from <kind>` copies one to start from;
  *  `composePresetOperations([])[kind]` reaches keel's to wrap). */
@@ -302,6 +320,7 @@ const frameworkPresetOperations: readonly PresetOperationDefinition[] = [
     inviteOperation,
     inboundOperation,
     flagOperation,
+    actorHoldOperation,
 ]
 
 /**

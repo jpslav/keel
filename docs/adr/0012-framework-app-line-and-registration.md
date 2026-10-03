@@ -381,3 +381,20 @@ under `src/` that the map does not publish) found two more that earlier figures 
 `components/simulator/tab-mount` and `components/simulator/people-dimensions`, added on `main` while the
 count stayed at 34. That number is now gated too: `public-surface.test.ts` holds the sentence in
 `docs/adopting.md` to the walked count, as it already held CLAUDE.md's published count.
+
+## Addendum (2026-10-03, later still: per-actor holds): `@app-config/actors` gains a value
+
+`@app-config/actors` was type-only (`ActorId`); it now also exports **`actors`**, the registered actors as a
+`readonly { id: string }[]` (the showcase's carries each actor's copy keys as well). keel's `actor.hold`
+demo-preset kind must reject an actor id the app did not register, and its definition is pure, so
+`PresetWorld` gains `actors` and the seam-conformance suite derives it from this list, the way it derives
+people, teams, handlers and flags. The empty form is `actors = []` alongside `type ActorId = never`.
+
+This is **not a new entry on the enumerated value-import list**: only a test reads the value. Framework
+runtime code still takes `ActorId` as a type, and neither host's `actor.hold` half validates its argument
+(the gate already has). The cost is that every registration must now provide the list, which is why the
+starter gained `actors = []` and the fixture, whose registration was empty, now registers one actor
+(`fixture-tug`): keel's replay test cannot prove that a hold is written, nor the gate that a known id passes
+and an unknown one is named, against an empty list. The fixture hosts no panel, so the actor is only an id.
+
+The fixture's seam is still **19** modules, and the public and internal counts are unchanged.

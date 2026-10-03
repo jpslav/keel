@@ -296,7 +296,7 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 | `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
 | `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
 | `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
-| `actors.ts`                                   | your simulated counterparties for dev/demo                                                         | `type ActorId = never`                     |
+| `actors.ts`                                   | your simulated counterparties for dev/demo                                                         | `actors = []`, `type ActorId = never`      |
 | `simulator.ts`                                | your extra Simulator tabs + feature flags                                                          | `flags = []`                               |
 | `presets.ts`                                  | demo presets: named starting worlds every host can load, and your own operation kinds' definitions | `presets = []`, `appPresetOperations = []` |
 | `preset-operations.ts`                        | server halves of your own preset operation kinds                                                   | `{}`                                       |

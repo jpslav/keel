@@ -1,3 +1,4 @@
+import { actors } from '@app-config/actors'
 import { loadAppMessages } from '@app-config/messages'
 import { organizations, people } from '@app-config/seed'
 import { appPresetOperations, presets } from '@app-config/presets'
@@ -17,7 +18,8 @@ import type { MessageTree } from '../i18n/messages'
  * differently on each — or, worse, quietly do nothing on one. This holds every registered preset to the
  * seed and the registries it will replay against, and its copy to both catalogs, at build time.
  *
- * The world is DERIVED (seed people, seed orgs, the composed inbound registry, KNOWN_FLAGS), never
+ * The world is DERIVED (seed people, seed orgs, the composed inbound registry, KNOWN_FLAGS, the
+ * registered actors), never
  * listed here, so the check cannot drift from what the replays actually consult. So is the operation
  * registry: keel's kinds composed with the app's (`composePresetOperations(appPresetOperations)`), and
  * held both ways to the server halves the replay dispatches to — a kind with a definition and no server
@@ -78,6 +80,7 @@ describe('registered demo presets', () => {
                 orgSlugs: organizations.map((org) => org.slug),
                 handlers: Object.keys(inboundHandlers),
                 flags: KNOWN_FLAGS,
+                actors: actors.map((actor) => actor.id),
             },
             definitions,
         )
@@ -106,9 +109,10 @@ describe('registered demo presets', () => {
         }
     })
 
-    it('replay on the server host: every operation performed, every invite pending, the viewpoint signed in', async () => {
+    it('replay on the server host: every operation performed, every invite pending, every hold set, the viewpoint signed in', async () => {
         const { applyDemoPreset } = await import('./demo-presets')
         const { fakeAuth } = await import('../adapters/fake/auth')
+        const { readActorHolds } = await import('../adapters/fake/simulator')
         for (const preset of presets) {
             // What replays is the EXPANDED preset (`extends` chain flattened): a child's inherited invites
             // and viewpoint are as much its world as its own.
@@ -116,6 +120,12 @@ describe('registered demo presets', () => {
             if (!expanded) throw new Error(`${preset.id} does not expand (unknown base or a cycle)`)
             const result = await applyDemoPreset(preset.id, { baseUrl: 'http://localhost:3000/' })
             expect(result, preset.id).toEqual({ signedIn: expanded.viewpoint !== undefined })
+            // The replay reset the world first, so the hold file is exactly the script's last word per actor.
+            const expectedHolds: Record<string, boolean> = {}
+            for (const operation of expanded.operations) {
+                if (operation.op === 'actor.hold') expectedHolds[operation.actor] = operation.held
+            }
+            expect(readActorHolds(), `${preset.id}: actor holds`).toEqual(expectedHolds)
             for (const operation of expanded.operations) {
                 if (operation.op !== 'invite') continue
                 const members = await fakeAuth.listMembers(operation.org)

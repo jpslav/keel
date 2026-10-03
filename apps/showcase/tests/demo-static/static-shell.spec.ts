@@ -417,6 +417,8 @@ test('the ticket queue pages through its cursor chain from file://', async ({ pa
 test('static shell: a demo preset loads from the Snapshots tab — no server, same world as pnpm dev', async ({
     page,
 }) => {
+    // Two preset loads, and two waits on an actor's first autonomous tick (a few seconds each).
+    test.setTimeout(60_000)
     await page.goto(indexUrl)
     await page.getByTestId('simulator-pill').click()
     await page.getByTestId('simulator-tab-snapshots').click()
@@ -463,6 +465,22 @@ test('static shell: a demo preset loads from the Snapshots tab — no server, sa
         hasText: 'Can I reopen my old ticket?',
     })
     await expect(refused).toContainText('unmatched')
+
+    // multi-tenant's `actor.hold`: the partner desk has been held, and the bundle analyzer has not. The
+    // actors run from page load, and `held` is only reported once an autonomous tick has asked the
+    // world, so wait for the first tick (a few seconds) rather than sleeping a fixed time. The analyzer
+    // is checked AFTER that: it ticks on the same schedule, so a hold wrongly applied to it by now would
+    // already show, and "not held" cannot pass merely because nothing has asked yet.
+    await page.getByTestId('simulator-tab-actors').click()
+    const partnerDesk = page.getByTestId('actor-card-partner-desk').getByTestId('actor-status')
+    const analyzer = page.getByTestId('actor-card-bundle-analyzer').getByTestId('actor-status')
+    await expect(partnerDesk).toHaveAttribute('data-state', 'held', { timeout: 30_000 })
+    await expect(analyzer).not.toHaveAttribute('data-state', 'held')
+    // ...and it is a hold on ONE actor, not the world's: loading a preset without it releases the desk.
+    await page.getByTestId('simulator-tab-snapshots').click()
+    await page.getByTestId('preset-load-mid-demo').click()
+    await page.getByTestId('simulator-tab-actors').click()
+    await expect(partnerDesk).not.toHaveAttribute('data-state', 'held', { timeout: 30_000 })
 })
 
 /**

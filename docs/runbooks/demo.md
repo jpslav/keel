@@ -161,8 +161,9 @@ signed in; **Mid-demo** adds two new tickets — the refund one already assigned
 assignment notification — and a teammate (Jordan) whose invite is waiting unread —
 the second tour, **Joining the desk, from a preset**, walks that invite to the end; **Both sites busy**
 builds on Mid-demo (the same two tickets, Sam's assignment and Jordan's invite), then adds a Platform ticket and a pending Platform
-invite, gives Pinebrook a queue of its own and a refused email from a restricted member, and turns late-ticket
-highlighting on, signed in at Pinebrook. Presets are scripts, not saved files, so they work identically
+invite, gives Pinebrook a queue of its own and a refused email from a restricted member, turns late-ticket
+highlighting on, and holds the **Partner desk** actor (its Actors-tab card reads _Held_ while the Bundle
+analyzer keeps running), signed in at Pinebrook. Presets are scripts, not saved files, so they work identically
 in `dist-demo/index.html`. Loading one signs in only YOUR browser; anyone else watching the same server
 keeps who they were.
 
