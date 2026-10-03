@@ -4,14 +4,15 @@
 
 ## The narrower, concrete gap: actors stop the moment you look away
 
-**SHIPPED 2026-10-03** (`feat/simulator-people-orgs-actor-keepalive`): `SimulatorExtraTab.keepMounted`,
-set on the showcase's Actors tab through `@app-config/simulator`. Lazy, then sticky — nothing mounts
-until the tab is first opened (so specs and tours still start in a quiet world), and from then on the
-content stays mounted, hidden, through tab switches and collapse; the collapsed panel keeps its
-hidden aside in the DOM at the same tree position, because an iframe that moves reloads. The rule is
+**SHIPPED 2026-10-03**, in two steps. `feat/simulator-people-orgs-actor-keepalive` kept the Actors tab
+mounted once opened; `feat/actors-always-on` then made it mount from PAGE LOAD — the counterparties are
+part of the world, so they run whether or not anyone opens the tab — and added the world's hold on
+them: the showcase's `actors-held` Snapshots flag, which each actor asks before every autonomous tick
+(`ActorShell`'s `held` prop; a manual Step ignores it). The rule is
 `packages/keel/src/components/simulator/tab-mount.ts`; the e2e proof is the last test in
-`apps/showcase/tests/e2e/destructive/actors.spec.ts`. The line references below describe the code as it
-was. Only the larger question that follows is still open.
+`apps/showcase/tests/e2e/destructive/actors.spec.ts` (held jobs stay queued while every frame reports
+`held`, then drain on release with the panel never opened). The line references below describe the
+code as it was.
 
 An actor's tick loop is a `setTimeout` chain owned by a mounted React component (`ActorShell`,
 `packages/keel/src/components/simulator/actor-shell.tsx`). Today it stops far more easily than
@@ -27,6 +28,22 @@ collapses the panel — not only when they navigate away or close the tab.
 tab switch and a panel collapse, not just while that specific tab is on screen. This is additive to
 the existing component — no architecture change, just not re-deriving "is this tab active" as the
 mount condition for something that is supposed to keep running in the background.
+
+## What is still open
+
+Always-on settles most of what "independent of the page" meant: an actor now runs whenever the app is
+open, on BOTH hosts — the static `file://` demo runs the same `ActorShell` inline, with the same
+`setTimeout` loop, just not in an iframe. Three narrower questions remain:
+
+1. **Runtime-created organizations.** Per-org actors are expressible today by registering one per org
+   in `@app-config/actors`, but not for an org created after the config was written.
+2. **Trigger-driven actors.** Today's actors poll. A counterparty that instead WAITS for something —
+   the app's outbound webhook delivery, an email — needs the app to deliver to an in-page actor, which
+   no host does yet.
+3. **Headless, with no browser open at all.** Only a server host could do it, no demo needs it, and it
+   contradicts the stated client-side design below; it is the least likely of the three to be worth it.
+
+The original framing follows, kept for the evidence.
 
 ## The larger, open design question: should any actor run off the page at all
 

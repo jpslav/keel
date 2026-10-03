@@ -44,9 +44,9 @@ export interface SimulatorExtraTab {
     id: string
     label: string
     content: ReactNode
-    /** Keep the content mounted (hidden) once the tab has been opened, through tab switches and panel
-     *  collapse — for content that RUNS something, like the Actors tab's tick loops. Unset: the
-     *  content exists only while its tab is showing. See ./tab-mount. */
+    /** Mount the content from page load and never unmount it — shown when its tab is, hidden otherwise
+     *  (other tabs, panel collapsed) — for content that RUNS something, like the Actors tab's tick
+     *  loops. Unset: the content exists only while its tab is showing. See ./tab-mount. */
     keepMounted?: boolean
 }
 
@@ -232,13 +232,20 @@ export function SimulatorPanel({
     // React has attached the click handlers. The SSR'd pill LOOKS clickable before hydration but
     // silently swallows clicks; Playwright waits for the stamp instead of racing that window.
     const [hydrated, setHydrated] = useState(false)
-    // keepMounted tabs that have been opened at least once (./tab-mount). Updated during render — the
-    // "adjust state while rendering" pattern — so the very render that first shows the tab records it.
-    const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<string>>(() => new Set())
-    if (!collapsed && !visitedTabs.has(activeTab) && extraTabs.some((tab) => tab.keepMounted && tab.id === activeTab)) {
-        setVisitedTabs(new Set(visitedTabs).add(activeTab))
-    }
-    const mountState = { activeTab, collapsed, visited: visitedTabs }
+    // Kept-mounted content (actor frames) mounts only once the host page has loaded — see ./tab-mount.
+    const [pageLoaded, setPageLoaded] = useState(false)
+    useEffect(() => {
+        if (document.readyState === 'complete') {
+            // Syncing with an external event (the window's load), so setting state here is the point.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setPageLoaded(true)
+            return
+        }
+        const onLoad = () => setPageLoaded(true)
+        window.addEventListener('load', onLoad, { once: true })
+        return () => window.removeEventListener('load', onLoad)
+    }, [])
+    const mountState = { activeTab, collapsed, pageLoaded }
     // A kept-mounted tab hidden behind the collapsed pill still needs its panel in the DOM, at the
     // SAME tree position it had while expanded — an iframe that moves is an iframe that reloads.
     const keepPanel = !collapsed || extraTabs.some((tab) => tabMount(tab, mountState) === 'hidden')
@@ -628,8 +635,8 @@ export function SimulatorPanel({
                 {showing('messages') ? <MessagesApp messages={messages} /> : null}
                 {showing('hooks') ? <HooksApp {...hooks} /> : null}
                 {/* App tabs render their host-built content here (between Hooks and Errors). An ordinary
-                    tab's live content (iframe / mounted node) unmounts with it; a keepMounted one, once
-                    opened, stays put and is only hidden (./tab-mount). */}
+                    tab's live content (iframe / mounted node) unmounts with it; a keepMounted one is there
+                    from page load, stays put, and is only hidden (./tab-mount). */}
                 {extraTabs.map((tab) => {
                     const mount = tabMount(tab, mountState)
                     return mount === 'none' ? null : (

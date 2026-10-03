@@ -1,6 +1,15 @@
 import { isSimulated } from 'keel/adapters/index'
-import { KNOWN_FLAGS, setFlag } from 'keel/adapters/fake/analytics'
+import { KNOWN_FLAGS, readFlags, setFlag } from 'keel/adapters/fake/analytics'
 import { withPortErrors } from '../../respond'
+
+/** The current value of every known flag — what an actor frame asks before each autonomous tick. */
+export async function GET(): Promise<Response> {
+    if (!isSimulated) return new Response(null, { status: 404 })
+    return withPortErrors(async () => {
+        const stored = readFlags()
+        return Response.json({ flags: Object.fromEntries(KNOWN_FLAGS.map((flag) => [flag, stored[flag] ?? false])) })
+    })
+}
 
 /**
  * Toggles a feature flag persisted at .data/analytics/flags.json — one of the Snapshots tab's world

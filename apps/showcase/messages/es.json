@@ -90,6 +90,7 @@
         "analyzeHint": "Un paquete de diagnóstico puede entregarse al analizador — se ejecuta como trabajo en segundo plano y deja aquí sus conclusiones."
     },
     "actors": {
+        "heldFlagLabel": "Retener a los actores",
         "analyzerTitle": "Analizador de paquetes",
         "analyzerDescription": "El servicio asociado al que la Mesa de Primera Línea envía paquetes de diagnóstico — reclama y completa los trabajos de la mesa por la API de servicio.",
         "partnerTitle": "Mesa asociada",

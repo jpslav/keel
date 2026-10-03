@@ -90,6 +90,7 @@
         "analyzeHint": "A diagnostic bundle can be handed to the analyzer — it runs as a background job and files its findings back here."
     },
     "actors": {
+        "heldFlagLabel": "Hold the actors",
         "analyzerTitle": "Bundle analyzer",
         "analyzerDescription": "The partner service the Frontline Desk sends diagnostic bundles to — claims and completes the desk's jobs over the service API.",
         "partnerTitle": "Partner desk",

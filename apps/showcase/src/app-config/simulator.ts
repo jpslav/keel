@@ -17,8 +17,8 @@ import type { DemoPreset, PresetOperation } from 'keel/core/presets'
 interface AppSimulatorTab {
     id: string
     labelKey: string
-    /** Once opened, keep the content running (hidden) through tab switches and collapse — the panel's
-     *  `SimulatorExtraTab.keepMounted`. */
+    /** Mount the content from page load and keep it running, hidden whenever its tab isn't showing — the
+     *  panel's `SimulatorExtraTab.keepMounted`. */
     keepMounted?: boolean
 }
 
@@ -26,8 +26,8 @@ interface AppSimulatorTab {
  * The demo's one Simulator tab: Actors — in-page automations driving the real service/webhook surfaces
  * (see src/app-config/actors.ts). Rendered between Hooks and Errors via the panel's `extraTabs` prop.
  */
-// keepMounted: the actors' tick loops live in this tab's content, so leaving the tab (to watch Jobs
-// drain, say) must not stop them.
+// keepMounted: the actors' tick loops live in this tab's content, and the counterparties are part of the
+// world — they run from page load whether or not anyone opens the tab (held by the `actors-held` flag).
 export const tabs: AppSimulatorTab[] = [{ id: 'actors', labelKey: 'actorsTab', keepMounted: true }]
 
 /** One app-registered Snapshots feature flag. `labelKey` is a FULLY-QUALIFIED path into the APP catalog
@@ -36,6 +36,9 @@ interface AppSimulatorFlag {
     id: string
     labelKey: string
 }
+
+/** The flag id the actor hosts (server glue + static twin) consult before every autonomous tick. */
+export const actorsHeldFlag = 'actors-held'
 
 /**
  * App feature flags for the Snapshots tab, composed into KNOWN_FLAGS
@@ -46,8 +49,15 @@ interface AppSimulatorFlag {
  * knob (highlight tickets past their SLA) that no framework flag could reasonably own, flipped from the
  * same Snapshots tab as the framework's own two. It is read by the tickets card, so flipping it changes
  * the product, not just the panel.
+ *
+ * `actors-held` is the world's hold on its counterparties. The actors run from page load, like the real
+ * services they stand in for; while this is on, each one keeps its schedule but does nothing on its own
+ * (a manual Step still works). Specs that drive held jobs by hand turn it on so no actor races them.
  */
-export const flags: AppSimulatorFlag[] = [{ id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' }]
+export const flags: AppSimulatorFlag[] = [
+    { id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' },
+    { id: actorsHeldFlag, labelKey: 'actors.heldFlagLabel' },
+]
 
 /** The weekday-morning emails both busy presets open with, sent to the Frontline Desk's front door.
  *  Simulated content, so one language — like the seed corpus and the tour's typed email (see tours.ts). */

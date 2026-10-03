@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { openSimulatorPanel } from '../support/simulator'
 import { signInAs } from '../support/people'
+import { setWorldFlag } from '../support/world-flags'
 
 /**
  * THE AUTOMATED ACTOR. service-flow.spec.ts drives the service/webhook loop BY HAND; this spec proves
@@ -11,23 +12,15 @@ import { signInAs } from '../support/people'
  * console delivers a genuine completion webhook. The pools are disjoint by org (see src/core/
  * actors.ts): the bundle-analyzer services `frontline`, the partner-desk every OTHER org.
  *
- * Destructive: it flips the persisted `jobs-held` world flag ON (a cross-tenant knob), so it lives in
- * the `destructive` project (playwright.config.ts) that only starts once every 'chromium' test
- * finishes, and normalizes the flag + Simulator continuity before and after. Serial: the three tests
- * warm each other's routes and share the held world.
+ * Destructive: it flips the persisted `jobs-held` and `actors-held` world flags (cross-tenant knobs), so
+ * it lives in the `destructive` project (playwright.config.ts) that only starts once every 'chromium'
+ * test finishes, and normalizes the flags + Simulator continuity before and after. Serial: the three
+ * tests warm each other's routes and share the held world.
  */
 
 test.describe.configure({ mode: 'serial' })
 
-const flagsFile = path.resolve(__dirname, '../../../.data/analytics/flags.json')
 const simulatorState = path.resolve(__dirname, '../../../.data/simulator/state.json')
-
-function setJobsHeld(enabled: boolean) {
-    const flags = existsSync(flagsFile) ? (JSON.parse(readFileSync(flagsFile, 'utf8')) as Record<string, boolean>) : {}
-    flags['jobs-held'] = enabled
-    mkdirSync(path.dirname(flagsFile), { recursive: true })
-    writeFileSync(flagsFile, JSON.stringify(flags, null, 2))
-}
 
 function clearSimulatorState() {
     try {
@@ -39,11 +32,13 @@ function clearSimulatorState() {
 
 // Normalize before and restore after: hand the world back to the other specs exactly as found.
 test.beforeAll(() => {
-    setJobsHeld(false)
+    setWorldFlag('jobs-held', false)
+    setWorldFlag('actors-held', false)
     clearSimulatorState()
 })
 test.afterAll(() => {
-    setJobsHeld(false)
+    setWorldFlag('jobs-held', false)
+    setWorldFlag('actors-held', false)
     clearSimulatorState()
 })
 
@@ -62,6 +57,12 @@ async function pinOrg(page: Page, orgSlug: string) {
 async function enableJobsHeld(request: APIRequestContext) {
     const res = await request.post('/api/simulator/flags', { data: { flag: 'jobs-held', enabled: true } })
     expect(res.ok(), 'enable jobs-held').toBeTruthy()
+}
+
+/** Hold or release the actors via the Simulator flags API (the Snapshots tab's `actors-held` toggle). */
+async function setActorsHeld(request: APIRequestContext, enabled: boolean) {
+    const res = await request.post('/api/simulator/flags', { data: { flag: 'actors-held', enabled } })
+    expect(res.ok(), `${enabled ? 'hold' : 'release'} the actors`).toBeTruthy()
 }
 
 /** A ticket to export, so the CSV artifact carries a real row (not just a header). */
@@ -110,6 +111,9 @@ test('stepped bundle-analyzer drives a held frontline export to a real, download
     const { request } = page
 
     // A held frontline export parks queued, waiting for its counterparty service to claim it.
+    // The actors run from page load; hold them so none claims the job before this test steps it.
+    // A manual Step ignores the hold — it is an explicit operator act.
+    setWorldFlag('actors-held', true)
     await signInAndPin(page, 'frontline')
     await enableJobsHeld(request)
     await addTicket(request, `actors-service-${Date.now()}`)
@@ -165,6 +169,7 @@ test('stepped partner-desk delivers a completion webhook for a held platform exp
     const { request } = page
 
     // A held PLATFORM export — the partner-desk's pool (every org that is not the service runner's own).
+    setWorldFlag('actors-held', true) // see the first test
     await signInAndPin(page, 'platform')
     await enableJobsHeld(request)
     await addTicket(request, `actors-builder-${Date.now()}`)
@@ -209,44 +214,50 @@ test('stepped partner-desk delivers a completion webhook for a held platform exp
     await expect(page.getByTestId('actor-log'), 'nothing left to build').toContainText('0 pending')
 })
 
-test('the Actors tab autonomously drains both queues with no manual stepping', async ({ page }) => {
+test('the actors run from page load, hold on the world flag, and drain both queues on release', async ({ page }) => {
     test.setTimeout(120_000)
     const { request } = page
+    setWorldFlag('actors-held', false) // the stepped tests above left the actors held
 
-    // Two held exports in disjoint pools: one for the service runner (frontline), one for the builder (platform).
+    // Two held exports in disjoint pools — one for the service runner (frontline), one for the builder
+    // (platform) — built while the actors are HELD, so both are still queued when we look.
     await signInAndPin(page, 'frontline')
     await enableJobsHeld(request)
+    await setActorsHeld(request, true)
     const frontlineJob = await submitExport(request)
     await pinOrg(page, 'platform')
     const platformJob = await submitExport(request)
-    expect((await worldJob(request, frontlineJob))?.status, 'frontline export parks queued').toBe('queued')
-    expect((await worldJob(request, platformJob))?.status, 'platform export parks queued').toBe('queued')
 
-    // Open the Actors tab in the real UI — both actor frames mount and start running on their own.
+    // A fresh page with the Simulator COLLAPSED and the Actors tab never opened: the frames are there
+    // anyway, hidden — the counterparties are part of the world, not of a tab.
     await page.goto('/en/dashboard', { timeout: 90_000 })
-    await openSimulatorPanel(page)
-    await page.getByTestId('simulator-tab-actors').click()
+    await expect(page.getByTestId('simulator-pill')).toBeVisible()
+    await expect(page.getByTestId('actor-frame-bundle-analyzer')).toBeAttached()
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeAttached()
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeHidden()
 
-    await expect(page.getByTestId('actor-frame-bundle-analyzer')).toBeVisible()
-    await expect(page.getByTestId('actor-frame-partner-desk')).toBeVisible()
-
-    // Reach INTO each same-origin iframe: neither is paused, so its status settles on running (between
-    // near-instant ticks) — the /running|ticking/ regex just proves it is live, not halted.
+    // Held: each frame keeps its schedule but reports itself held and does nothing — once both have
+    // checked the world at least once, both jobs are provably still queued.
     const serviceFrame = page.frameLocator('[data-testid="actor-frame-bundle-analyzer"]')
     const builderFrame = page.frameLocator('[data-testid="actor-frame-partner-desk"]')
-    await expect(serviceFrame.getByTestId('actor-status'), 'service frame is live').toHaveAttribute(
+    await expect(serviceFrame.getByTestId('actor-status'), 'service frame is held').toHaveAttribute(
         'data-state',
-        /running|ticking/,
+        'held',
         { timeout: 30_000 },
     )
-    await expect(builderFrame.getByTestId('actor-status'), 'builder frame is live').toHaveAttribute(
+    await expect(builderFrame.getByTestId('actor-status'), 'builder frame is held').toHaveAttribute(
         'data-state',
-        /running|ticking/,
+        'held',
         { timeout: 30_000 },
     )
+    expect((await worldJob(request, frontlineJob))?.status, 'held actors leave the frontline export').toBe('queued')
+    expect((await worldJob(request, platformJob))?.status, 'held actors leave the platform export').toBe('queued')
 
-    // The capstone: NO stepping. The two autonomous actors drive BOTH jobs to completed entirely on
-    // their own timers — the hermetic async demo proof.
+    // Release the hold — still with the panel collapsed and the tab never opened.
+    await setActorsHeld(request, false)
+
+    // The capstone: NO stepping, and nobody opened anything. The two actors drive BOTH jobs to
+    // completed entirely on their own timers — the hermetic async demo proof.
     await expect
         .poll(
             async () => {
@@ -258,10 +269,9 @@ test('the Actors tab autonomously drains both queues with no manual stepping', a
         )
         .toBe('completed/completed')
 
-    // Once opened, the Actors tab is kept mounted (SimulatorExtraTab.keepMounted): switching to Jobs
-    // only HIDES the frames, so the actors keep working while you watch the queue drain. A marker on the
-    // frame's window proves it is the SAME document throughout — a reloaded (moved/remounted) iframe
-    // would also complete jobs, but it would come back without the marker.
+    // The frames never move or reload, whatever the panel does (SimulatorExtraTab.keepMounted). A marker
+    // on the frame's window proves it is the SAME document throughout — a reloaded (moved/remounted)
+    // iframe would also complete jobs, but it would come back without the marker.
     const builderWindow = page.frames().find((frame) => frame.url().includes('/simulator/actors/partner-desk'))
     expect(builderWindow, 'the partner-desk frame is attached').toBeTruthy()
     await builderWindow!.evaluate(() => {
@@ -269,8 +279,20 @@ test('the Actors tab autonomously drains both queues with no manual stepping', a
     })
     const stillSameDocument = () =>
         builderWindow!.evaluate(() => (window as unknown as { keepAliveMark?: boolean }).keepAliveMark === true)
+
+    // Opening the Actors tab SHOWS the frames that were already running; it doesn't start them.
+    await openSimulatorPanel(page)
+    await page.getByTestId('simulator-tab-actors').click()
+    await expect(page.getByTestId('actor-frame-partner-desk')).toBeVisible()
+    await expect(builderFrame.getByTestId('actor-status'), 'builder frame is live').toHaveAttribute(
+        'data-state',
+        /running|ticking/,
+        { timeout: 30_000 },
+    )
+    expect(await stillSameDocument(), 'opening the tab did not reload the actor frame').toBe(true)
+
+    // Switching to Jobs only HIDES the frames, so the actors keep working while you watch the queue.
     await page.getByTestId('simulator-tab-jobs').click()
-    await expect(page.getByTestId('actor-frame-partner-desk')).toBeAttached()
     await expect(page.getByTestId('actor-frame-partner-desk')).toBeHidden()
     const whileOnJobs = await submitExport(request) // still pinned to platform → the partner-desk's pool
     await expect

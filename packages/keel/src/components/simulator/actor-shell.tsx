@@ -20,11 +20,15 @@ const buttonStyle = {
     padding: '4px 12px',
 } as const
 
+type ActorState = 'running' | 'paused' | 'ticking' | 'held'
+
 /** data-state → status-dot colour cue. Presentational only; the label stays translated. */
-function stateColor(state: 'running' | 'paused' | 'ticking'): string {
+function stateColor(state: ActorState): string {
     switch (state) {
         case 'ticking':
             return 'blue.4'
+        case 'held':
+            return 'yellow.4'
         case 'running':
             return 'teal.4'
         default:
@@ -38,6 +42,10 @@ export interface ActorShellProps {
      *  its driver + memory. A throw triggers the error note + exponential backoff. */
     tick: (log: ActorLog) => Promise<void>
     startPaused: boolean
+    /** The WORLD's hold on its counterparties (e.g. a Simulator flag), asked before every AUTONOMOUS
+     *  tick: while it answers true the loop keeps its schedule but does nothing. A manual Step is an
+     *  explicit operator act and ignores it. Omit for an actor the world never holds. */
+    held?: () => boolean | Promise<boolean>
     intervalMs?: number
     /** Compact skin for the Actors-tab card (vs. the full-page host frame). */
     inline?: boolean
@@ -52,7 +60,7 @@ export interface ActorShellProps {
  * 15s), reset on the next success. Dark-skinned to match the Simulator panel — it reads as "not the
  * product". Router- and transport-agnostic: the `tick` closure owns all I/O.
  */
-export function ActorShell({ actor, tick, startPaused, intervalMs, inline = false }: ActorShellProps) {
+export function ActorShell({ actor, tick, startPaused, held, intervalMs, inline = false }: ActorShellProps) {
     const t = useTranslations('simulator')
     const locale = useLocale()
     const baseInterval = intervalMs ?? DEFAULT_INTERVAL_MS
@@ -60,6 +68,7 @@ export function ActorShell({ actor, tick, startPaused, intervalMs, inline = fals
     const [paused, setPaused] = useState(startPaused)
     const [ticking, setTicking] = useState(false)
     const [entries, setEntries] = useState<ActorLogEntry[]>([])
+    const [worldHeld, setWorldHeld] = useState(false)
 
     const pausedRef = useRef(startPaused)
     const tickingRef = useRef(false)
@@ -100,6 +109,20 @@ export function ActorShell({ actor, tick, startPaused, intervalMs, inline = fals
         runTickRef.current = runTick
     }, [runTick])
 
+    // An autonomous tick asks the world first. A failed answer counts as "not held": the tick itself
+    // then surfaces whatever is wrong through the usual error note + backoff.
+    const heldRef = useRef(held)
+    useEffect(() => {
+        heldRef.current = held
+    }, [held])
+    const autonomousTick = useCallback(async () => {
+        // An async wrapper turns a synchronous throw into a rejection, so both count as "not held".
+        const isHeld = await (async () => (await heldRef.current?.()) ?? false)().catch(() => false)
+        if (!mountedRef.current) return
+        setWorldHeld(isHeld)
+        if (!isHeld) await runTickRef.current()
+    }, [])
+
     // The chain: clear any pending timer, then (unless paused/unmounted) arm the next tick, which
     // re-arms itself (via armRef — no self-reference) once it resolves. Stable (refs only) so
     // mount/toggle can call it freely.
@@ -112,9 +135,9 @@ export function ActorShell({ actor, tick, startPaused, intervalMs, inline = fals
         if (pausedRef.current || !mountedRef.current) return
         timeoutRef.current = setTimeout(() => {
             timeoutRef.current = null
-            void runTickRef.current().finally(() => armRef.current())
+            void autonomousTick().finally(() => armRef.current())
         }, intervalRef.current)
-    }, [])
+    }, [autonomousTick])
     useEffect(() => {
         armRef.current = arm
     }, [arm])
@@ -147,7 +170,7 @@ export function ActorShell({ actor, tick, startPaused, intervalMs, inline = fals
         void runTickRef.current()
     }
 
-    const state: 'running' | 'paused' | 'ticking' = ticking ? 'ticking' : paused ? 'paused' : 'running'
+    const state: ActorState = ticking ? 'ticking' : paused ? 'paused' : worldHeld ? 'held' : 'running'
 
     return (
         <Box
@@ -181,7 +204,7 @@ export function ActorShell({ actor, tick, startPaused, intervalMs, inline = fals
                             }}
                         />
                         <Text size="xs" fw={700} c={stateColor(state)}>
-                            {paused ? t('actorPaused') : t('actorRunning')}
+                            {paused ? t('actorPaused') : worldHeld ? t('actorHeld') : t('actorRunning')}
                         </Text>
                     </Group>
                 </Group>

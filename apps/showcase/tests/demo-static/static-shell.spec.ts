@@ -283,6 +283,9 @@ test('static shell exports tickets as an instant job (no download) and mirrors t
     // reload), export again → the new job stays queued, and "Run pending" steps it to completed.
     await page.getByTestId('simulator-tab-snapshots').click()
     await page.getByTestId('flag-toggle-jobs-held').click()
+    // Hold the actors too: the inline analyzer runs from page load and serves Dana's org, so it would
+    // finish the held export itself and this test would stop proving that Run pending does.
+    await page.getByTestId('flag-toggle-actors-held').click()
 
     // The dashboard export card is still mounted in the main pane behind the panel — export again.
     await page.getByTestId('export-run').click()
@@ -332,6 +335,9 @@ test('static shell: the inline analyzer actor steps a held export to completed (
     await page.getByTestId('simulator-pill').click()
     await page.getByTestId('simulator-tab-snapshots').click()
     await page.getByTestId('flag-toggle-jobs-held').click()
+    // The actors run from page load (the static twin too); hold them so the analyzer can't claim the
+    // export before this test steps it. A manual Step ignores the hold.
+    await page.getByTestId('flag-toggle-actors-held').click()
 
     // Dana's default active org is frontline (the bundle-analyzer's pool). Export from the dashboard card,
     // still mounted in the main pane behind the persistent panel sibling.
@@ -345,8 +351,8 @@ test('static shell: the inline analyzer actor steps a held export to completed (
     const analyzerCard = page.getByTestId('actor-card-bundle-analyzer')
     await expect(analyzerCard.getByTestId('actor-shell')).toBeVisible()
 
-    // Pause the autonomous loop, then hand-step it: claim (queued → running), complete (running →
-    // completed). Pausing before the first 3s tick keeps the stepping deterministic.
+    // Pause the loop (Step only works while paused), then hand-step it: claim (queued → running),
+    // complete (running → completed). The world hold above is what keeps it deterministic.
     await analyzerCard.getByTestId('actor-toggle').click()
     await expect(analyzerCard.getByTestId('actor-status')).toHaveAttribute('data-state', 'paused')
     const step = analyzerCard.getByTestId('actor-step')
@@ -355,8 +361,7 @@ test('static shell: the inline analyzer actor steps a held export to completed (
     await step.click()
     await expect(step).toBeEnabled()
 
-    // The job is now completed, and the process log recorded the work — assert BEFORE leaving the tab
-    // (the inline shell unmounts on tab switch, resetting its in-component log).
+    // The job is now completed, and the process log recorded the work.
     await expect(job.getByTestId('job-timeline-entry-completed')).toBeVisible()
     await expect(analyzerCard.locator('[data-testid="actor-log-entry"]').first()).toBeVisible()
 

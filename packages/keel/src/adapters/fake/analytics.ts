@@ -31,8 +31,7 @@ const frameworkFlags = ['demo-banner', 'jobs-held']
 /**
  * The feature flags the Simulator Snapshots tab can toggle — the ONE list both simulator routes read
  * (events feeds the toggle list, flags validates writes) so they can never drift. Composed from the
- * framework flags and any app-registered ones (src/app-config/simulator.ts `flags`, EMPTY today — the
- * seam is proven live by this composition, not by a demo entry).
+ * framework flags and any app-registered ones (the app's `@app-config/simulator` `flags`).
  */
 export const KNOWN_FLAGS = [...frameworkFlags, ...appSimulatorFlags.map((flag) => flag.id)]
 

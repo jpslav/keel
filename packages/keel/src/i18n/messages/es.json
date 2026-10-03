@@ -158,6 +158,7 @@
         "actorFrameTitle": "Actor: {actor}",
         "actorRunning": "En marcha",
         "actorPaused": "En pausa",
+        "actorHeld": "Retenido",
         "actorPauseButton": "Pausar",
         "actorResumeButton": "Reanudar",
         "actorStepButton": "Avanzar",
