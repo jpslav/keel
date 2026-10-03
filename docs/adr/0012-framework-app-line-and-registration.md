@@ -347,3 +347,34 @@ test under every app.
 The fixture's seam is now **18** modules (`presets.ts` added). It registers `busy-harbor` and a child,
 `busy-harbor-lead`, which extends it, so keel's replay test proves inheritance in keel's own vocabulary.
 The public surface and internal counts are unchanged.
+
+## Addendum (2026-10-03, later still): preset operation kinds and `@app-config/preset-operations`
+
+Demo-preset operation kinds become a registry the framework and the app both extend. Two seam changes:
+
+- **`@app-config/presets` exports two more things.** `appPresetOperations` (`PresetOperationDefinition[]`,
+  contract in `keel/core/presets.ts`) is the app's operation DEFINITIONS — argument schema, product
+  rules, consumed names — read as a value by keel's seam-conformance suite. `AppPresetOperation` is a TYPE,
+  composed into `PresetOperation = FrameworkPresetOperation | AppPresetOperation` exactly as job kinds
+  compose; the empty form is `never` and `[]`. Definitions are pure, so the static demo may bundle the
+  module as before. Nothing new on the enumerated value-import list: `presets` is already on it.
+- **`@app-config/preset-operations` is a new seam module, SERVER-ONLY, and a new entry on the enumerated
+  value-import list.** It exports `appPresetOperationHandlers`, the app's server halves keyed by kind,
+  which `keel/server-lib/demo-presets.ts` composes over keel's (`{ ...framework, ...app }`, so an app
+  entry with a framework kind's name replaces it). It is a separate module from `presets` because the
+  static demo bundles `presets`, and a server half reaches modules (`server-only`, pglite) that stop that
+  bundle loading. The static halves do not go on the seam at all: like the inbound-email twins, the
+  static composition root supplies them through `DemoWorldOptions.presetOperations`, because they act on
+  that root's own in-memory rows. The empty form is `{}`.
+
+The contract is typed against the Standard Schema v1 interface (vendored as types in
+`keel/core/standard-schema.ts`), not against a validation library, so the seam does not choose one for the
+app; keel's own kinds happen to use Valibot.
+
+The fixture's seam is now **19** modules (`preset-operations.ts` added). It registers one app kind,
+`docket.flag`, which consumes a named result an `inbound` step produced, and a `flag` server half that
+replaces keel's by name, so keel's replay test proves both in keel's own vocabulary.
+
+The public surface grows by one subpath, `server-lib/preset-operations` (the server-half types, keel's
+own halves to wrap, and `resolvePresetOrg`), to **130**. The internal count grows by one
+(`core/standard-schema`).

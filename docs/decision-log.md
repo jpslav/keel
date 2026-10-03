@@ -1426,3 +1426,62 @@ read that as "keep the fixtures", and built their own world beside the starter's
 - **A consequence in the showcase.** `multi-tenant` now builds on `mid-demo`, so it also contains
   Jordan's pending invite, which it did not before. The static-shell spec that proved "loading another
   preset is a reset underneath" by Jordan's absence now proves it with a hand-made flag flip instead.
+
+## Preset operations become a registry keel and the app both extend (2026-10-03, `preset-operations`)
+
+- **The operation kinds are a registry, not a closed union.** `invite`, `inbound` and `flag` were a
+  union in `keel/core/presets.ts` that each host replayed with its own hard-coded `switch`, so an adopter
+  could neither add a kind ("assign a ticket") nor make a preset follow a customized invite flow. Now keel
+  contributes its kinds, the app registers its own on the seam (`appPresetOperations`, typed by an
+  `AppPresetOperation` union composed like job kinds), and each host dispatches every step through ONE
+  function that looks the kind up: `performPresetOperation` on the server, its twin in the static world.
+- **Three parts per kind, never in one module.** A pure DEFINITION (argument schema, the product rules
+  as `check`, the named results it `consumes`) on `@app-config/presets`; a SERVER half on the new
+  server-only `@app-config/preset-operations`; a STATIC half supplied by the static composition root
+  through `DemoWorldOptions.presetOperations`. The split is physical, not stylistic: a server half
+  reaches `server-only` modules and pglite, and the `file://` demo is one browser bundle that fails to
+  load with either inside it. It is the same split inbound email already had (server registry vs the
+  static twins in `inboundHandlers`). The bundle carries no `pglite` string after the change.
+- **Replacement by kind name.** Definitions and both halves compose `{ ...framework, ...app }` keyed by
+  kind, so an app entry named `invite` replaces keel's. keel's server halves are published
+  (`keel/server-lib/preset-operations`) and its static halves reach an app half through the context's
+  `framework` map, so a replacement can WRAP keel's behaviour instead of copying it — the fixture's `flag`
+  does exactly that, and keel's replay test proves the app entry is the one that ran.
+- **Standard Schema, with Valibot for keel's own kinds.** `PresetOperationDefinition.args` is typed
+  against the Standard Schema v1 interface, vendored as types only (`keel/core/standard-schema.ts`), so
+  an app may write its kinds in Zod or ArkType. keel's three kinds, the fixture's and the showcase's use
+  Valibot, which makes it a new runtime dependency of `keel/core` (allowed: the core fence bans
+  frameworks and vendor SDKs, not small pure libraries). Valibot over Zod for the static demo's byte
+  budget: Valibot is standalone functions a bundler can keep one at a time, where Zod's default API
+  hangs its methods on schema classes (Zod was not measured here). Measured: the showcase's `dist-demo/index.html` went from 938,049 to 942,766 bytes (+4,717;
+  budget 950,000, unchanged), the starter's from 849,632 to 853,371 (+3,739). About 3 KB of each is
+  Valibot's four schema constructors and issue plumbing, which the bundler keeps although the static
+  world never calls them (no host validates at replay time; the conformance gate does): annotating the
+  schema calls `/* @__PURE__ */` brought the showcase to +1,690 in a trial, and was not adopted because
+  every app author would have to repeat it on every nested call.
+- **Shape in the schema, rules in `check`.** keel's `invite` schema accepts any role (`v.picklist(ROLES)`)
+  and any string as the email; "cannot be granted by invite" and the email shape stay in `check`, with
+  their old sentences. A preset asking for `admin` is a product rule being broken, and the gate should
+  answer with the org screen's own words. `check` runs only once the shape passes, and it receives the
+  script's earlier valid operations (`earlier`), which is what the duplicate-invite rule always needed.
+- **Named results.** An operation may say `as: 'refund'`; the id of what it created is bound to that
+  name for the rest of the replay, and a later operation names it in an argument its kind `consumes`.
+  Each host keeps its own name → id map (a uuid on the server, the twin's id in the static world), so a
+  script never holds a host's ids. `presetProblems` holds names to be unique and bound EARLIER; an
+  unbound name throws on the server and settles the static replay false. For `inbound` to produce a
+  name, a handler's 'handled' result (and the static twin's) gains an optional `subjectId` — the row it
+  created — which intake passes through on `IntakeOutcome`. Additive: no existing handler had to change,
+  and the compose route's response simply gains the field.
+- **Operations, not a bus, for product code a preset drives.** The showcase's `ticket.assign` does not
+  re-implement assignment or post an event a listener reacts to. The PATCH ticket route's post-authorize
+  body — write, `ticket.assigned`/`ticket.updated` audit, the assignee's notification — moved, with the
+  session's user replaced by an explicit actor, into a named domain operation, `applyTicketChanges` (`apps/showcase/src/domain/ticket-changes.ts`),
+  which the route and the preset's server half both call; the route keeps parsing, validation,
+  `requireUser`, org resolution, the org-scoped lookup and `authorize(...)`. The core takes the ticket
+  as the caller resolved it, rather than its id, so the org-scoped lookup cannot be skipped and the
+  route makes no extra read. The static twin got the same treatment (`applyDemoTicketChanges`, shared
+  by the ticket card and the static half). The route's unit suite passed unchanged across the move.
+- **Coverage where each half lives.** The seam-conformance suite holds definitions and server halves to
+  each other both ways under every app. Static halves are built at runtime by the composition root, out
+  of a unit test's sight, so the static-shell e2e loads every registered preset and waits for its
+  "Preset loaded" notice: a kind with no static half settles the replay false and the notice never comes.

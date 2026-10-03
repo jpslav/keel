@@ -326,8 +326,8 @@ someone and let them press Start.
 
 **Presets: starting points every host can load ✅.** A saved snapshot is a binary copy of `.data/`, so it
 restores only where there is a server to copy it into. A **demo preset** is the other representation —
-the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag,
-each naming its actor and team) and an optional viewpoint — which each host replays its own way: the
+the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag
+and whatever kinds the app adds, each naming its actor and team) and an optional viewpoint — which each host replays its own way: the
 server through the same code the product runs (`keel/server-lib/demo-presets.ts`, sharing
 `sendOrgInvite` with the org route and the intake with the inbound webhook), the `file://` twin through
 its in-memory world, one step per commit so each step sees the world its predecessor left. So a preset
@@ -337,7 +337,12 @@ name is refused so it can never mean two worlds. Preset content is app vocabular
 own seam module, `@app-config/presets` (one file per preset; a preset may `extends` one other, single
 inheritance), and every registered preset is held at build time to what the product itself would allow
 (`presetProblems`, run as seam conformance under every app) — a preset is a
-shortcut to a world someone could have clicked together, never a back door into one they could not. The
+shortcut to a world someone could have clicked together, never a back door into one they could not.
+The operation kinds are a registry keel and the app both extend: each kind is a pure definition plus a
+server half and a static half that never share a module, and an app entry with keel's kind name replaces
+keel's. An app kind calls the same named core function its route calls — the showcase's `ticket.assign`
+step and its ticket PATCH route both call `applyTicketChanges` — so a script step and a click cannot
+drift apart. The
 viewpoint rides along as **who the restorer sits down as**, not as captured state: it is a per-browser
 cookie and the world is shared, so loading a preset signs in only the browser that loaded it.
 

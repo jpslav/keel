@@ -157,9 +157,10 @@ everything back — including the seeded queue, which comes back exactly as it s
 
 **Start from a preset** is the demo-prep shortcut: one click resets the world, replays a scripted
 starting point, and signs you in as the right person. **Fresh desk** is the seed with Dana already
-signed in; **Mid-demo** adds two new tickets and a teammate (Jordan) whose invite is waiting unread —
+signed in; **Mid-demo** adds two new tickets — the refund one already assigned to Sam, who gets the
+assignment notification — and a teammate (Jordan) whose invite is waiting unread —
 the second tour, **Joining the desk, from a preset**, walks that invite to the end; **Both sites busy**
-builds on Mid-demo (the same two tickets and Jordan's invite), then adds a Platform ticket and a pending Platform
+builds on Mid-demo (the same two tickets, Sam's assignment and Jordan's invite), then adds a Platform ticket and a pending Platform
 invite, gives Pinebrook a queue of its own and a refused email from a restricted member, and turns late-ticket
 highlighting on, signed in at Pinebrook. Presets are scripts, not saved files, so they work identically
 in `dist-demo/index.html`. Loading one signs in only YOUR browser; anyone else watching the same server
