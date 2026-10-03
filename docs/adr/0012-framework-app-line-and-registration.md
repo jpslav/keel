@@ -376,5 +376,8 @@ The fixture's seam is now **19** modules (`preset-operations.ts` added). It regi
 replaces keel's by name, so keel's replay test proves both in keel's own vocabulary.
 
 The public surface grows by one subpath, `server-lib/preset-operations` (the server-half types, keel's
-own halves to wrap, and `resolvePresetOrg`), to **130**. The internal count grows by one
-(`core/standard-schema`).
+own halves to wrap, and `resolvePresetOrg`), to **130**. The internal count is **37**: `core/standard-schema` is new, and re-deriving it (non-test modules
+under `src/` that the map does not publish) found two more that earlier figures missed —
+`components/simulator/tab-mount` and `components/simulator/people-dimensions`, added on `main` while the
+count stayed at 34. That number is now gated too: `public-surface.test.ts` holds the sentence in
+`docs/adopting.md` to the walked count, as it already held CLAUDE.md's published count.

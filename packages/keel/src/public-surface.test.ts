@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -65,5 +65,36 @@ describe('keel public surface', () => {
         const stated = /(\d+)\s+published subpaths/.exec(claude)
         expect(stated, 'CLAUDE.md no longer states a published-subpath count').not.toBeNull()
         expect(Number(stated?.[1])).toBe(published)
+    })
+
+    /**
+     * The complement: every module under `src/` the map does NOT publish. It was quoted by hand and
+     * ungated, and it drifted twice (build-notes: 33 stated, 34 real; then 34 stated while two new
+     * Simulator internals made it 36). `docs/adopting.md` is where an adopter reads it, so that sentence
+     * is the one held. A module is a non-test, non-story, non-declaration `.ts`/`.tsx` file; a published
+     * target counts once however many keys point at it.
+     */
+    it('leaves exactly as many modules internal as docs/adopting.md says', () => {
+        const published = new Set(
+            Object.values(exportsMap)
+                .flatMap(targetsFor)
+                .map((file) => path.join(packageDir, file)),
+        )
+        const modules: string[] = []
+        const walk = (dir: string) => {
+            for (const entry of readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name)
+                if (entry.isDirectory()) walk(full)
+                else if (/\.tsx?$/.test(entry.name) && !/\.(test|stories)\.tsx?$|\.d\.ts$/.test(entry.name)) {
+                    modules.push(full)
+                }
+            }
+        }
+        walk(path.join(packageDir, 'src'))
+        const internal = modules.filter((file) => !published.has(file)).length
+        const adopting = readFileSync(path.resolve(process.cwd(), 'docs/adopting.md'), 'utf8')
+        const stated = /other\s+(\d+)\s+modules of the package are internals/.exec(adopting)
+        expect(stated, 'docs/adopting.md no longer states an internal-module count').not.toBeNull()
+        expect(Number(stated?.[1])).toBe(internal)
     })
 })

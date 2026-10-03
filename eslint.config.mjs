@@ -120,7 +120,7 @@ const FIXTURE_FILES_GLOB = 'packages/keel/test-fixture/**/*.{ts,tsx}'
 // keel's PUBLIC SURFACE (ADR-0012).
 //
 // The package `exports` map names the 130 subpaths an app may import (128 modules + the two message
-// catalogs); the other 35 modules under `src/` are internals reachable only by relative import inside
+// catalogs); the other 37 modules under `src/` are internals reachable only by relative import inside
 // packages/keel. Both halves are derived, not remembered — `node -e` over the map and a walk of
 // `src/**` minus `*.test.*`/`*.stories.*`; recount rather than adjust. But the repo ALIASES `keel` to source in
 // tsconfig paths, both vitest configs and each app's vite build, and an alias bypasses the exports
