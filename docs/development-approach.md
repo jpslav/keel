@@ -253,7 +253,7 @@ whole simulated-world panel described next, is walkable there too.
 **The static demo maintains feature parity — always.** Every feature ships its in-memory twin in the same
 change: the same router-agnostic components driven by in-memory state instead of server routes. The static
 demo degrades only where physics forbid — no server means no real HTTP or byte downloads, no filesystem
-means Snapshots is reset-only — and every such degrade is noted where it happens. Pure world _logic_ (flags,
+means Snapshots cannot SAVE (reset and the demo presets still work: they are scripts, not files) — and every such degrade is noted where it happens. Pure world _logic_ (flags,
 held jobs, advancing state) is never a physics degrade: if it can run in memory, the twin runs it. An empty
 tab in the flagship portable demo would undermine the very proof it exists to make. The budget guard
 (`scripts/check-demo-size.mjs`) keeps parity honest: hand-built twins over vendored libraries, per the
@@ -283,7 +283,7 @@ deliveries, with the signed body/header inspectable per delivery, a per-endpoint
 "deliver due now" control that drains on the same ticks as Jobs' schedule runner;
 _Actors_ (below) runs simulated counterparties that drive that same job timeline
 autonomously; _Snapshots_ snapshots and restores the entire world — world state is `.data/`, so a snapshot is a
-directory copy — plus an **Agreements** section (access gates): every tenant's agreements with
+directory copy — and loads the app's **demo presets** (below), plus an **Agreements** section (access gates): every tenant's agreements with
 acceptance tallies and a version-bump control that re-arms the gate for everyone still on an older
 version, the same "section, not a new tab" call the Events audit trail made. One surface serves demo'ers
 and developers alike: the friendly skin is what a stakeholder
@@ -307,7 +307,8 @@ it can act on its own.
 
 **Tours: the world's narrative, next to the world's state ✅.** A snapshot snapshots what the world IS; a
 **tour** is its temporal sibling — a scripted walkthrough that drives the running app for a watcher, with
-narration, starting from a snapshot it declares. The engine is the framework's
+narration, starting from a world it declares (`'reset'`, a demo preset, or — on a server only — a saved
+snapshot). The engine is the framework's
 (`packages/keel/src/demo-static/tour/`): a ghost cursor that glides to real elements, fires real clicks,
 types character by character, and drives Simulator itself through the panel's own controls; the Tours tab
 sits beside Snapshots and disappears entirely for an app that registers none. Each tour is APP content on the
@@ -322,6 +323,22 @@ recorded rather than swallowed and the run report has to come back clean: a tour
 an e2e walkthrough, so a screen change that breaks the story fails the build instead of embarrassing
 someone in front of a stakeholder. That gate is what makes it safe to email `dist-demo/index.html` to
 someone and let them press Start.
+
+**Presets: starting points every host can load ✅.** A saved snapshot is a binary copy of `.data/`, so it
+restores only where there is a server to copy it into. A **demo preset** is the other representation —
+the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag,
+each naming its actor and team) and an optional viewpoint — which each host replays its own way: the
+server through the same code the product runs (`keel/server-lib/demo-presets.ts`, sharing
+`sendOrgInvite` with the org route and the intake with the inbound webhook), the `file://` twin through
+its in-memory world, one step per commit so each step sees the world its predecessor left. So a preset
+works in `dist-demo/index.html`, and a tour may start from one on every host; `'reset'` → preset →
+saved snapshot is the one resolution order (`resolveWorldStart`), and saving a snapshot under a reserved
+name is refused so it can never mean two worlds. Preset content is app vocabulary, registered on
+`@app-config/simulator` beside the flags, and every registered preset is held at build time to what the
+product itself would allow (`presetProblems`, run as seam conformance under every app) — a preset is a
+shortcut to a world someone could have clicked together, never a back door into one they could not. The
+viewpoint rides along as **who the restorer sits down as**, not as captured state: it is a per-browser
+cookie and the world is shared, so loading a preset signs in only the browser that loaded it.
 
 Three boundary rules keep Simulator honest. **Feedback stays inside Simulator** — transient confirmations
 render as a notice overlay anchored to the panel's bottom edge (absolute, so a notice never shifts the

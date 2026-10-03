@@ -3,7 +3,8 @@
 import { Button, Group, Stack, Switch, Text, TextInput, UnstyledButton } from '@mantine/core'
 import { useLocale, useTranslations } from 'next-intl'
 import { useState } from 'react'
-import { flags as appSimulatorFlags } from '@app-config/simulator'
+import { flags as appSimulatorFlags, presets as appPresets } from '@app-config/simulator'
+import { isReservedWorldStartName, WORLD_START_NAME_PATTERN } from '../../core/presets'
 import { formatWhen } from './format-when'
 
 export interface Snapshot {
@@ -28,8 +29,6 @@ export interface SnapshotAgreement {
     totalAcceptances: number
 }
 
-const SNAPSHOT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/
-
 const snapshotActionStyle = {
     fontSize: 12,
     fontWeight: 600,
@@ -48,6 +47,11 @@ const snapshotActionStyle = {
  * button is a two-step confirm (no browser `confirm()` — this whole app avoids blocking dialogs).
  * When `snapshots` is undefined the caller has no server-side snapshot store to talk to (the static
  * shell), so the snapshot half doesn't render.
+ *
+ * DEMO PRESETS (keel/core/presets.ts) render on EVERY host that passes `onLoadPreset`: a preset is a
+ * script each host replays its own way, not a directory copy, so unlike a saved snapshot it needs no
+ * server. The list comes from the seam (`@app-config/simulator`), read here exactly as the flag labels
+ * are, and the section disappears for an app that registers none.
  */
 export function SnapshotsApp({
     snapshots,
@@ -62,6 +66,8 @@ export function SnapshotsApp({
     agreements,
     onBumpAgreement,
     busyAgreement,
+    onLoadPreset,
+    busyPreset,
 }: {
     snapshots?: Snapshot[]
     onReset: () => void
@@ -78,6 +84,10 @@ export function SnapshotsApp({
     onBumpAgreement?: (id: string) => void
     /** Id of the agreement a bump is currently running for — that row shows as busy. */
     busyAgreement?: string | null
+    /** Load a registered demo preset. Undefined ⇒ the presets section doesn't render. */
+    onLoadPreset?: (id: string) => void
+    /** Id of the preset a load is currently running for — that row shows as busy. */
+    busyPreset?: string | null
 }) {
     const t = useTranslations('simulator')
     // Root translator: an app-registered flag's label lives in the APP's catalog (see flagLabel).
@@ -85,7 +95,13 @@ export function SnapshotsApp({
     const locale = useLocale()
     const [confirmingReset, setConfirmingReset] = useState(false)
     const [name, setName] = useState('')
-    const nameValid = SNAPSHOT_NAME_PATTERN.test(name)
+    // A saved snapshot may not shadow 'reset' or a preset (the server refuses it too): a tour names its
+    // starting world by that one string, and it must mean the same world on every host.
+    const nameReserved = isReservedWorldStartName(name, appPresets)
+    const nameValid = WORLD_START_NAME_PATTERN.test(name) && !nameReserved
+    // Reset, restore and a preset load each rewrite the whole world, so one in flight disables the others:
+    // a second one starting mid-replay would wipe the world underneath the first.
+    const worldBusy = Boolean(busy) || busySnapshot != null || busyPreset != null
 
     // Known flags get a friendly label; anything new falls back to its raw key instead of silently
     // borrowing another flag's label. Framework flags (demo-banner, jobs-held) are labelled here, from
@@ -151,6 +167,7 @@ export function SnapshotsApp({
                         color="red.4"
                         variant="outline"
                         size="xs"
+                        disabled={worldBusy}
                         data-testid="snapshots-reset"
                         onClick={() => setConfirmingReset(true)}
                     >
@@ -158,6 +175,51 @@ export function SnapshotsApp({
                     </Button>
                 )}
             </Stack>
+
+            {onLoadPreset !== undefined && appPresets.length > 0 ? (
+                <Stack gap="xs" data-testid="simulator-presets">
+                    <Text size="sm" fw={700} c="gray.0">
+                        {t('presetsHeading')}
+                    </Text>
+                    <Text size="xs" c="gray.5">
+                        {t('presetsHint')}
+                    </Text>
+                    {appPresets.map((preset) => {
+                        const rowBusy = busyPreset === preset.id
+                        return (
+                            <Group
+                                key={preset.id}
+                                justify="space-between"
+                                wrap="nowrap"
+                                data-testid={`preset-row-${preset.id}`}
+                                style={{
+                                    borderRadius: 8,
+                                    padding: '6px 10px',
+                                    border: '1px solid rgba(255,255,255,0.15)',
+                                    opacity: rowBusy ? 0.6 : 1,
+                                }}
+                            >
+                                <Stack gap={0}>
+                                    <Text size="sm" fw={600} c="gray.0">
+                                        {tRoot(preset.titleKey)}
+                                    </Text>
+                                    <Text size="xs" c="gray.5">
+                                        {rowBusy ? t('snapshotsWorking') : tRoot(preset.summaryKey)}
+                                    </Text>
+                                </Stack>
+                                <UnstyledButton
+                                    data-testid={`preset-load-${preset.id}`}
+                                    disabled={worldBusy}
+                                    onClick={() => onLoadPreset(preset.id)}
+                                    style={snapshotActionStyle}
+                                >
+                                    {t('presetsLoad')}
+                                </UnstyledButton>
+                            </Group>
+                        )
+                    })}
+                </Stack>
+            ) : null}
 
             {flags !== undefined ? (
                 <Stack gap="xs">
@@ -268,8 +330,8 @@ export function SnapshotsApp({
                         </Button>
                     </Group>
                     {name.length > 0 && !nameValid ? (
-                        <Text size="xs" c="red.4">
-                            {t('snapshotsNameInvalid')}
+                        <Text size="xs" c="red.4" data-testid="snapshot-name-error">
+                            {nameReserved ? t('snapshotsNameReserved') : t('snapshotsNameInvalid')}
                         </Text>
                     ) : null}
 
@@ -308,7 +370,7 @@ export function SnapshotsApp({
                                         <Group gap={6} wrap="nowrap">
                                             <UnstyledButton
                                                 data-testid={`snapshots-restore-${snapshot.name}`}
-                                                disabled={rowBusy}
+                                                disabled={worldBusy}
                                                 onClick={() => onRestore?.(snapshot.name)}
                                                 style={snapshotActionStyle}
                                             >

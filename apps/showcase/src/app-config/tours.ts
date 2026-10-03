@@ -42,6 +42,10 @@ const INBOUND_BODY =
  *  the correct outcome — the narration says NW-1042 out loud. */
 const NEW_TICKET_REF = 'NW-1042'
 
+/** The teammate the `mid-demo` preset invites (src/app-config/simulator.ts). Simulated data, like the
+ *  ticket subjects above: the tour types their name and then looks for it. */
+const INVITEE_NAME = 'Jordan Ellis'
+
 export const tours: TourDefinition[] = [
     {
         id: 'ticket-end-to-end',
@@ -184,6 +188,70 @@ export const tours: TourDefinition[] = [
             {
                 textKey: 'tours.ticketStep15',
                 script: [['click', '[data-testid="nav-dashboard"]'], ['panel'], ['scrollTop']],
+            },
+        ],
+    },
+    {
+        // The second tour exists to start from a PRESET rather than from the seed: `mid-demo` puts two new
+        // tickets in the queue and a pending invite in someone's inbox, and signs the viewer in as Dana —
+        // so step 1 opens on a shift already in progress, on the server and in the `file://` demo alike
+        // (keel/core/presets.ts). It walks the invite to its end: from a person with no account to a
+        // member of the desk.
+        id: 'invite-from-preset',
+        titleKey: 'tours.inviteTitle',
+        summaryKey: 'tours.inviteSummary',
+        snapshot: 'mid-demo',
+        steps: [
+            {
+                textKey: 'tours.inviteStep1',
+                spotlight: '[data-testid="tickets-card"]',
+                script: [['expectText', '[data-testid="tickets-list"]', 'Refund stuck in pending']],
+            },
+            {
+                textKey: 'tours.inviteStep2',
+                script: [
+                    ['panel', 'people'],
+                    ['expectText', '[data-testid="simulator-people"]', 'jordan.ellis@example.test'],
+                ],
+                // A viewpoint switch, and on the server a reload — so it waits for Next.
+                advance: [['click', '[data-testid^="people-"]:has([data-testid="people-invited-badge"])']],
+            },
+            {
+                textKey: 'tours.inviteStep3',
+                script: [
+                    ['panel', 'mail'],
+                    ['click', '[data-testid^="mail-item-"]'],
+                    ['expect', '[data-testid="mail-link"]'],
+                ],
+            },
+            {
+                textKey: 'tours.inviteStep4',
+                spotlight: '[data-testid="mail-link"]',
+                advance: [['click', '[data-testid="mail-link"]']],
+            },
+            {
+                textKey: 'tours.inviteStep5',
+                script: [['type', '[data-testid="accept-name"]', INVITEE_NAME]],
+                advance: [['click', '[data-testid="accept-submit"]']],
+            },
+            {
+                textKey: 'tours.inviteStep6',
+                spotlight: '[data-testid="signed-in-as"]',
+                script: [['expectText', '[data-testid="signed-in-as"]', INVITEE_NAME]],
+            },
+            {
+                textKey: 'tours.inviteStep7',
+                script: [
+                    ['panel', 'people'],
+                    ['expectText', '[data-testid="simulator-people"]', INVITEE_NAME],
+                ],
+            },
+            {
+                textKey: 'tours.inviteStep8',
+                script: [
+                    ['panel', 'snapshots'],
+                    ['expect', '[data-testid="simulator-presets"]'],
+                ],
             },
         ],
     },

@@ -38,9 +38,10 @@ Here the fakes compose into a world with inhabitants, and a panel called **Simul
   an in-process shortcut. Pause one, or step it a single call at a time.
 - **A clock you can push forward.** Jump an hour, a day, a week, and watch the scheduled work that came
   due actually fire.
-- **A world you can snapshot and restore**, so a demo starts from the same state every time.
-- **Walkthroughs that drive themselves.** A _tour_ is the temporal sibling of a snapshot: it restores one,
-  then drives the real screens with a ghost cursor while a bar narrates. Nothing is submitted until the
+- **A world you can snapshot and restore**, plus demo presets that load the same starting point in the
+  static demo too, so a demo starts from the same state every time.
+- **Walkthroughs that drive themselves.** A _tour_ is the temporal sibling of a snapshot: it restores one
+  (or a demo preset), then drives the real screens with a ghost cursor while a bar narrates. Nothing is submitted until the
   person watching presses Next, and every registered tour is run to its last step in CI, so a screen change
   that breaks the story fails the build instead of embarrassing you in front of a stakeholder.
 

@@ -412,3 +412,44 @@ test('the ticket queue pages through its cursor chain from file://', async ({ pa
         .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ref') ?? ''))
     expect(new Set(refs).size).toBe(refs.length)
 })
+
+test('static shell: a demo preset loads from the Snapshots tab — no server, same world as pnpm dev', async ({
+    page,
+}) => {
+    await page.goto(indexUrl)
+    await page.getByTestId('simulator-pill').click()
+    await page.getByTestId('simulator-tab-snapshots').click()
+
+    // A saved snapshot needs a server's `.data/`; a preset is a script, so this host lists them too.
+    await expect(page.getByTestId('snapshots-list')).toHaveCount(0)
+    await page.getByTestId('preset-load-mid-demo').click()
+
+    // The preset's viewpoint: signed in as Dana, on her desk, with the replayed inbound mail as tickets.
+    await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye')
+    await expect(page.getByTestId('tickets-list')).toContainText('Refund stuck in pending for three days')
+    await expect(page.getByTestId('tickets-list')).toContainText('Checkout times out for shoppers in the EU')
+
+    // The replayed invite: a pending person in People, with the invite unread in their inbox.
+    await page.getByTestId('simulator-tab-people').click()
+    const invited = page.locator('[data-testid^="people-"]').filter({ hasText: 'jordan.ellis@example.test' })
+    await expect(invited).toContainText('invited')
+    await invited.click()
+    await page.getByTestId('simulator-tab-mail').click()
+    await expect(page.getByTestId('mail-list').locator('[data-testid^="mail-item-"]')).toHaveCount(1)
+
+    // Loading another preset is a reset underneath: mid-demo's invite is gone, multi-tenant's world is
+    // here — Pinebrook's queue, signed in at Pinebrook as Gale, Riley's refused email filed 'unmatched'.
+    await page.getByTestId('simulator-tab-snapshots').click()
+    await page.getByTestId('preset-load-multi-tenant').click()
+    await expect(page.getByTestId('signed-in-as')).toContainText('Gale Bennett')
+    await expect(page.getByTestId('tickets-list')).toContainText('Booking confirmations arrive twice')
+    await expect(page.getByTestId('tickets-list')).not.toContainText('Refund stuck in pending')
+    await page.getByTestId('simulator-tab-people').click()
+    await expect(page.getByTestId('simulator-people')).not.toContainText('jordan.ellis@example.test')
+    await expect(page.getByTestId('simulator-people')).toContainText('priya.shah@example.test')
+    await page.getByTestId('simulator-tab-mail').click()
+    const refused = page.getByTestId('inbound-list').locator('[data-testid^="inbound-item-"]').filter({
+        hasText: 'Can I reopen my old ticket?',
+    })
+    await expect(refused).toContainText('unmatched')
+})

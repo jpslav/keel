@@ -125,6 +125,24 @@
         "ticketStep12": "Ahora la decisión. Pulsa Siguiente para aceptar la escalación y mira qué sale del edificio cuando lo hace.",
         "ticketStep13": "La decisión está en cola para el destino que pidió enterarse. Todavía no se ha enviado nada, que es la verdad del trabajo saliente: espera su turno. Pulsa Siguiente para que el mundo haga el intento.",
         "ticketStep14": "Entregada y <b>firmada</b>: el sobre que viajó por la red, la firma con la que el receptor lo comprueba, el número de intento. Haz fallar este destino desde aquí y verás los reintentos espaciarse y rendirse.",
-        "ticketStep15": "Ese es el ciclo. El correo se convierte en trabajo, el trabajo cambia de manos, un proceso externo hace su parte y la decisión sale como un hecho del que otros sistemas pueden fiarse. Todo lo que has visto puedes pulsarlo tú, y los trabajos siguen retenidos: la palanca está en <b>Instantáneas</b>."
+        "ticketStep15": "Ese es el ciclo. El correo se convierte en trabajo, el trabajo cambia de manos, un proceso externo hace su parte y la decisión sale como un hecho del que otros sistemas pueden fiarse. Todo lo que has visto puedes pulsarlo tú, y los trabajos siguen retenidos: la palanca está en <b>Instantáneas</b>.",
+        "inviteTitle": "Unirse a la mesa, desde un preajuste",
+        "inviteSummary": "Empieza a mitad de turno con el preajuste mid-demo y sigue una invitación pendiente hasta que la nueva persona es miembro. Unos dos minutos.",
+        "inviteStep1": "Este recorrido no empezó desde la siembra. Cargó el preajuste <b>mid-demo</b>: la mesa de Dana a mitad de turno, con dos correos ya convertidos en tickets. Un preajuste es un guion que el mundo reproduce, así que se carga igual aquí y en un servidor.",
+        "inviteStep2": "El mismo preajuste invitó a una persona nueva al equipo, Jordan, que aún no se ha unido: la pestaña Personas la muestra como invitada. Pulsa Siguiente para <b>sentarte en el escritorio de Jordan</b>.",
+        "inviteStep3": "Jordan no tiene cuenta, así que el producto muestra la página de bienvenida sin sesión mientras el panel lo sigue. Su bandeja ya contiene la <b>invitación</b>, sin leer.",
+        "inviteStep4": "La invitación trae un enlace a la página de aceptación. Pulsa Siguiente para <b>seguirlo</b>.",
+        "inviteStep5": "La página de aceptación nombra el equipo al que se une Jordan. Basta un nombre: pulsa Siguiente para <b>unirte a la mesa</b>.",
+        "inviteStep6": "Al aceptar, Jordan entró directamente como <b>miembro</b> del Frontline Desk.",
+        "inviteStep7": "De vuelta en la pestaña Personas, Jordan es ahora una <b>persona activa</b>, ya no una invitación.",
+        "inviteStep8": "Todos los preajustes viven en la pestaña <b>Instantáneas</b>. Carga uno antes de una demo y empezarás dentro de la historia, en el anfitrión que estés usando."
+    },
+    "presets": {
+        "freshTitle": "Mesa recién abierta",
+        "freshSummary": "El mundo sembrado, con la sesión de Dana iniciada en el Frontline Desk.",
+        "midDemoTitle": "A mitad de la demo",
+        "midDemoSummary": "Dos tickets nuevos en la cola y una persona invitada al equipo cuya invitación espera sin leer.",
+        "multiTenantTitle": "Ambos sitios ocupados",
+        "multiTenantSummary": "Colas en Northwind y Pinebrook, una invitación pendiente, un correo rechazado y el resaltado de SLA activo. Sesión iniciada en Pinebrook."
     }
 }

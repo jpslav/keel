@@ -243,7 +243,12 @@
         "tourMiss": "Not found ({action}): {target}",
         "tourReportClean": "Tour finished: {steps} steps, nothing missing.",
         "tourReportProblems": "Tour finished: {steps} steps, {count} missing.",
-        "tourReportDismiss": "Dismiss"
+        "tourReportDismiss": "Dismiss",
+        "presetsHeading": "Start from a preset",
+        "presetsHint": "Reset the world and replay a scripted starting point — works in every demo, including the single-file one.",
+        "presetsLoad": "Load",
+        "noticePresetLoaded": "Preset loaded: {name}",
+        "snapshotsNameReserved": "That name belongs to reset or a preset — pick another."
     },
     "acceptInvite": {
         "title": "Join {org}",

@@ -101,3 +101,40 @@ test('snapshots: save, mutate, restore, then reset returns to the seed baseline'
     await expect(page.getByTestId('mail-list').locator('[data-testid^="mail-item-"]')).toHaveCount(1)
     await expect(page.getByTestId('mail-list')).not.toContainText('reset-demo@example.test')
 })
+
+test('presets: loading one replays it on the server, signs this browser in, and reserves its name', async ({
+    page,
+}) => {
+    // Two world resets (each lazily re-migrates + re-seeds pglite) plus the replays — same room as above.
+    test.setTimeout(120_000)
+
+    // Start signed in as someone ELSE: the preset's viewpoint, not the previous session, decides who
+    // this browser is afterwards.
+    await signInAs(page, 'person-staff')
+    await ensurePanelOpen(page)
+    await page.getByTestId('simulator-tab-snapshots').click()
+    await page.getByTestId('preset-load-mid-demo').click()
+
+    // The server replays the preset and answers the dashboard, because mid-demo signs Dana in.
+    await page.waitForURL('**/en/dashboard')
+    await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye', { timeout: 20_000 })
+    await expect(page.getByTestId('tickets-list')).toContainText('Refund stuck in pending for three days')
+    await expect(page.getByTestId('tickets-list')).toContainText('Checkout times out for shoppers in the EU')
+
+    await ensurePanelOpen(page)
+    await page.getByTestId('simulator-tab-people').click()
+    const invited = page.locator('[data-testid^="people-"]').filter({ hasText: 'jordan.ellis@example.test' })
+    await expect(invited).toContainText('invited')
+
+    // A saved snapshot may not take a preset's name: a tour naming it must mean one world on every host.
+    await page.getByTestId('simulator-tab-snapshots').click()
+    await page.getByTestId('snapshot-name').fill('mid-demo')
+    await expect(page.getByTestId('snapshots-save')).toBeDisabled()
+    await expect(page.getByTestId('snapshot-name-error')).toBeVisible()
+    const refused = await page.request.post('/api/simulator/snapshots', { data: { name: 'mid-demo' } })
+    expect(refused.status()).toBe(403)
+
+    // Leave the seed baseline behind for the rest of the destructive project.
+    const reset = await page.request.post('/api/simulator/reset')
+    expect(reset.ok()).toBe(true)
+})
