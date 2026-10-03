@@ -24,7 +24,7 @@ import { WebhookEndpointsCard } from '../components/webhook-endpoints-card'
 import { type Locale, LOCALES } from '../core/locale'
 import { unreadCount } from '../core/notifications'
 import { resolveWorldStart } from '../core/presets'
-import { canManageOrg, ROLES } from '../core/roles'
+import { canManageOrg, isAssignableRole, ROLES } from '../core/roles'
 import { WEBHOOK_EVENT_KINDS } from '../core/webhook-events'
 import { scrubEvent } from '../observability/scrub'
 import { go } from './hash-route'
@@ -233,7 +233,7 @@ export function DemoShell({
                     <OrgScreen
                         orgName={org.name}
                         members={[...members, ...invitedMembers]}
-                        roles={ROLES.filter((r) => r !== 'admin')}
+                        roles={ROLES.filter(isAssignableRole)}
                         canManage={canManage}
                         error={world.inviteError}
                         onInvite={world.sendInvite}

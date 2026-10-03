@@ -53,7 +53,7 @@ import {
     type InviteArgs,
     type PresetOperation,
 } from '../core/presets'
-import { canManageOrg } from '../core/roles'
+import { canManageOrg, isAssignableRole } from '../core/roles'
 import { computeNextRunAt } from '../core/schedules'
 import {
     backoffDelayMs,
@@ -910,6 +910,15 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     /** Twin of POST /api/org/invite: the signed-in person invites into the active team. */
     async function sendInvite({ email, role }: { email: string; role: string }) {
         setInviteError(null)
+        // The same allowlist the real invite route enforces. The org screen only offers assignable
+        // roles, so no click reaches this — but a tour script or other non-UI caller can pass 'admin'
+        // straight in. The error is set before throwing because the org screen swallows the rejection
+        // and shows only `inviteError`. (A demo preset's invite never gets here: it is held to the same
+        // rule at build time, by the `invite` kind's check in keel/core/presets.ts.)
+        if (!isAssignableRole(role)) {
+            setInviteError(tOrg('inviteFailed'))
+            throw new Error('role not assignable')
+        }
         if (!person) return
         // The display name honours an unsaved profile edit, like the rest of the signed-in header.
         if (!inviteInto({ ...person, name }, activeOrgSlug, email, role)) {

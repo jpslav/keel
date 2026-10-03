@@ -1,6 +1,6 @@
 import { auth } from 'keel/adapters/index'
 import { authorize } from 'keel/authz/authorize'
-import { ORG_ASSIGNABLE_ROLES, isRole, type Role } from 'keel/core/roles'
+import { isAssignableRole } from 'keel/core/roles'
 import { findOrg } from '@app/seed'
 import { sendOrgInvite } from 'keel/server-lib/invite'
 import { resolveOrgContext } from '../../org-context'
@@ -20,7 +20,7 @@ export async function POST(request: Request): Promise<Response> {
         const { tenantId, orgId } = resolved
         const body = (await request.json()) as { email: string; role: string }
         // Server-side allowlist, independent of what the UI offers: managers may never grant admin.
-        if (!isRole(body.role) || !ORG_ASSIGNABLE_ROLES.includes(body.role as Role)) {
+        if (!isAssignableRole(body.role)) {
             return Response.json({ error: 'role not assignable' }, { status: 400 })
         }
         // Same shape check the form runs — the API must not trust the UI (mirrors the role
@@ -45,7 +45,7 @@ export async function POST(request: Request): Promise<Response> {
             orgSlug: user.orgSlug,
             orgName: findOrg(user.orgSlug)?.name ?? user.orgSlug,
             email: inviteEmail,
-            role: body.role as Role,
+            role: body.role,
             members: existing,
             baseUrl: request.url,
         })

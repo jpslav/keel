@@ -1,7 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 
 // The server replay of a demo preset, against keel's OWN seam: the fixture registers `busy-harbor`
 // (packages/keel/test-fixture/app-config/presets.ts), one operation of every kind plus a viewpoint, and
@@ -13,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 // next-intl's server translator is stubbed: the invite email's copy is not what is under test here. The
 // adapter registry is `server-only`, so it is replaced by the simulated-mode registry it would build —
 // the fake adapters themselves, unmocked, which is the whole path the replay drives.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-demo-presets-'))
+const tmp = makeTestTmpDir('app-demo-presets-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

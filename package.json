@@ -21,8 +21,8 @@
         "typecheck": "pnpm --filter './apps/*' typecheck && tsc --noEmit",
         "lint": "eslint . && prettier --check --log-level warn .",
         "lint:fix": "eslint --fix . && prettier --write --log-level warn .",
-        "test:unit": "vitest run",
-        "test:coverage": "vitest run --coverage",
+        "test:unit": "node scripts/check-tmpdir-leak.mjs vitest run",
+        "test:coverage": "node scripts/check-tmpdir-leak.mjs vitest run --coverage",
         "test:e2e": "pnpm --filter './apps/*' --workspace-concurrency=1 test:e2e",
         "knip": "knip",
         "jscpd": "jscpd",
@@ -34,7 +34,7 @@
         "build:demo-static": "pnpm --filter './apps/*' build:demo-static",
         "check:demo-size": "pnpm --filter './apps/*' check:demo-size",
         "e2e:demo-static": "pnpm --filter './apps/*' e2e:demo-static",
-        "test:contract": "vitest run --config vitest.contract.config.ts"
+        "test:contract": "node scripts/check-tmpdir-leak.mjs vitest run --config vitest.contract.config.ts"
     },
     "dependencies": {
         "@mantine/core": "^9.5.0",

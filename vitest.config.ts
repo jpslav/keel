@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 const at = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
 
@@ -96,6 +96,8 @@ const keelProject = {
         name: 'keel',
         environment: 'happy-dom',
         include: ['packages/*/src/**/*.test.{ts,tsx}'],
+        // Real-Postgres proofs belong to `pnpm test:contract` (vitest.contract.config.ts), not the unit run.
+        exclude: [...configDefaults.exclude, '**/*.contract.test.ts'],
         setupFiles: [at('./tests/vitest.setup.ts')],
         // The fake LLM adapter resolves fixtures from the working directory, which for `next dev` is
         // the app — but this suite runs from the REPO ROOT, so it points the adapter at the fixture's

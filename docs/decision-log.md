@@ -1358,6 +1358,74 @@ read that as "keep the fixtures", and built their own world beside the starter's
   one org (`people-dimensions.ts`); role always shows. A second tenant or team makes the chip appear on
   its own.
 
+## A `date` column reads as a string, on both engines (2026-10-03, `feat/upstream-date-storage-keyset`)
+
+- **The return type is the wire string, `'YYYY-MM-DD'`, not a `Date`.** A `date` is a calendar day
+  with no time and no zone; any `Date` built from it has to pick a zone, and each driver's default
+  picks a different one. `pg` builds local midnight, so a server east of UTC hands back the previous
+  day once the value is read as UTC (watched: `2026-10-03` came back as `2026-10-02T15:00:00.000Z`
+  under `TZ=Asia/Tokyo`). pglite builds UTC midnight, so the fake and the real engine disagreed on the
+  same row. The string is also what the schema types already promised (`string`), it sorts and
+  compares correctly as-is, and `'infinity'` survives (pglite's default turned it into `null`).
+  `date[]` reads as `string[]` for the same reason.
+- **Per pool, not process-global.** The real adapter passes a `types` override to its own `Pool`
+  rather than calling `pg.types.setTypeParser`, which would rewrite the parser for every `pg` client
+  in the process from whichever module happened to load first. Only text-format `date`/`date[]` are
+  overridden; everything else falls through to `pg`'s defaults.
+- **pglite gets the same override, and the tests use it.** The claim that pglite could not take a
+  parser was wrong: `PGliteOptions.parsers` does exactly this. Every pglite the framework opens now
+  comes from one factory (`openPglite`, `packages/keel/src/adapters/fake/pglite-dialect.ts`), and the
+  pglite RLS suite builds its engine there too. Before this it called `new PGlite()` directly, so it
+  proved a configuration the app never ran.
+- **keel's fixture got its own contract database.** The proof is a `date` column on the fixture's
+  `dockets` table (`1002_dockets_due_on`), and the fixture's migrations had never run on real Postgres:
+  the contract runner held a single app. `vitest.contract.config.ts` now has a second project, `keel`,
+  aliased at the fixture seam. Its harness
+  (`packages/keel/src/adapters/real/db.contract.test.ts`) creates `keel_contract` on whichever server
+  it is given and drives the real adapter's `createRealDb`, so the contract run proves the pool
+  configuration production uses. Files run one at a time because both harnesses default to the same
+  derived embedded-postgres port. The showcase harness is unchanged. It still builds its own `Pool`,
+  and with no `date` columns in its proofs that difference is harmless today. Watched failing:
+  removing the `date` override, then the `date[]` override, from the real adapter turns the `keel`
+  contract project red, and removing pglite's turns the pglite suite red.
+
+## Per-person cloud workspaces: a recipe, not a port (2026-10-03, `upstream-mechanical-bundle`)
+
+A future task proposed a `workspace` port generic over the backend, with its adapter selection gated
+independently of `APP_MODE`. It is resolved the other way, as `docs/recipes/workspace-coder.md`.
+
+- **Fails both vendor-code tests.** Almost no instance provisions per-person dev environments
+  (universality), and an authenticated REST vendor behind a polled long-running operation is a class
+  the LLM, email and webhook-dispatch adapters already teach (new-class).
+- **The implementation it was drawn from broke doctrine twice**: it chose its adapter from the
+  backend's own env vars rather than `APP_MODE`, and it let product vocabulary into the adapter
+  registry. Writing the plan down, rather than lifting the code, is what keeps both out.
+- **The one legitimate need survives as an explicit override.** A real backend inside an otherwise
+  simulated demo is allowed only as a named, fail-closed switch with its costs stated in the recipe —
+  never an adapter that turns itself on because its env vars happen to be present.
+
+## What a derived app's mechanical changes did NOT bring back (2026-10-03, `upstream-mechanical-bundle`)
+
+A derived app's change list was mined for small, mechanical items worth taking back into keel. Four of
+them were declined, each for the same reason: keel has no caller for them, and dead exports fail the
+gate (`knip`) as surely as dead vendor code fails the doctrine.
+
+- **`BadRequestError` / `ConflictError` in `packages/keel/src/ports/errors.ts`.** The derived app throws
+  them from adapters keel does not ship (a workspace backend — now `docs/recipes/workspace-coder.md`,
+  which tells an adopter to export their own typed conflict from that port) and maps them in its own
+  respond helper. The nearest keel candidate is the fake storage adapter's path-escape refusal, but
+  making that a 400 would give the fake a failure mode the real S3 adapter does not have, which is the
+  opposite of what a fake is for. Revisit when a real keel adapter has a caller-input failure to report.
+- **Optional `themePrimaryColor` / `themeRadius` on `SeedTenant`.** `getTenantTheme`
+  (`packages/keel/src/theme.ts`) already falls back when they are missing, but every keel seed world —
+  both apps and the fixture — sets both, so optional fields would be a contract widened for nobody.
+- **A `label` prop on the user menu.** Generic presentation (text and a chevron beside the avatar),
+  not a framework invariant made visible; it fails the component test in
+  `docs/development-approach.md`, and no keel shell draws a name in its top bar.
+- **Out of scope by choice, not by test:** stopping the invite flow from emailing admins (a product
+  decision), a caller-named org for `sendInvite` and the live-org list it needs, a fake-person helper,
+  and a package licence file.
+
 ## Demo presets are declarative, registered beside the flags, and replayed per host (2026-10-03, `prebaked-demo-presets`)
 
 - **No prebaked `.data/` worlds.** The task proposed a `pnpm snapshots:seed` that drove the fake

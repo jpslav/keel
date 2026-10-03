@@ -1,4 +1,4 @@
-import type { PGlite } from '@electric-sql/pglite'
+import { PGlite, types } from '@electric-sql/pglite'
 import {
     CompiledQuery,
     PostgresAdapter,
@@ -11,6 +11,20 @@ import {
     type QueryResult,
     type TransactionSettings,
 } from 'kysely'
+
+/**
+ * Every pglite this framework opens — the fake adapter's persisted one and the in-memory one the RLS
+ * suite migrates — comes from here, so tests prove the engine configuration the app actually runs.
+ *
+ * The one override is `date` (OID 1082): handed back as the wire string (`'2026-10-03'`), exactly as
+ * the real adapter's pool does (../real/db.ts says why). pglite's default would build a UTC-midnight
+ * `Date` — a different wrong answer from `pg`'s local-midnight one, so without this the fake and the
+ * real engine disagree on the same row. pglite parses array elements with the element type's parser,
+ * so `date[]` follows without a second entry.
+ */
+export function openPglite(dataDir?: string): PGlite {
+    return new PGlite({ dataDir, parsers: { [types.DATE]: (value: string) => value } })
+}
 
 /**
  * Minimal Kysely dialect over pglite, promoted from spikes/kysely-pglite (the community
