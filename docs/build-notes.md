@@ -1205,6 +1205,29 @@ pass got no exclusion list; prior claims were handed to it as hypotheses to re-d
   all three places it appears. Its complement, "the other 33 modules are internal", was ungated and
   was 34, in three files. A gate on half a derived pair is a gate on half a derived pair.
 
+## `keysetPage` alternate ordering (2026-10-03, `feat/upstream-date-storage-keyset`)
+
+- **A literal `orderBy` next to an inline arrow `build` makes TypeScript abandon `TB`, and `NoInfer`
+  does not help.** `keysetPage(db, req, (trx) => trx.selectFrom('dockets')…, 'last_touched_at')` fails
+  to typecheck: `build`'s return type is rejected against `SelectQueryBuilder<DB, KeysetTableName, …>`
+  and `O` collapses to `{ id: string }`. The checker has to resolve `KeysetOrderColumn<TB>` to test the
+  literal, which happens before the context-sensitive arrow (untyped `trx`) is read, so `TB` is fixed
+  at its constraint. Typing the parameter (`(trx: Transaction<DB>) => …`) or passing a named `build`
+  restores inference, and a nullable, missing or other-table column is then rejected naming
+  `KeysetOrderColumn<"dockets">`. Wrapping the parameter in `NoInfer<TB>` produced byte-identical results
+  in all three shapes (tsc 5.9.3), so it is not used. The type-level assertions are in
+  `packages/keel/src/db/keyset.test.ts`.
+- **"Is a timestamptz" is a runtime guarantee, and it holds.** The schema has no nominal timestamp
+  type, so `KeysetOrderColumn` cannot exclude a text column; pointing the proof at `dockets.label`
+  failed on the first page with `function pg_catalog.timezone(unknown, text) does not exist`, from the
+  `to_char(… at time zone 'UTC', …)` cursor render. A wrong-typed key errors, it does not mis-order.
+- **The proof only counts because the tie and the two orderings disagree.** Three sabotage runs, each
+  red on both pglite and real Postgres: ordering by `created_at` regardless of `orderBy` (first row
+  wrong), comparing on `created_at` while ordering by the alternate column (the walk never
+  terminates), and rendering the cursor from `created_at` (the walk stops after 3 of 6 rows). That
+  needs a row that is oldest by one column and newest by the other, and a tie wider than the page
+  size.
+
 ## Test temp directories are cleaned up by construction (2026-10-03)
 
 Twenty-three test files made a scratch directory with a raw `mkdtempSync` and never removed it, so every

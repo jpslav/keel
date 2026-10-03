@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
@@ -67,6 +67,34 @@ describe('simulator-admin snapshots', () => {
         expect(readFileSync(path.join(authDir, 'dev-secret'), 'utf8')).toBe('stable-secret-value')
         expect(existsSync(path.join(authDir, 'people.json'))).toBe(false)
         expect(existsSync(path.join(emailsDir, 'leftover.json'))).toBe(false)
+    })
+
+    test("reset clears the fake LLM's request catch, as it clears the mailbox", async () => {
+        const { dataDir } = await import('./data-dir')
+        const { resetWorld } = await import('./simulator-admin')
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'before reset' }] })
+        expect(listCaughtLlmRequests()).toHaveLength(1)
+
+        await resetWorld()
+
+        expect(readdirSync(dataDir('llm-requests'))).toEqual([])
+        expect(listCaughtLlmRequests()).toEqual([])
+    })
+
+    test('a snapshot carries the caught LLM requests it was taken with', async () => {
+        const { saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
+        const { fakeLlm, listCaughtLlmRequests, clearCaughtLlmRequests } = await import('./llm')
+
+        clearCaughtLlmRequests()
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'kept' }] })
+        await saveSnapshot('with-llm-catch')
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'after' }] })
+
+        await restoreSnapshot('with-llm-catch')
+
+        expect(listCaughtLlmRequests().map((c) => c.messages[0]!.content)).toEqual(['kept'])
     })
 
     test('snapshot name validation rejects path traversal and uppercase', async () => {

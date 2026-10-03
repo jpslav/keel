@@ -17,3 +17,10 @@ migrations are exactly where an adopter's own tables live, so the untested half 
 **Approach:** parameterize `vitest.contract.config.ts` over apps with a distinct database name per app
 (the local runner uses embedded-postgres, CI a service container — both can host two databases). Then
 fan out like the other per-app scripts.
+
+**Update 2026-10-03:** half of this pattern now exists. keel's fixture seam has a second project in
+`vitest.contract.config.ts` and its own database (`packages/keel/src/adapters/real/db.contract.test.ts`
+creates `keel_contract` on the same server, embedded or CI's). A second APP would follow the same
+shape: add a project with that app's aliases, and give its harness a database name of its own. The two
+harnesses still duplicate the embedded-postgres boilerplate. If a third arrives, extract the shared
+part first.

@@ -34,4 +34,18 @@ export interface StoragePort {
      * above, which the app owns — only the app knows what it accepts.
      */
     createUploadTarget(key: string, constraints: UploadConstraints): Promise<UploadTarget>
+    /**
+     * Every stored key that begins with `prefix`, as FULL keys (never relative to the prefix), sorted
+     * ascending. `prefix` is a literal string prefix on the key, not a directory boundary — S3's
+     * `ListObjectsV2` `Prefix` semantics, which both adapters match: `'a/b'` also returns `'a/bc'`, so
+     * pass a trailing `/` to mean "inside this folder". No match is `[]`; `''` lists every key.
+     */
+    list(prefix: string): Promise<string[]>
+    /**
+     * Remove objects. Idempotent: a key that does not exist is not an error. Each entry is a FULL key,
+     * never a prefix — this method never scans, so to delete everything under a prefix `list` it first.
+     * Real adapter batches against S3's 1000-keys-per-request cap; an empty array does nothing. A failed
+     * batch throws naming its FIRST failing key only; earlier batches have already been deleted.
+     */
+    delete(keys: readonly string[]): Promise<void>
 }

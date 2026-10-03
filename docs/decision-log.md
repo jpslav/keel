@@ -1358,6 +1358,37 @@ read that as "keep the fixtures", and built their own world beside the starter's
   one org (`people-dimensions.ts`); role always shows. A second tenant or team makes the chip appear on
   its own.
 
+## A `date` column reads as a string, on both engines (2026-10-03, `feat/upstream-date-storage-keyset`)
+
+- **The return type is the wire string, `'YYYY-MM-DD'`, not a `Date`.** A `date` is a calendar day
+  with no time and no zone; any `Date` built from it has to pick a zone, and each driver's default
+  picks a different one. `pg` builds local midnight, so a server east of UTC hands back the previous
+  day once the value is read as UTC (watched: `2026-10-03` came back as `2026-10-02T15:00:00.000Z`
+  under `TZ=Asia/Tokyo`). pglite builds UTC midnight, so the fake and the real engine disagreed on the
+  same row. The string is also what the schema types already promised (`string`), it sorts and
+  compares correctly as-is, and `'infinity'` survives (pglite's default turned it into `null`).
+  `date[]` reads as `string[]` for the same reason.
+- **Per pool, not process-global.** The real adapter passes a `types` override to its own `Pool`
+  rather than calling `pg.types.setTypeParser`, which would rewrite the parser for every `pg` client
+  in the process from whichever module happened to load first. Only text-format `date`/`date[]` are
+  overridden; everything else falls through to `pg`'s defaults.
+- **pglite gets the same override, and the tests use it.** The claim that pglite could not take a
+  parser was wrong: `PGliteOptions.parsers` does exactly this. Every pglite the framework opens now
+  comes from one factory (`openPglite`, `packages/keel/src/adapters/fake/pglite-dialect.ts`), and the
+  pglite RLS suite builds its engine there too. Before this it called `new PGlite()` directly, so it
+  proved a configuration the app never ran.
+- **keel's fixture got its own contract database.** The proof is a `date` column on the fixture's
+  `dockets` table (`1002_dockets_due_on`), and the fixture's migrations had never run on real Postgres:
+  the contract runner held a single app. `vitest.contract.config.ts` now has a second project, `keel`,
+  aliased at the fixture seam. Its harness
+  (`packages/keel/src/adapters/real/db.contract.test.ts`) creates `keel_contract` on whichever server
+  it is given and drives the real adapter's `createRealDb`, so the contract run proves the pool
+  configuration production uses. Files run one at a time because both harnesses default to the same
+  derived embedded-postgres port. The showcase harness is unchanged. It still builds its own `Pool`,
+  and with no `date` columns in its proofs that difference is harmless today. Watched failing:
+  removing the `date` override, then the `date[]` override, from the real adapter turns the `keel`
+  contract project red, and removing pglite's turns the pglite suite red.
+
 ## Per-person cloud workspaces: a recipe, not a port (2026-10-03, `upstream-mechanical-bundle`)
 
 A future task proposed a `workspace` port generic over the backend, with its adapter selection gated
