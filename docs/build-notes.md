@@ -349,6 +349,12 @@ signatures, render purity. Skim the bold lead-ins; they are the index._
   path trips the purity lint. Fix: capture the anchor ONCE in a lazy `useState(() => Date.now())`
   initializer (the one place an impure read is allowed) and read `mountedAtMs + offset` everywhere —
   render-pure, and consistent with the seed schedule's `next_run_at` basis (also computed at mount).
+- **`react-hooks/purity` can blame a `Date.now()` you didn't touch.** In
+  `packages/keel/src/demo-static/world.ts`, adding any CALL on a seed person's `memberships` inside
+  `useDemoWorld` (an inline `.map`, or a module-level helper taking the array) made the rule flag the
+  `Date.now()` in `startJob`, ~400 lines away, inside an event handler. Passing the array through
+  untouched (`orgs: p.memberships`) and shaping it in the consumer clears it. If purity fires on a line
+  you didn't change, look for a new call on a captured value in the same hook (2026-10-03).
 - **A raw cross-tenant scan of a FORCE-RLS table only _appears_ to work on pglite.** The due-scan's
   first draft read `job_schedules` via `db.getDb()` with no tenant set — green everywhere locally
   because pglite's default role is a superuser that bypasses RLS. On a real Postgres role (Aurora's
