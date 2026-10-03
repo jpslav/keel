@@ -28,6 +28,81 @@ describe('fake storage', () => {
         await expect(fakeStorage.put('../outside.txt', 'x', 'text/plain')).rejects.toThrow(/invalid storage key/)
     })
 
+    describe('list and delete', () => {
+        // A directory of its own so earlier tests' objects (and the upload secret they provoked) never
+        // leak into an exact-equality assertion.
+        const sub = (name: string) => `list-delete/${name}`
+
+        test('list returns sorted FULL keys, with bookkeeping files never among them', async () => {
+            const { fakeStorage } = await import('./storage')
+            // Mint a target first so the upload secret exists at the store root.
+            await fakeStorage.createUploadTarget(sub('x'), { contentType: 'text/plain', maxBytes: 1 })
+            await fakeStorage.put(sub('sorted/b.txt'), 'b', 'text/plain')
+            await fakeStorage.put(sub('sorted/a.txt'), 'a', 'text/plain')
+            await fakeStorage.put(sub('sorted/deep/c.txt'), 'c', 'text/plain')
+
+            expect(await fakeStorage.list(sub('sorted/'))).toEqual([
+                sub('sorted/a.txt'),
+                sub('sorted/b.txt'),
+                sub('sorted/deep/c.txt'),
+            ])
+            // Everything: still no `.meta.json` sidecar and no `upload-secret`.
+            const all = await fakeStorage.list('')
+            expect(all).toContain(sub('sorted/a.txt'))
+            expect(all.filter((key) => key.endsWith('.meta.json') || key === 'upload-secret')).toEqual([])
+            expect([...all].sort()).toEqual(all)
+        })
+
+        test('the prefix is a literal string prefix, not a directory boundary', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('lit/a/b'), '1', 'text/plain')
+            await fakeStorage.put(sub('lit/a/bc'), '2', 'text/plain')
+            await fakeStorage.put(sub('lit/a/c'), '3', 'text/plain')
+            expect(await fakeStorage.list(sub('lit/a/b'))).toEqual([sub('lit/a/b'), sub('lit/a/bc')])
+            expect(await fakeStorage.list(sub('lit/a/b/'))).toEqual([])
+            expect(await fakeStorage.list(sub('lit/nothing-here'))).toEqual([])
+        })
+
+        test('keys that collide with the fake bookkeeping are refused, not silently shadowed', async () => {
+            const { fakeStorage } = await import('./storage')
+            await expect(fakeStorage.put('thing.meta.json', 'x', 'text/plain')).rejects.toThrow(/reserved/)
+            await expect(fakeStorage.put('upload-secret', 'x', 'text/plain')).rejects.toThrow(/reserved/)
+            // ...and are never objects: not readable (a GET route maps null to 404, not a throw to 500),
+            // and a delete naming one is a no-op that leaves the real object's sidecar in place.
+            await fakeStorage.put(sub('kept'), 'k', 'text/plain')
+            expect(await fakeStorage.get(`${sub('kept')}.meta.json`)).toBeNull()
+            expect(await fakeStorage.get('upload-secret')).toBeNull()
+            await fakeStorage.delete([`${sub('kept')}.meta.json`, 'upload-secret'])
+            expect(await fakeStorage.get(sub('kept'))).toEqual({
+                body: new TextEncoder().encode('k'),
+                contentType: 'text/plain',
+            })
+        })
+
+        test('delete removes the object and its sidecar, and is idempotent', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('del/one'), '1', 'text/plain')
+            await fakeStorage.put(sub('del/two'), '2', 'text/plain')
+            await fakeStorage.put(sub('del/keep'), '3', 'text/plain')
+
+            await fakeStorage.delete([sub('del/one'), sub('del/two'), sub('del/never-existed')])
+
+            expect(await fakeStorage.get(sub('del/one'))).toBeNull()
+            expect(await fakeStorage.list(sub('del/'))).toEqual([sub('del/keep')])
+            // The sidecar went with it: a re-put of the same key must not inherit stale metadata.
+            await fakeStorage.put(sub('del/one'), 'again', 'application/json')
+            expect((await fakeStorage.get(sub('del/one')))!.contentType).toBe('application/json')
+            // Deleting what is already gone is not an error.
+            await expect(fakeStorage.delete([sub('del/never-existed')])).resolves.toBeUndefined()
+            await expect(fakeStorage.delete([])).resolves.toBeUndefined()
+        })
+
+        test('delete keeps resolveKey’s path-escape guard', async () => {
+            const { fakeStorage } = await import('./storage')
+            await expect(fakeStorage.delete(['../outside.txt'])).rejects.toThrow(/invalid storage key/)
+        })
+    })
+
     test('signed url points at the local storage route', async () => {
         const { fakeStorage } = await import('./storage')
         expect(await fakeStorage.getSignedDownloadUrl('reports/hello.txt')).toBe('/api/storage/reports/hello.txt')
