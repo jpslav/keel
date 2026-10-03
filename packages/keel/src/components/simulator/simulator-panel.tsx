@@ -230,10 +230,20 @@ export function SimulatorPanel({
     // React has attached the click handlers. The SSR'd pill LOOKS clickable before hydration but
     // silently swallows clicks; Playwright waits for the stamp instead of racing that window.
     const [hydrated, setHydrated] = useState(false)
-    const mountState = { activeTab, collapsed }
+    // Kept-mounted content (actor frames) mounts only once the host page has loaded — see ./tab-mount.
+    const [pageLoaded, setPageLoaded] = useState(false)
+    useEffect(() => {
+        // Syncing with an external event (the window's load), so setting state here is the point.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (document.readyState === 'complete') return setPageLoaded(true)
+        const onLoad = () => setPageLoaded(true)
+        window.addEventListener('load', onLoad, { once: true })
+        return () => window.removeEventListener('load', onLoad)
+    }, [])
+    const mountState = { activeTab, collapsed, pageLoaded }
     // A kept-mounted tab hidden behind the collapsed pill still needs its panel in the DOM, at the
     // SAME tree position it had while expanded — an iframe that moves is an iframe that reloads.
-    const keepPanel = !collapsed || extraTabs.some((tab) => tab.keepMounted)
+    const keepPanel = !collapsed || extraTabs.some((tab) => tabMount(tab, mountState) === 'hidden')
     // A core tab's content shows only in an expanded panel (the hidden kept-alive panel holds nothing else).
     const showing = (tab: string) => !collapsed && activeTab === tab
 
