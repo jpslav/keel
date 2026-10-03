@@ -22,3 +22,28 @@ host can honour is `'reset'` (the seeded world); a server host can additionally 
 saved by hand. So this task is no longer speculative and no longer conditional on anything else: the
 socket exists, and building these worlds is what gives a tour author something worth plugging into it
 other than "the seed" or a world they clicked together and hoped nobody deletes.
+
+**Extends to: the viewpoint, and every host, not only the Next server.**
+
+A snapshot today is `.data/`-only — `LIVE_DIRS` in `packages/keel/src/adapters/fake/simulator-admin.ts`
+is what `saveSnapshot`/`restoreSnapshot` actually copy — and the signed-in viewpoint lives outside
+`.data/` entirely, as a cookie (`writeViewpointCookie`, read/written from
+`apps/showcase/src/app/api/simulator/viewpoint/route.ts`). Saving and restoring a snapshot carries the
+world but not who was looking at it. A preset meant to open on something like "a pending review,
+signed in as the reviewer" needs the viewpoint captured and restored alongside the world, not just the
+world state.
+
+And a snapshot today only exists where a Next server can run it. `SnapshotsApp` renders its
+save/restore/delete controls only when the host supplies a `snapshots` prop
+(`packages/keel/src/components/simulator/snapshots-app.tsx` — "when `snapshots` is undefined the
+caller has no server-side snapshot store to talk to (the static shell), so the snapshot half doesn't
+render"), and the runtime creation route (`apps/showcase/src/app/api/simulator/snapshots/route.ts`)
+404s wherever `isSimulated` is false. `useTours`' own doc comment is explicit about the asymmetry this
+causes: "`'reset'` is the snapshot every host has... a server host may also restore a named snapshot"
+(`packages/keel/src/demo-static/tour/use-tours.tsx`) — a static/served demo host has no `onSnapshot`
+that can do anything with a named snapshot at all.
+
+So the prebaked worlds this task already asks for need a second half to be useful everywhere a tour
+can run: a snapshot representation (and a restore path) that a host with no server — the static/served
+demo — can also honour, carrying the viewpoint along with the world. Once that exists, tours starting
+from a preset on every host is just wiring `onSnapshot` on that host too, not a separate task.
