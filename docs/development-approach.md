@@ -399,8 +399,11 @@ linking, tenant-level governance, isolation audits.
 classic one-way door. No early slice needs the expensive 80%.
 
 **Keep-honest trick.** A second, fake tenant exists in tests from day one and the E2E suite runs against
-both, so any accidental single-tenant assumption breaks a test the day it's written. Multi-tenant shaped,
-single-tenant operated. See ADR [0004](adr/0004-tenancy-rls.md); the one enforced path is `db.withTenant()`
+both, so any accidental single-tenant assumption breaks a test the day it's written. The RLS proofs get that
+second tenant from the proof runner, not from an app's seed, so an app deployed one tenant per deployment may
+seed one and keep the guarantee for its own tables (ADR [0004](adr/0004-tenancy-rls.md), addendum of
+2026-11-16); what it gives up is seeing isolation by using the app. Multi-tenant shaped, single-tenant
+operated. See ADR [0004](adr/0004-tenancy-rls.md); the one enforced path is `db.withTenant()`
 (raw `getDb()` in request paths is lint-banned).
 
 **Teams — the in-tenant layer, one door in.** A tenant stays the ambient, separately-branded site — never

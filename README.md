@@ -118,11 +118,11 @@ app extends it only through the `apps/<app>/src/app-config/` registration seam, 
 want is turned off by registering nothing for it.
 
 ```sh
-pnpm init-app acme --name "Acme Research" --eject-showcase
+pnpm init-app acme --name "Acme Research" --repo acme-research --eject-showcase
 ```
 
 That renames the app you keep, deletes the demo, and repoints every file that named either — the whole
-mechanical half of adoption. Two example apps ship here: `apps/showcase` (a support desk — tickets, escalations, file
+mechanical half of adoption (`--repo` is the GitHub repository's name, which need not be the app's). Two example apps ship here: `apps/showcase` (a support desk — tickets, escalations, file
 attachments, an export job run by a simulated external service) so every framework capability has a living
 worked example, and `apps/starter`, the minimum you keep. Build against the showcase as your reference,
 eject it when you no longer read it.

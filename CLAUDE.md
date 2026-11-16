@@ -95,13 +95,16 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   new tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
   migrations are numbered ≥1001; framework migrations 0001–0999 live in
   `packages/keel/src/db/migrations` — ADR-0012).
-- **Every mutating API route (POST/PUT/PATCH/DELETE) must call `authorize(...)`**
+- **Every mutating route handler (POST/PUT/PATCH/DELETE) must call `authorize(...)`**
   (`keel/authz/authorize.ts`) — a build-time scan
-  (`packages/keel/src/authz/authorized-mutations.test.ts`, which walks EVERY app's `apps/*/src/app/api`
-  **plus the framework's own reference tree, `packages/keel/test-fixture/api`**) fails any route that
-  neither calls it nor has a justified entry in that file's exemption map. The exemption map's
-  staleness is measured against the FIXTURE tree, so a new exemption needs a file there to demonstrate
-  it; the fixture's routes are scanned, never served. **Every exemption MUST carry a `mustMatch`** —
+  (`packages/keel/src/authz/authorized-mutations.test.ts`) walks every `route.{ts,tsx,js,jsx,mjs}` under
+  EVERY app's whole `apps/*/src/app` tree, not only `api/` (Next serves a `route.ts` from anywhere
+  there), **plus the framework's own reference tree, `packages/keel/test-fixture/api`**. It fails any
+  file that exports a mutating verb and neither calls `authorize(...)` nor has a justified entry in that
+  file's exemption map. Exemption keys are paths relative to each app's `apps/<app>/src/app/api`, so a
+  mutating route OUTSIDE `api/` can match no exemption and must call `authorize(...)` itself. The
+  exemption map's staleness is measured against the FIXTURE tree, so a new exemption needs a file there
+  to demonstrate it; the fixture's routes are scanned, never served. **Every exemption MUST carry a `mustMatch`** —
   entries are matched by relative path in every root, so a gateless one would exempt an adopter's
   same-named route from authorization entirely. It proves the route is the KIND the reason describes,
   never the reason's whole claim; ADR-0012 states the limit.
@@ -172,7 +175,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   records (`build-notes.md`, `decision-log.md`, ADR bodies and anything appended to them) are exempt — see
   `docs/README.md` for the split. If you move a directory, the gate is what tells you which docs you
   just falsified.
-- **The app's identity is a script, not a checklist**: `pnpm init-app <slug> [--eject-showcase]`
+- **The app's identity is a script, not a checklist**: `pnpm init-app <slug> [--repo <name>] [--eject-showcase]`
   (`scripts/init-app.ts`). Anything that names an app directory or the product's display name belongs
   in the surface that script covers — and **never hard-code the product name in a test**; specs read
   the app's own catalog via `apps/*/tests/catalog.ts`. See `docs/adopting.md`.
