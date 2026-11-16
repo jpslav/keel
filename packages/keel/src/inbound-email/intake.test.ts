@@ -133,6 +133,16 @@ describe('intakeInboundEmail', () => {
             trx.selectFrom('dockets').select('id').where('org_id', '=', orgId).execute(),
         )
         expect(after.length).toBe(before.length) // nothing created
+
+        // A stranger's email proved nobody's identity: the system actor's row records no credential.
+        const received = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select(['actor_user_id', 'credential_kind', 'credential_id'])
+                .where('subject_id', '=', outcome.id!)
+                .executeTakeFirstOrThrow(),
+        )
+        expect(received).toEqual({ actor_user_id: 'system:inbound-email', credential_kind: null, credential_id: null })
     })
 
     test('a restricted member is refused: email authoring grants no more than the UI', async () => {

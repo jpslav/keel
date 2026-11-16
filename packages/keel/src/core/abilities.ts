@@ -82,16 +82,23 @@ export type PersonCredentialKind = 'session' | 'inbound-email' | AppPersonCreden
  */
 export type MachineCredentialKind = 'service-key' | AppMachineCredentialKind
 
-/** True when two kind unions share no member. Used below to keep person and machine kinds apart. */
-type Disjoint<A, B> = [Extract<A, B>] extends [never] ? true : false
+/**
+ * True when two kind unions share no member, checked in BOTH directions: `Extract<A, B>` alone misses a
+ * wide member, since `string` is not assignable to `'service-key'` while `'service-key'` is to `string`.
+ */
+type Disjoint<A, B> = [Extract<A, B> | Extract<B, A>] extends [never] ? true : false
+/** True when a kind union is a set of named kinds, not `string` (which would admit every kind). */
+type Named<K> = string extends K ? false : true
 
 /**
  * The two kind unions must not overlap: a kind is a person's or a machine's, never both, or an audit
- * row's `credential_kind` could not say which. An app that registers one kind on both sides fails the
- * typecheck here.
+ * row's `credential_kind` could not say which. And each must be NAMED kinds: an app that registers
+ * `string` would let a person claim `service-key`. Either mistake fails the typecheck here.
  */
 const credentialKindsAreDisjoint: Disjoint<PersonCredentialKind, MachineCredentialKind> = true
+const credentialKindsAreNamed: Named<PersonCredentialKind> & Named<MachineCredentialKind> = true
 void credentialKindsAreDisjoint
+void credentialKindsAreNamed
 
 /**
  * HOW an actor proved who it is. `id` names WHICH credential (a token's row id, a service key's id, the

@@ -32,6 +32,17 @@ interface AppPublicMetadata {
     tenantSlug?: string
 }
 
+/**
+ * Restricted by the user's own `restricted` flag OR by holding the `restricted` role in the org. Both
+ * readings exist in this template: the fake world keeps them in step, and `createInvite` here writes
+ * only the role. So reading the flag alone left a `restricted` invitee unrestricted in real mode. One
+ * function, used for the caller (getCurrentUser) and for anyone else (getMember), so the two cannot
+ * disagree.
+ */
+function restrictedFrom(metadata: AppPublicMetadata, role: Role): boolean {
+    return metadata.restricted === true || role === 'restricted'
+}
+
 function roleFrom(metadata: unknown, fallback: Role): Role {
     const role = (metadata as AppPublicMetadata)?.role
     return role && isRole(role) ? role : fallback
@@ -61,16 +72,17 @@ export const realAuth: AuthPort = {
             memberships.data.find((m) => (m.organization.slug ?? m.organization.id) === currentOrgSlug) ??
             memberships.data[0]
 
+        const role = roleFrom(active?.publicMetadata, 'guest')
         return {
             id: userId,
             name: user.fullName ?? user.primaryEmailAddress?.emailAddress ?? userId,
             email: user.primaryEmailAddress?.emailAddress ?? '',
-            role: roleFrom(active?.publicMetadata, 'guest'),
+            role,
             locale,
             // Ambient site claim — never the active org's business.
             tenantSlug: metadata.tenantSlug ?? '',
             orgSlug: active ? (active.organization.slug ?? active.organization.id) : '',
-            restricted: metadata.restricted ?? false,
+            restricted: restrictedFrom(metadata, role),
         }
     },
 
@@ -118,20 +130,23 @@ export const realAuth: AuthPort = {
 
     async getMember(orgSlug: string, userId: string): Promise<MemberStanding | null> {
         // The two facts getCurrentUser reads, for a user who is not the caller: the role from the org
-        // membership, `restricted` from the user's own metadata. The membership is looked up on the ORG,
-        // filtered to this user, so a person in many orgs is never cut off by a page size. No
-        // membership, no standing.
+        // membership, and `restricted` from the user's metadata and that role (restrictedFrom). The
+        // membership is looked up on the ORG, filtered to this user, so a person in many orgs is never cut
+        // off by a page size. No membership, no standing.
         const client = await clerkClient()
         const organizationId = await organizationIdForSlug(orgSlug)
         const memberships = await client.organizations.getOrganizationMembershipList({
             organizationId,
             userId: [userId],
         })
-        const membership = memberships.data[0]
+        // Matched on the user, not taken as the first row: if the filter were ever ignored, the first row
+        // would be someone else's membership, and their role.
+        const membership = memberships.data.find((m) => m.publicUserData?.userId === userId)
         if (!membership) return null
         const user = await client.users.getUser(userId)
         const metadata = (user.publicMetadata ?? {}) as AppPublicMetadata
-        return { role: roleFrom(membership.publicMetadata, 'guest'), restricted: metadata.restricted ?? false }
+        const role = roleFrom(membership.publicMetadata, 'guest')
+        return { role, restricted: restrictedFrom(metadata, role) }
     },
 
     async listMembers(orgSlug: string): Promise<Membership[]> {

@@ -3,7 +3,7 @@ import { Kysely, sql } from 'kysely'
 import { Migrator } from 'kysely/migration'
 import { describe, expect, test } from 'vitest'
 import { openPglite, PGliteDialect } from '../adapters/fake/pglite-dialect'
-import { migrateToLatest } from './migrate'
+import { migrateToLatest, outOfSequence } from './migrate'
 import { frameworkMigrations, migrations } from './migrations/index'
 import type { DB } from './schema'
 
@@ -16,21 +16,43 @@ import type { DB } from './schema'
 
 const prefix = (name: string): number => Number(/^(\d{4})_/.exec(name)?.[1] ?? Number.NaN)
 
-/** The parts of a schema a migration can change and that must not depend on the order it ran in. */
+/**
+ * The parts of a schema a migration can change and that must not depend on the order it ran in: above
+ * all, the tenancy machinery (RLS enabled and FORCED per table, its policies and their roles, app_user's
+ * grants down to the column), then shape (columns, constraints, indexes) and code (triggers, functions).
+ */
 async function schemaOf(db: Kysely<DB>) {
-    const columns = await sql`
-        SELECT table_name, column_name, data_type, is_nullable, column_default
-        FROM information_schema.columns WHERE table_schema = 'public'
-        ORDER BY table_name, column_name`.execute(db)
-    const policies = await sql`
-        SELECT tablename, policyname, cmd, qual, with_check FROM pg_policies
-        WHERE schemaname = 'public' ORDER BY tablename, policyname`.execute(db)
-    const grants = await sql`
-        SELECT table_name, privilege_type FROM information_schema.role_table_grants
-        WHERE grantee = 'app_user' ORDER BY table_name, privilege_type`.execute(db)
-    const indexes = await sql`
-        SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY indexname`.execute(db)
-    return { columns: columns.rows, policies: policies.rows, grants: grants.rows, indexes: indexes.rows }
+    const rows = async (query: ReturnType<typeof sql>) => (await query.execute(db)).rows
+    return {
+        rls: await rows(sql`
+            SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`),
+        policies: await rows(sql`
+            SELECT tablename, policyname, permissive, roles, cmd, qual, with_check FROM pg_policies
+            WHERE schemaname = 'public' ORDER BY tablename, policyname`),
+        tableGrants: await rows(sql`
+            SELECT table_name, privilege_type FROM information_schema.role_table_grants
+            WHERE grantee = 'app_user' ORDER BY table_name, privilege_type`),
+        columnGrants: await rows(sql`
+            SELECT table_name, column_name, privilege_type FROM information_schema.column_privileges
+            WHERE grantee = 'app_user' ORDER BY table_name, column_name, privilege_type`),
+        columns: await rows(sql`
+            SELECT table_name, column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns WHERE table_schema = 'public'
+            ORDER BY table_name, column_name`),
+        constraints: await rows(sql`
+            SELECT conrelid::regclass::text AS table_name, conname, pg_get_constraintdef(oid) AS definition
+            FROM pg_constraint WHERE connamespace = 'public'::regnamespace ORDER BY 1, 2`),
+        indexes: await rows(sql`
+            SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY indexname`),
+        triggers: await rows(sql`
+            SELECT event_object_table, trigger_name, event_manipulation, action_timing, action_statement
+            FROM information_schema.triggers WHERE trigger_schema = 'public' ORDER BY 1, 2, 3`),
+        functions: await rows(sql`
+            SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' ORDER BY 1, 2`),
+    }
 }
 
 describe('migration numbering', () => {
@@ -41,6 +63,18 @@ describe('migration numbering', () => {
         for (const name of Object.keys(frameworkMigrations)) expect(prefix(name), name).toBeLessThan(1000)
         // A collision would let the app's key silently replace the framework's in the merged map.
         expect(app.filter((name) => Object.hasOwn(frameworkMigrations, name))).toEqual([])
+    })
+})
+
+describe('outOfSequence', () => {
+    test('lets a framework migration run after app migrations, and nothing else out of order', () => {
+        const executed = ['0001_a', '0013_b', '1001_c', '1006_f']
+        expect(outOfSequence(executed, ['0014_new'])).toEqual([])
+        expect(outOfSequence(executed, ['1007_g'])).toEqual([])
+        // An app migration that sorts before an app migration already applied (two branches' 1005/1006).
+        expect(outOfSequence(executed, ['1005_e', '1007_g'])).toEqual(['1005_e'])
+        // A framework migration that sorts before one already applied: a renumbered or late framework one.
+        expect(outOfSequence(executed, ['0012_late'])).toEqual(['0012_late'])
     })
 })
 
@@ -71,6 +105,25 @@ describe('migrateToLatest', () => {
 
             await upgraded.destroy()
             await fresh.destroy()
+        },
+    )
+
+    test(
+        'refuses, before running anything, a migration that would run after a later one of its own sequence',
+        { timeout: 30_000 },
+        async () => {
+            // The framework sequence always has several migrations, so this runs under every seam (the
+            // starter registers a single app migration). outOfSequence's unit case covers the app sequence.
+            const first = Object.keys(frameworkMigrations).sort()[0]!
+            const db = new Kysely<DB>({ dialect: new PGliteDialect(openPglite()) })
+            await migrateToLatest(db)
+            // The database forgets it ran the FIRST framework migration, as if it had been renumbered below
+            // migrations already applied.
+            await sql`DELETE FROM kysely_migration WHERE name = ${first}`.execute(db)
+            await expect(migrateToLatest(db)).rejects.toThrow(
+                new RegExp(`out of order within their sequence: ${first}`),
+            )
+            await db.destroy()
         },
     )
 })

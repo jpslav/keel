@@ -61,9 +61,10 @@ async function auditReceived(db: DbPort, org: ResolvedInboundOrg, emailId: strin
         tenantId: org.tenantId,
         orgId: org.orgId,
         actorUserId,
-        // The email itself is the credential, whoever the row names: the matched sender, or the system
-        // actor when nobody matched.
-        credential: { kind: 'inbound-email', id: emailId },
+        // The email is a credential only for the member it was matched to. A row the SYSTEM actor writes
+        // (no handler, an unmatched or refused sender, a handler that threw) proved nobody's identity, and
+        // records none, like keel's other `system:*` writers.
+        credential: actorUserId === SYSTEM_ACTOR ? null : { kind: 'inbound-email', id: emailId },
         action: 'inbound-email.received',
         subjectType: 'InboundEmail',
         subjectId: emailId,
