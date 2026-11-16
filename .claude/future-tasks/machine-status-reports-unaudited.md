@@ -14,7 +14,8 @@ write to `audit_events`, so the trail never shows which machine moved a job.
 `job.status-reported`, in `FrameworkAuditAction`, `packages/keel/src/db/audit.ts`) and the
 `recordAuditEvent` call after the write. It also needs a static-demo twin: the Actors tab's in-memory
 driver advances jobs too, and the doctrine is feature parity. The machine attribution itself is already
-solved: `principalIdOf(actor)` gives `service-key:<org slug>` for `actor_user_id`.
+solved: `auditActorOf(actor)` gives `actor_user_id` = `service-key:<org slug>` and the credential (which
+key) for the 0014 columns.
 
 **Decide first:** whether the timeline, which already records every hop with its message, is the record
 for job status. If it is, the fix is to amend the ADR sentence, not to add a write. The webhook completion

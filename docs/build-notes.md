@@ -1313,7 +1313,7 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
   error contract onto callers that each want a different one.
 
-## Machine actors in `authorize()` (2026-11-16, `feat/authorize-non-session-actors`)
+## Actors that are not sessions, in `authorize()` (2026-11-16, `feat/authorize-non-session-actors`)
 
 - **An exemption justified "by construction" names a check that isn't there.** The scan's `service/`
   entry was honest about its gate: `mustMatch` proved the route used `withServiceCaller`. The reason,
@@ -1328,3 +1328,12 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
 - **Make "decide this for every member" a type error.** `frameworkMachineRules` is a
   `Record<BaseSubjectType, …>`, so adding a framework subject without a machine decision fails
   `tsc` (seen: TS2741). The person rules' `switch` has no such check.
+- **A rule a caller must not break belongs in a signature or an evaluator, not in a docstring.** "Never
+  cache a role in a token" holds because `abilityActorFromCredential` has no role parameter: it reads
+  the standing itself, on every call. "Only a session wields `manageAll`" holds because
+  `defineAbilitiesFor` ignores the field for any other credential. Both started as advice to whoever
+  builds an actor, and an adopter had already built one with a placeholder role.
+- **Ask who the caller IS before giving it a shape.** The first cut of this work treated every
+  non-session caller as a machine. The adopter's token belongs to a person and acts as that person, so
+  it needed a person actor with a credential, not a principal of its own. The difference decides
+  which rules judge it.

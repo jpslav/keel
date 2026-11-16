@@ -1602,48 +1602,69 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
 - **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
 
-## `authorize()` judges machine actors as well as people (2026-11-16, `feat/authorize-non-session-actors`)
+## `authorize()` judges actors that are not sessions (2026-11-16, `feat/authorize-non-session-actors`)
 
-The design is in the ADR-0012 addendum of the same date. These are the calls it made that no plan
-anticipated.
+The design is in the ADR-0012 addendum of the same date. The port method is in ADR-0003's. These are
+the calls the work made that no plan anticipated.
 
-- **The requester's evidence.** The sharing site's console (`safeinsights/pages`, read-only) names three
-  kinds of caller in `apps/console/src/domain/pages/callers.ts`: a session, a CLI's API token and CI's
-  GitHub OIDC token. Its `sessionUser(ctx)` throws `AuthRequiredError` for anything but a session, so
-  token and CI callers cannot reach `authorize()` at all. Its rules (`Page`, `Publisher`) read
-  `actor.userId`, `actor.restricted`, and a console role that the route resolves and puts on the
-  subject. It needs no keel role for a machine. It does need two things keel lacked: a way into
-  `authorize()` without an `AuthUser`, and a machine whose ownership comparisons cannot collide with a
-  person's id.
-- **Machines get a separate rule function, not a role.** The alternative was to give a machine a role
-  and the `restricted` flag and pass it to `appAbilityRules`. That fails open: every app's person rules
-  grant authoring to any non-restricted member, so a machine would get a member's powers until someone
-  remembered to exclude it. `appMachineAbilityRules` with a `return false` default fails closed. It is
-  also an additive change for adopters (one new export), where the alternative would have changed the
-  signature of every adopter's rule function.
-- **Per-credential scopes were not built.** The other way to bound a machine is a grant stored with its
-  credential (OAuth-style scopes, intersected with the rules). It would split "who may do what" across the
-  rule file and a database column, and `service_keys` has no such column. The actor can take an optional
-  cap later without changing anything here. This was sent to JP as the one open fork; the rule-file
-  option is the conservative one taken meanwhile.
-- **The framework's one machine grant names an issuer.** Job `read`/`update` in the caller's own org goes
-  to keel's own service keys only (`SERVICE_KEY_ISSUER`), not to every machine. Granting it to all
-  machines would have handed an adopter's CI identity the power to move its org's jobs, which nothing asked
-  for. `machineActor` refuses that issuer, and `system`, so an app's machine cannot pass for either.
-- **An overload, not a migration.** `authorize(actor, action, subject)` was added beside the four-argument
-  session form rather than replacing it. Changing the 19 existing calls (16 in the showcase, one in the
-  starter, two fixture routes) and their tests would have been mechanical here, but every adopter's routes
-  would have changed too (the console has nine calls), and the four-argument form is still the right
-  shorthand for a session. The scan's `authorize(` pattern matches
-  both forms. A separately named function would have needed a second pattern.
-- **`kind` is optional on the person actor.** Requiring `kind: 'person'` would have broken every
-  `AbilityActor` literal: the inbound-email handlers, the preset checks, both static demos and every
-  adopter's tests. Optional on the person and required on the machine is enough for TypeScript to narrow
-  `actor.kind === 'machine'`.
+- **The requester's evidence.** The sharing site's console (`safeinsights/pages`) names its callers in
+  `apps/console/src/domain/pages/callers.ts`: a session, a CLI's API token, and later CI's GitHub OIDC
+  token. On its `main`, read before the requester's shape arrived, `sessionUser(ctx)` throws
+  `AuthRequiredError` for anything but a session. The worker on its token branch then reported the
+  design of record. The token is PERSONAL: it acts as the publisher who approved it, its console role is
+  resolved afresh on every call, removing the publisher stops it at once, and it never wields
+  `manageAll`. Its stand-in actor is an `AuthUser` with placeholder role and locale. Its audit rows read
+  exactly like browser ones. CI is a principal of its own.
+- **The machine design was built first, and the person kind came after.** The first cut gave keel
+  machine actors only, for keel's own service keys and for CI. The requester's answer showed that the
+  caller it has NOW is a person holding a token, which a roleless machine cannot express. Both kinds
+  shipped in one PR. They share the `Actor` union, the `Credential` vocabulary, the `authorize`
+  overload, the audit columns and one addendum, so a split would have landed the overload with half its
+  union and rewritten the same functions in the second PR. The commits are separate: machine actors,
+  then the person kind.
+- **The person's standing is read by keel, through the auth port, on every call.**
+  `abilityActorFromCredential` takes no role at all, so "never cache a role in the token" is a property
+  of the function's signature rather than a convention. `listMembers` could not supply it, because
+  `restricted` is not on `Membership`, so the port gained `getMember` (ADR-0003 addendum). Inbound email
+  had guessed `restricted` from the role; it now reads the same flag a session does.
+- **`manageAll` is a session's alone, enforced in `defineAbilitiesFor`.** It is not left to whoever
+  builds the actor. A token's owner acting in the operator org is an ordinary member there.
+- **Credential kinds are composed, not closed.** `PersonCredentialKind` and `MachineCredentialKind`
+  each add the app's kinds from the abilities seam, as subjects and audit verbs already do. The
+  console's one-time `cli-login` kind is app vocabulary; keel never edits a base union for it.
+- **Narrowing by kind, not per-credential scopes.** The console's narrowing ("publisher administration
+  takes a browser session") is by credential KIND, and the app's rules can see the kind. That makes
+  per-credential scopes (option b of the fork sent to JP) unnecessary for now. The place where a
+  per-credential cap would intersect `can()` is marked in `defineAbilitiesFor`, and nothing is built
+  there.
+- **Machines get a separate rule function, not a role.** Giving a machine a role and passing it to
+  `appAbilityRules` fails open: every app's person rules allow authoring to any member who is not
+  restricted. `appMachineAbilityRules` with a `return false` default fails closed. It is also one new
+  export for an adopter, not a changed signature.
+- **The framework's one machine grant names a credential kind.** Job `read`/`update` in the caller's
+  own org goes to `service-key` only. `machineActor` refuses that kind, keel's person kinds and
+  `system`, so an app's machine cannot pass for any of them.
+- **The audit columns are nullable, and NULL means "not recorded".** Rows before 0014, `system:*`
+  writers, and session routes that don't yet pass a credential all record NULL. A NOT NULL default
+  would have had to claim a kind for rows nobody can vouch for. The session routes are left as they were.
+  Making them record `session` would touch every audited route in the showcase, in a PR about callers
+  that are not sessions.
+- **An overload, not a migration.** `authorize(actor, action, subject)` sits beside the four-argument
+  session form. Changing the 19 existing calls (16 in the showcase, one in the starter, two fixture
+  routes) and their tests would have been mechanical here, but every adopter's routes would have
+  changed too (the console has nine calls), and the four-argument form is still the right shorthand
+  for a session.
+- **`kind` and `credential` are optional on the person actor.** Requiring them would have broken every
+  `AbilityActor` literal: the preset checks, both static demos and every adopter's tests. A literal with
+  no credential is a session, which is what all of them are.
 - **The seam's machine rules are bound at call time.** `defineAbilitiesFor` assigns
-  `appMachineAbilityRules` to its `MachineAbilityRules` type inside the function, not at module load. The
-  assignment is what lets the empty registration take no parameters, and doing it at call time means a seam
-  module that later value-imports `keel/core/abilities` cannot hit the import in its temporal dead zone.
-- **The `service/` exemption is retired rather than kept beside the new path.** Once a service route can
-  authorize, an exemption that says it need not is a second way through the gate. One showcase route
-  needed the change. The console has no `api/service/` routes, so it costs that adopter nothing.
+  `appMachineAbilityRules` to `MachineAbilityRules` inside the function, not at module load. That lets
+  the empty registration take no parameters, and a seam module that later value-imports
+  `keel/core/abilities` cannot hit the binding before it is initialized.
+- **The `service/` exemption is retired, and the scan says what to do instead.** Once a service route
+  can authorize, an exemption that says it need not is a second way through the gate. The scan's
+  failure message names the three non-session constructors, so an adopter whose old service route goes
+  red learns the fix from the failure itself.
+- **Token storage stays in the app.** keel owns what `authorize()` needs, and the token itself is the
+  app's for now: `.claude/future-tasks/personal-api-tokens.md` records the console's shape for when keel
+  takes it.

@@ -103,3 +103,24 @@ Folding it in would have made the port mean "anything that authenticates", which
   `resolutionPath` points at the Clerk enrollment flow, with no change to the evaluator or the layout
   hook. Clickwrap agreements are the worked example that shipped; email verification, onboarding,
   suspension and billing entitlements ride the same seam.
+
+## Addendum (2026-11-16): the port gains `getMember`
+
+The port grows by one method: `getMember(orgSlug, userId)`. It returns `MemberStanding`
+(`{ role, restricted }`), or `null` when the user is not an active member of that org. Its call site is
+`abilityActorFromCredential` (`packages/keel/src/authz/authorize.ts`). That function builds the person
+behind a credential that is not a session: an inbound email from a member's address, or a personal API
+token an adopter issues. It calls `getMember` on every request, so the person is judged by their
+current role, and a person removed from the org fails on the next call (ADR-0012 addendum of this
+date).
+
+`listMembers` could not do this job. `restricted` is a person-level flag: the fake keeps it on the
+person, and the real adapter reads it from the user's metadata, while `Membership` has only a role. A
+non-session actor built from `listMembers` would therefore have had to guess `restricted`. Inbound email
+used to guess it from the role. The real adapter answers `getMember` with the same two reads
+`getCurrentUser` makes for the caller: the membership list for the role, then the user's metadata. It
+is unverified against a real Clerk instance, like the rest of that adapter (`auth-dev` in
+`docs/cutover-checklist.md`).
+
+"Machine callers are a sibling seam, not this port" still holds. `ServiceIdentity` and `AuthUser`
+remain different types. The two kinds of caller meet in `authorize()`'s actor, not in this port.
