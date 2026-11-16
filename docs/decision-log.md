@@ -1631,9 +1631,10 @@ anticipated.
   machines would have handed an adopter's CI identity the power to move its org's jobs, which nothing asked
   for. `machineActor` refuses that issuer, and `system`, so an app's machine cannot pass for either.
 - **An overload, not a migration.** `authorize(actor, action, subject)` was added beside the four-argument
-  session form rather than replacing it. Changing the 25 existing call sites would have been mechanical
-  here, but every adopter's routes would have changed too (the console has a dozen calls), and the
-  four-argument form is still the right shorthand for a session. The scan's `authorize(` pattern matches
+  session form rather than replacing it. Changing the 19 existing calls (16 in the showcase, one in the
+  starter, two fixture routes) and their tests would have been mechanical here, but every adopter's routes
+  would have changed too (the console has nine calls), and the four-argument form is still the right
+  shorthand for a session. The scan's `authorize(` pattern matches
   both forms. A separately named function would have needed a second pattern.
 - **`kind` is optional on the person actor.** Requiring `kind: 'person'` would have broken every
   `AbilityActor` literal: the inbound-email handlers, the preset checks, both static demos and every
