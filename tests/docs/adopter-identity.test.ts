@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -8,27 +8,41 @@ import { makeTestTmpDir } from '../support/tmp-dir'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 /**
- * ENFORCED, not prose. An ejected adopter repo must not name the TEMPLATE maintainer as its own
- * security contact, code owner, or conduct contact — see `scripts/init-app.ts`'s
- * `rewriteAdopterIdentity`. That function used to not exist at all: four files were byte-identical to
- * the template's after a real `pnpm init-app acme --eject-showcase --yes`, and `init-app`'s own
- * "WHAT THIS DID NOT TOUCH" list — precisely where a careful adopter looks — never mentioned any of
- * them. A norm that is not a test rots; this is the test.
+ * ENFORCED, not prose. An adopted repo must not name the TEMPLATE maintainer as its own security
+ * contact, code owner, or conduct contact — see `scripts/init-app.ts`'s `rewriteAdopterIdentity`. That
+ * function used to not exist at all: four files were byte-identical to the template's after a real
+ * `pnpm init-app acme --eject-showcase --yes`, and `init-app`'s own "WHAT THIS DID NOT TOUCH" list —
+ * precisely where a careful adopter looks — never mentioned any of them. A norm that is not a test
+ * rots; this is the test.
  *
- * This runs the SAME command the `adoption-probe` CI job runs (`.github/workflows/checks.yml`),
- * against a throwaway copy of the tree, and inspects the result — because `init-app.ts` resolves its
- * own root from `import.meta.url`, so "run it and check the output" is the only way to test it; the
- * module cannot be imported directly (`main()` runs unconditionally on import and would exit the test
- * process).
+ * THIS FILE SHIPS TO EVERY ADOPTER and comes back with every upstream merge (ADR-0013), so it has to be
+ * right in three different trees, and it works out which one it is in before it asserts anything:
  *
- * The copy walks the WORKING TREE, not `git ls-files`. That distinction is load-bearing: this test
- * itself runs a second time inside the adoption-probe CI job (that job's `pnpm verify` step runs the
- * whole suite, including this file, against the tree `init-app` just ejected) — and at that point the
- * eject is uncommitted, so `git ls-files` still lists the PRE-eject paths (`apps/showcase/...`) while
- * the working tree already has `apps/acme/...`. Copying by `git ls-files` there fails with ENOENT the
- * moment it tries to copy a path the eject already deleted — caught by running this file inside a
- * throwaway eject of THIS repo's own working copy, the same failure mode the adoption-probe job hits
- * for real. Walking the real tree has no such blind spot.
+ *   TEMPLATE  all four identity files still name the maintainer, and `scripts/init-app.ts` is there.
+ *             The rewrite has work to do, so the suite below runs the SAME command the `adoption-probe`
+ *             CI job runs (`.github/workflows/checks.yml`) against throwaway copies of the tree and
+ *             inspects what comes out. `init-app.ts` resolves its own root from `import.meta.url`, so
+ *             "run it and check the output" is the only way to test it: the module cannot be imported
+ *             (`main()` runs unconditionally on import and would exit the test process).
+ *   ADOPTED   none of the four names the maintainer: `init-app` already ran. There is no rewrite to
+ *             test — it replaces the template's literals, and they are gone — so the only claim left
+ *             is the one that matters to an adopter, checked directly on their real files: nothing in
+ *             them routes people to someone else's inbox. That also catches the way it comes back in
+ *             a fork: an upstream merge that adds a line owned by `@jpslav` to your CODEOWNERS.
+ *   MIXED     some do, some do not. In an adopted repo a file was missed; in the template one lost the
+ *             identity the rewrite is tested against. Either way: red, naming the files.
+ *
+ * WHY IT IS NOT "SKIP WHEN THE SHOWCASE IS GONE". This file used to run `init-app` on a copy of
+ * WHATEVER tree it was in, with the slug `acme` hard-coded, and assert what the rewrite produced. In an
+ * adopted tree the rewrite finds nothing to replace, so those assertions read the adopter's own files:
+ * with an app called `console`, three tests went red on `…/acme/security/advisories/new`, and once the
+ * owner placeholder was filled in a fourth did too. It stayed green in the `adoption-probe` job for one
+ * reason: that job also adopts as `acme`. A coincidence, not a design. Skipping on "no `apps/showcase`"
+ * would have fixed the adopter and switched the gate off in the probe's ejected tree, which has none —
+ * where the ADOPTED check above now runs against the tree the real command produced.
+ *
+ * The copies walk the WORKING TREE, not `git ls-files`: a maintainer is mid-edit, and the index lists
+ * paths an uncommitted change has already deleted (ENOENT on the copy).
  */
 
 /** Directories a copy must skip: dependencies, VCS metadata, and build/test output — never source. */
@@ -59,7 +73,8 @@ function copyTree(from: string, to: string): void {
 }
 
 const MAINTAINER_HANDLE = '@jpslav'
-const MAINTAINER_ADVISORY_URL = 'github.com/jpslav/keel/security/advisories/new'
+/** The template's own repo, which every link in the contact files pointed at before the rewrite. */
+const MAINTAINER_REPO = 'github.com/jpslav/keel'
 
 /**
  * ANY address, rather than the maintainer's own literal.
@@ -75,11 +90,55 @@ const MAINTAINER_ADVISORY_URL = 'github.com/jpslav/keel/security/advisories/new'
  * strictly stronger — these four files route contact through GitHub on purpose
  * (`CODE_OF_CONDUCT.md`: "This project has no separate conduct address"), so an address appearing in
  * one is wrong whoever it belongs to.
+ *
+ * Template-only: it asserts the TEMPLATE's policy about the output of `init-app`. An adopter's own
+ * security policy may legitimately carry an address.
  */
 const ANY_EMAIL_ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
 
-/** The four files the bug was about — none of them may name the maintainer after an eject. */
+/** The four files the bug was about — none of them may name the maintainer after an adoption. */
 const IDENTITY_FILES = ['CODEOWNERS', 'SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
+
+const INIT_APP = path.join(ROOT, 'scripts/init-app.ts')
+
+/** A file that does not exist cannot name anyone — an adopter may delete one. */
+function namesMaintainer(relative: string): boolean {
+    const file = path.join(ROOT, relative)
+    if (!existsSync(file)) return false
+    const text = readFileSync(file, 'utf8')
+    return text.includes(MAINTAINER_HANDLE) || text.includes(MAINTAINER_REPO)
+}
+
+const carriers = IDENTITY_FILES.filter(namesMaintainer)
+/** See "TEMPLATE" above. Decided once, at load, so the suites below can be switched on and off by it. */
+const isTemplate = carriers.length === IDENTITY_FILES.length && existsSync(INIT_APP)
+
+describe('the maintainer identity lives in the template only', () => {
+    it('no identity file names the maintainer unless this is the pristine template', () => {
+        const others = IDENTITY_FILES.filter((file) => !carriers.includes(file))
+        const contrast = others.length > 0 ? ` (${others.join(', ')} ${others.length === 1 ? 'does' : 'do'} not)` : ''
+        expect(
+            isTemplate || carriers.length === 0,
+            `These files still name the template maintainer (${MAINTAINER_HANDLE}, ${MAINTAINER_REPO}): ` +
+                `${carriers.join(', ')}${contrast}. In an adopted repo that file still routes people to the ` +
+                `template's maintainer: replace it (\`pnpm init-app\` writes the placeholders). In the template ` +
+                `itself it means an identity file lost what the rewrite is tested against: restore it, or change ` +
+                `the constants in this file and \`rewriteAdopterIdentity\` together.`,
+        ).toBe(true)
+    })
+
+    // The sentinel that keeps the template suite below from going quietly vacuous. It only runs when
+    // the identity strings are present in the files, so if someone moves the maintainer's identity and
+    // updates the files and one of {this file, init-app} but not the other, every file reads as
+    // "adopted", the suite switches itself off, and nothing is red. Both halves must name the same
+    // identity for as long as init-app is in the tree.
+    it("the identity this file looks for is the one init-app's rewrite replaces", () => {
+        if (!existsSync(INIT_APP)) return // an adopter who deleted the script has no rewrite to keep in step
+        const source = readFileSync(INIT_APP, 'utf8')
+        expect(source, 'init-app no longer names the maintainer handle it rewrites').toContain(`'${MAINTAINER_HANDLE}'`)
+        expect(source, 'init-app no longer names the repo whose links it rewrites').toContain(MAINTAINER_REPO)
+    })
+})
 
 interface Probe {
     /** The throwaway copy `init-app` ran in. */
@@ -119,149 +178,153 @@ let ejected: Probe
 /** Rename-only, with the repository named: the other path through the identity rewrite. */
 let named: Probe
 
-beforeAll(() => {
-    ejected = runInitApp('keel-adopter-identity-', [SLUG, '--eject-showcase', '--yes'])
-    named = runInitApp('keel-adopter-identity-named-', [SLUG, '--repo', REPO, '--yes'])
-}, 120_000)
-
 function readProbe(relative: string, probe: Probe = ejected): string {
     return readFileSync(path.join(probe.dir, relative), 'utf8')
 }
 
-describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inherit the maintainer identity', () => {
-    it.each(IDENTITY_FILES)('%s no longer names the maintainer', (relative) => {
-        const text = readProbe(relative)
-        expect(text).not.toContain(MAINTAINER_HANDLE)
-        expect(text).not.toMatch(ANY_EMAIL_ADDRESS)
-        expect(text).not.toContain(MAINTAINER_ADVISORY_URL)
+describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer identity', () => {
+    beforeAll(() => {
+        ejected = runInitApp('keel-adopter-identity-', [SLUG, '--eject-showcase', '--yes'])
+        named = runInitApp('keel-adopter-identity-named-', [SLUG, '--repo', REPO, '--yes'])
+    }, 120_000)
+
+    describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inherit the maintainer identity', () => {
+        it.each(IDENTITY_FILES)('%s no longer names the maintainer', (relative) => {
+            const text = readProbe(relative)
+            expect(text).not.toContain(MAINTAINER_HANDLE)
+            expect(text).not.toMatch(ANY_EMAIL_ADDRESS)
+            expect(text).not.toContain(MAINTAINER_REPO)
+        })
+
+        it('CODEOWNERS keeps the curated path list — only the owner was wrong', () => {
+            const text = readProbe('CODEOWNERS')
+            for (const owned of [
+                '/packages/keel/src/db/',
+                '/packages/keel/src/authz/',
+                '/packages/keel/src/adapters/',
+                '/packages/keel/test-fixture/',
+                '/scripts/init-app.ts',
+                '/tests/docs/',
+                '/.github/workflows/',
+                '/docs/adr/',
+            ]) {
+                expect(text).toContain(owned)
+            }
+            expect(text).toContain(`@${OWNER}`)
+        })
+
+        // With no --repo, the repository is a placeholder of its own — never the slug, which is a guess.
+        const UNNAMED = `github.com/${OWNER}/${REPO_PLACEHOLDER}`
+
+        it("SECURITY.md points the advisory link at the adopter's own repo, still to be named", () => {
+            expect(readProbe('SECURITY.md')).toContain(`${UNNAMED}/security/advisories/new`)
+        })
+
+        it('the issue-template config repoints both the security and discussions links', () => {
+            const text = readProbe('.github/ISSUE_TEMPLATE/config.yml')
+            expect(text).toContain(`${UNNAMED}/security/advisories/new`)
+            expect(text).toContain(`${UNNAMED}/discussions`)
+        })
+
+        it("the code of conduct enforcement contact is the adopter's own private channel", () => {
+            expect(readProbe('CODE_OF_CONDUCT.md')).toContain(`${UNNAMED}/security/advisories/new`)
+        })
+
+        // Two places correctly KEEP the maintainer's name, and must stay exempt:
+        it("LICENSE keeps the maintainer's name — MIT requires preserving the copyright notice verbatim", () => {
+            expect(readProbe('LICENSE')).toContain('JP Slavinsky')
+        })
+
+        it("docs/adr approver lines keep the maintainer's name — honest provenance for keel's own decisions", () => {
+            expect(readProbe('docs/adr/0012-framework-app-line-and-registration.md')).toContain(
+                'Approver: JP Slavinsky',
+            )
+        })
     })
 
-    it('CODEOWNERS keeps the curated path list — only the owner was wrong', () => {
-        const text = readProbe('CODEOWNERS')
-        for (const owned of [
-            '/packages/keel/src/db/',
-            '/packages/keel/src/authz/',
-            '/packages/keel/src/adapters/',
-            '/packages/keel/test-fixture/',
-            '/scripts/init-app.ts',
-            '/tests/docs/',
-            '/.github/workflows/',
-            '/docs/adr/',
-        ]) {
-            expect(text).toContain(owned)
-        }
-        expect(text).toContain(`@${OWNER}`)
+    /**
+     * `--repo` names the repository, and the links must say THAT — not the app slug. The slug and the repo
+     * are different here (`acme` in `pages`), so a link that still carries the slug fails by name.
+     */
+    describe('`pnpm init-app --repo <name>` writes the repository name into the contact links', () => {
+        const FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
+
+        it.each(FILES)('%s links github.com/<owner>/<repo>, never the app slug', (relative) => {
+            const text = readProbe(relative, named)
+            expect(text).toContain(`github.com/${OWNER}/${REPO}/security/advisories/new`)
+            expect(text).not.toContain(REPO_PLACEHOLDER)
+            expect(text, 'the slug is not the repository').not.toContain(`github.com/${OWNER}/${SLUG}`)
+        })
+
+        it('the issue-template discussions link names it too', () => {
+            expect(readProbe('.github/ISSUE_TEMPLATE/config.yml', named)).toContain(
+                `github.com/${OWNER}/${REPO}/discussions`,
+            )
+        })
+
+        it('the owner stays a placeholder, since it also fills CODEOWNERS where it may be a team', () => {
+            expect(readProbe('CODEOWNERS', named)).toContain(`@${OWNER}`)
+        })
+
+        it('the closing output asks for the repository name only when none was given', () => {
+            expect(ejected.output).toContain(REPO_PLACEHOLDER)
+            expect(ejected.output).toContain('The repository name')
+            expect(named.output).not.toContain(REPO_PLACEHOLDER)
+            expect(named.output).not.toContain('The repository name')
+        })
+
+        it.each([
+            ['owner/name', 'a/b', 'NAME only'],
+            ['a clone URL suffix', 'pages.git', '.git'],
+            ['a dot-dot', '..', 'not a valid'],
+            ['a space', 'my repo', 'not a valid'],
+        ])('rejects %s as a repository name', (_label, value, message) => {
+            // --dry-run: validation runs before anything is planned, and nothing may be written either way.
+            const result = spawnSync(
+                path.join(ROOT, 'node_modules/.bin/tsx'),
+                [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', value, '--dry-run'],
+                { cwd: named.dir, encoding: 'utf8' },
+            )
+            expect(result.status).toBe(1)
+            expect(result.stderr).toContain(message)
+        })
+
+        it("a re-run's --repo is reported as ignored instead of silently dropped", () => {
+            const result = spawnSync(
+                path.join(ROOT, 'node_modules/.bin/tsx'),
+                [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', 'elsewhere', '--dry-run'],
+                { cwd: named.dir, encoding: 'utf8' },
+            )
+            expect(result.status).toBe(0)
+            expect(result.stdout).toContain('--repo elsewhere ignored')
+        })
     })
 
-    // With no --repo, the repository is a placeholder of its own — never the slug, which is a guess.
-    const UNNAMED = `github.com/${OWNER}/${REPO_PLACEHOLDER}`
+    /**
+     * The other thing a rename leaves behind is CONTENT: the starter's seed world, welcome copy, Items
+     * slice and static-demo wiring are all still on screen afterwards, and no gate can call leftover
+     * content an error. The closing output is the only place an adopter is told, so it is pinned — the
+     * seed, seam, catalog and demo paths it names must exist in the tree `init-app` just produced, or the
+     * list is sending people to files that are not there. (The Items files are named in prose, not by
+     * path, so they are not checked.)
+     */
+    describe('`pnpm init-app` tells the adopter which starter content is still on screen', () => {
+        it('prints the section', () => {
+            expect(ejected.output).toContain('STARTER CONTENT STILL WIRED INTO YOUR UI')
+        })
 
-    it("SECURITY.md points the advisory link at the adopter's own repo, still to be named", () => {
-        expect(readProbe('SECURITY.md')).toContain(`${UNNAMED}/security/advisories/new`)
-    })
-
-    it('the issue-template config repoints both the security and discussions links', () => {
-        const text = readProbe('.github/ISSUE_TEMPLATE/config.yml')
-        expect(text).toContain(`${UNNAMED}/security/advisories/new`)
-        expect(text).toContain(`${UNNAMED}/discussions`)
-    })
-
-    it("the code of conduct enforcement contact is the adopter's own private channel", () => {
-        expect(readProbe('CODE_OF_CONDUCT.md')).toContain(`${UNNAMED}/security/advisories/new`)
-    })
-
-    // Two places correctly KEEP the maintainer's name, and must stay exempt:
-    it("LICENSE keeps the maintainer's name — MIT requires preserving the copyright notice verbatim", () => {
-        expect(readProbe('LICENSE')).toContain('JP Slavinsky')
-    })
-
-    it("docs/adr approver lines keep the maintainer's name — honest provenance for keel's own decisions", () => {
-        expect(readProbe('docs/adr/0012-framework-app-line-and-registration.md')).toContain('Approver: JP Slavinsky')
-    })
-})
-
-/**
- * `--repo` names the repository, and the links must say THAT — not the app slug. The slug and the repo
- * are different here (`acme` in `pages`), so a link that still carries the slug fails by name.
- */
-describe('`pnpm init-app --repo <name>` writes the repository name into the contact links', () => {
-    const FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
-
-    it.each(FILES)('%s links github.com/<owner>/<repo>, never the app slug', (relative) => {
-        const text = readProbe(relative, named)
-        expect(text).toContain(`github.com/${OWNER}/${REPO}/security/advisories/new`)
-        expect(text).not.toContain(REPO_PLACEHOLDER)
-        expect(text, 'the slug is not the repository').not.toContain(`github.com/${OWNER}/${SLUG}`)
-    })
-
-    it('the issue-template discussions link names it too', () => {
-        expect(readProbe('.github/ISSUE_TEMPLATE/config.yml', named)).toContain(
-            `github.com/${OWNER}/${REPO}/discussions`,
-        )
-    })
-
-    it('the owner stays a placeholder, since it also fills CODEOWNERS where it may be a team', () => {
-        expect(readProbe('CODEOWNERS', named)).toContain(`@${OWNER}`)
-    })
-
-    it('the closing output asks for the repository name only when none was given', () => {
-        expect(ejected.output).toContain(REPO_PLACEHOLDER)
-        expect(ejected.output).toContain('The repository name')
-        expect(named.output).not.toContain(REPO_PLACEHOLDER)
-        expect(named.output).not.toContain('The repository name')
-    })
-
-    it.each([
-        ['owner/name', 'a/b', 'NAME only'],
-        ['a clone URL suffix', 'pages.git', '.git'],
-        ['a dot-dot', '..', 'not a valid'],
-        ['a space', 'my repo', 'not a valid'],
-    ])('rejects %s as a repository name', (_label, value, message) => {
-        // --dry-run: validation runs before anything is planned, and nothing may be written either way.
-        const result = spawnSync(
-            path.join(ROOT, 'node_modules/.bin/tsx'),
-            [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', value, '--dry-run'],
-            { cwd: named.dir, encoding: 'utf8' },
-        )
-        expect(result.status).toBe(1)
-        expect(result.stderr).toContain(message)
-    })
-
-    it("a re-run's --repo is reported as ignored instead of silently dropped", () => {
-        const result = spawnSync(
-            path.join(ROOT, 'node_modules/.bin/tsx'),
-            [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', 'elsewhere', '--dry-run'],
-            { cwd: named.dir, encoding: 'utf8' },
-        )
-        expect(result.status).toBe(0)
-        expect(result.stdout).toContain('--repo elsewhere ignored')
-    })
-})
-
-/**
- * The other thing a rename leaves behind is CONTENT: the starter's seed world, welcome copy, Items
- * slice and static-demo wiring are all still on screen afterwards, and no gate can call leftover
- * content an error. The closing output is the only place an adopter is told, so it is pinned — the
- * seed, seam, catalog and demo paths it names must exist in the tree `init-app` just produced, or the
- * list is sending people to files that are not there. (The Items files are named in prose, not by
- * path, so they are not checked.)
- */
-describe('`pnpm init-app` tells the adopter which starter content is still on screen', () => {
-    it('prints the section', () => {
-        expect(ejected.output).toContain('STARTER CONTENT STILL WIRED INTO YOUR UI')
-    })
-
-    it.each([
-        'apps/acme/src/seed/',
-        'apps/acme/src/app-config/abilities.ts',
-        'apps/acme/messages/{en,es}.json',
-        'apps/acme/src/demo-static/app.tsx',
-    ])('names %s, and it exists', (cited) => {
-        expect(ejected.output).toContain(cited)
-        for (const relative of cited.includes('{en,es}')
-            ? ['en', 'es'].map((locale) => cited.replace('{en,es}', locale))
-            : [cited]) {
-            expect(() => readProbe(relative.replace(/\/$/, '/index.ts'))).not.toThrow()
-        }
+        it.each([
+            `apps/${SLUG}/src/seed/`,
+            `apps/${SLUG}/src/app-config/abilities.ts`,
+            `apps/${SLUG}/messages/{en,es}.json`,
+            `apps/${SLUG}/src/demo-static/app.tsx`,
+        ])('names %s, and it exists', (cited) => {
+            expect(ejected.output).toContain(cited)
+            for (const relative of cited.includes('{en,es}')
+                ? ['en', 'es'].map((locale) => cited.replace('{en,es}', locale))
+                : [cited]) {
+                expect(() => readProbe(relative.replace(/\/$/, '/index.ts'))).not.toThrow()
+            }
+        })
     })
 })

@@ -128,6 +128,12 @@ resolve, and turning on "require review from Code Owners" branch protection make
 survives — the first because MIT requires the notice, the second because it is honest provenance for
 keel's own decisions.
 
+`tests/docs/adopter-identity.test.ts` ships with you and keeps guarding this, in a form that fits your
+repo. In the template it runs `init-app` on a scratch copy and checks the result. In yours, where the
+rewrite has already happened, it skips that half (you will see the skips) and runs one direct check: none
+of those four files may name the template's maintainer. That is what turns red if a later
+`git merge upstream/main` adds a line owned by `@jpslav` to your `CODEOWNERS`.
+
 **`<repo>` is the repository's name, which is not the app's slug.** An app called `console` can live in
 a repo called `pages`, and a link that says `…/console/security/advisories/new` 404s while looking
 right. So pass the name you will push to: `pnpm init-app console --repo pages`. It takes the NAME only
