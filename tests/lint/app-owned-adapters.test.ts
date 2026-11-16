@@ -1,64 +1,27 @@
-import path from 'node:path'
-import { ESLint } from 'eslint'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import {
+    A11Y_LITERAL,
+    APP,
+    fired,
+    JSX_LITERAL,
+    KEEL_REAL_ADAPTER,
+    lint,
+    NEXT_FONT,
+    PROCESS_ENV,
+    REAL_ADAPTER,
+    REAL_ADAPTER_DYNAMIC,
+    REAL_ADAPTER_INSIDE,
+    RUN_MODE,
+    VENDOR_DYNAMIC,
+    VENDOR_STATIC,
+} from './lint-text'
 
 /**
  * The app-owned adapter seam (ADR-0012, addendum 2026-11-16) is a set of lint fences, and this file
- * pins them against the repo's REAL config: `new ESLint()` with no override, linting virtual files at
- * the paths the fences are about. Nothing is written to disk, so there is no dead fixture for knip,
- * tsc or jscpd to trip over, and no vendor package has to be installed. `no-restricted-imports`
- * judges the specifier and never resolves it.
- *
- * The paths sit under `apps/any-app/`, which is neither of this repo's apps, on purpose. Every fence
- * is written `apps/*`, so the app's name is not what is being tested, and a name nobody owns
- * survives `pnpm init-app` renaming or ejecting the real ones.
+ * pins them against the repo's REAL config (./lint-text says how, and why the app is `apps/any-app`).
+ * Every case here is a `.ts` or `.tsx` file; ./extensions.test.ts holds the same fences for the other
+ * six extensions ESLint lints.
  */
-const repoRoot = process.cwd()
-const APP = 'apps/any-app'
-
-let eslint: ESLint
-beforeAll(() => {
-    eslint = new ESLint({ cwd: repoRoot })
-})
-
-interface Finding {
-    rule: string
-    message: string
-}
-
-async function lint(relativePath: string, code: string): Promise<Finding[]> {
-    const [result] = await eslint.lintText(code, { filePath: path.join(repoRoot, relativePath) })
-    // A parse failure, or the warning for a file the config ignores, carries no rule id. Either one
-    // would make every "nothing fired" expectation below pass vacuously, so it fails the case instead.
-    expect(
-        result.messages.filter((m) => !m.ruleId),
-        `${relativePath} was not actually linted`,
-    ).toEqual([])
-    return result.messages.map((m) => ({ rule: m.ruleId as string, message: m.message }))
-}
-
-// Each fence is told apart by its rule id AND its message, because five different patterns all report
-// as `no-restricted-imports` (vendor, two real-adapter forms, keel's real adapters, next/font/google) and
-// four different selectors as `no-restricted-syntax` (process.env, run mode, dynamic real/, a11y).
-const VENDOR_STATIC = { rule: 'no-restricted-imports', fragment: 'Vendor SDKs may only be imported' }
-const VENDOR_DYNAMIC = { rule: 'keel/no-dynamic-vendor-import', fragment: 'is a vendor SDK' }
-const PROCESS_ENV = { rule: 'no-restricted-syntax', fragment: 'process.env is read ONLY' }
-const RUN_MODE = { rule: 'no-restricted-syntax', fragment: "Run mode is keel's" }
-const REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "Reach the app's real adapters through its registry" }
-const REAL_ADAPTER_INSIDE = { rule: 'no-restricted-imports', fragment: 'real/ is loaded only with import()' }
-const REAL_ADAPTER_DYNAMIC = { rule: 'no-restricted-syntax', fragment: "Only the app's registry" }
-const KEEL_REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "never import keel's real adapters" }
-const NEXT_FONT = { rule: 'no-restricted-imports', fragment: 'next/font/google phones home' }
-const JSX_LITERAL = { rule: 'react/jsx-no-literals', fragment: '' }
-const A11Y_LITERAL = {
-    rule: 'no-restricted-syntax',
-    fragment: 'aria-label/placeholder/title/alt carry user-visible copy',
-}
-
-type Fence = typeof VENDOR_STATIC
-const fired = (findings: Finding[], fence: Fence) =>
-    findings.filter((f) => f.rule === fence.rule && f.message.includes(fence.fragment)).length
-
 const IMPORTS_VENDOR = "import { S3Client } from '@aws-sdk/client-s3'\nexport const client = S3Client\n"
 const IMPORTS_VENDOR_SUBPATH = "import { auth } from '@clerk/nextjs/server'\nexport const current = auth\n"
 const LOADS_VENDOR = "export const load = () => import('@aws-sdk/client-s3')\n"
