@@ -139,8 +139,8 @@ has tables of its own. An app's own e2e that signs in as a second tenant's perso
 commit that shrinks its seed.
 
 **Not enforced by a gate.** What is enforced is structural and independent of the seed:
-`proveRlsCoverage` fails any relation `app_user` can reach that lacks `ENABLE` + `FORCE` row-level
-security and a policy keyed on `app.current_tenant`. Whether an app's half then exercises two tenants is a
+`proveRlsCoverage` fails any relation `app_user` can reach, bar its three named exemptions, that lacks
+`ENABLE` + `FORCE` row-level security and a policy keyed on `app.current_tenant`. Whether an app's half then exercises two tenants is a
 question about what its assertions say, and no cheap check answers it: counting that the half touched both
 tenant ids, or names each table, is satisfied by a comment or an `expect(1)`, and would reject the empty
 half that an app with no tables of its own is allowed. It stays a convention, carried by the `/new-entity` and

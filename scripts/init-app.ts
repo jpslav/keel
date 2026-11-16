@@ -44,7 +44,7 @@ pnpm init-app --repo <name>           fill in the repository name on a tree adop
   --name "<Name>"     display name for UI copy and titles (default: title-cased <slug>)
   --app <dir>         which directory under apps/ to rename (default: starter, else the only app)
   --repo <name>       the GitHub repository NAME this will live in: not the owner, and not the app slug
-                      (they differ more often than not). Used in the advisory and discussions links of
+                      (an app can live in a repo of another name). Used in the advisory and discussions links of
                       SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md. Without it those
                       links say ${PLACEHOLDER_REPO}, next to ${PLACEHOLDER_OWNER}, for you to replace
   --eject-showcase    remove apps/showcase and every reference to it
@@ -735,8 +735,9 @@ function reportNeedsYourDetails(repo: string | null, links: ContactLinks): void 
   • The repository name — SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md say
     ${PLACEHOLDER_REPO}, because no --repo was given and the app slug is not a reliable guess
     (a "console" app can live in a repo called "pages"). Run \`pnpm init-app --repo <name>\` to fill it in,
-    or replace it by hand with the repository's NAME, not the slug. \`git grep PLACEHOLDER_GITHUB --
-    CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github\` lists every placeholder, owner and repo both.`
+    or replace it by hand with the repository's NAME, not the slug. To list every placeholder, owner and
+    repo both:
+      git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github`
             : ''
     console.log(`
 WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone:
@@ -810,9 +811,10 @@ behind fails your first push with an error that does not mention this command.`)
 // ---------------------------------------------------------------------------------------------
 
 /**
- * `--repo` is the repository NAME. Two mistakes are common enough to name: `owner/name` (the owner is a
+ * `--repo` is the repository NAME. Two mistakes are easy to make, so they get messages of their own: `owner/name` (the owner is a
  * separate placeholder on purpose — it also fills CODEOWNERS, where it may be a team) and a clone URL's
- * `.git` suffix. GitHub's own rule for the rest: letters, digits, `.`, `_`, `-`, and never `.` or `..`.
+ * `.git` suffix. For the rest: the characters GitHub repository names use (letters, digits, `.`, `_`, `-`),
+ * at most 100 of them, and never `.` or `..`.
  */
 function checkRepoName(repo: string): void {
     if (repo.includes('/')) {

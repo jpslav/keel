@@ -83,7 +83,7 @@ pnpm init-app --repo <name>           fill in the repository name on a tree adop
   --name "<Name>"     display name for UI copy and titles (default: title-cased <slug>)
   --app <dir>         which directory under apps/ to rename (default: starter, else the only app)
   --repo <name>       the GitHub repository NAME this will live in: not the owner, and not the app slug
-                      (they differ more often than not). Used in the advisory and discussions links of
+                      (an app can live in a repo of another name). Used in the advisory and discussions links of
                       SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md. Without it those
                       links say PLACEHOLDER_GITHUB_REPO, next to PLACEHOLDER_GITHUB_OWNER, for you to replace
   --eject-showcase    remove apps/showcase and every reference to it
@@ -122,8 +122,8 @@ files that name the app's directory:
 **The last row runs even on a rename-only adoption, with no `--eject-showcase`.** Those four files
 route YOUR users to the TEMPLATE maintainer — a security report, a code-owner review, a conduct
 complaint — and that is wrong the moment you fork, not only once you delete the showcase. `init-app`
-rewrites `@jpslav` to `PLACEHOLDER_GITHUB_OWNER` and every `github.com/jpslav/keel` link to
-`github.com/PLACEHOLDER_GITHUB_OWNER/<repo>`, and prints a "WHAT NOW NEEDS YOUR DETAILS" section naming
+rewrites `@jpslav` to `PLACEHOLDER_GITHUB_OWNER`, and the `github.com/jpslav/keel` advisory and
+discussions links to `github.com/PLACEHOLDER_GITHUB_OWNER/<repo>`, and prints a "WHAT NOW NEEDS YOUR DETAILS" section naming
 exactly what to fill in. Left as `PLACEHOLDER_GITHUB_OWNER`, `CODEOWNERS` names an account GitHub cannot
 resolve, and turning on "require review from Code Owners" branch protection makes every PR unmergeable.
 `LICENSE` and the `docs/adr/` approver lines are the two places the maintainer's name correctly

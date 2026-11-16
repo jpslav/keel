@@ -325,6 +325,10 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
         it('the closing output asks for the repository name only when none was given', () => {
             expect(ejected.output).toContain(REPO_PLACEHOLDER)
             expect(ejected.output).toContain('The repository name')
+            // One unbroken line, or pasting it into a shell runs a fragment.
+            expect(ejected.output).toContain(
+                'git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github',
+            )
             expect(named.output).not.toContain(REPO_PLACEHOLDER)
             expect(named.output).not.toContain('The repository name')
         })
