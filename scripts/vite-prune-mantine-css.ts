@@ -8,7 +8,8 @@ import type { Plugin } from 'vite'
  * WHY: `@mantine/core/styles.css` is every component's stylesheet in one file, and the apps import it
  * whole. The starter's bundle reaches 33 of its ~100 component stylesheets (42 component directories in the
  * module graph, 33 with a sheet of their own), so 130 KB of the demo's 231 KB of CSS styled nothing — 15% of
- * the artifact, and the largest single thing `check:demo-size` measures. Mantine's own advice is to import per-component sheets, but that is a list a person keeps
+ * the artifact, doing nothing. Mantine ships per-component sheets (`@mantine/core/styles/<Name>.css`) for
+ * this, but that is a list a person keeps
  * (and gets wrong silently: an unstyled component passes every test); this finds the same set by asking the
  * bundle itself.
  *
@@ -30,8 +31,10 @@ import type { Plugin } from 'vite'
  *   Panda's utilities, the app's own CSS) is kept.
  */
 
-/** The shape Mantine's CSS modules give a class: `m_` and a 32-bit hash in hex, which is 7 or 8 digits and
- *  fewer when it has leading zeros (`m_a74036a`, `m_77c9d27d`). */
+/** The shape Mantine's CSS modules give a class: `m_` and a 32-bit hash in hex: 8 digits, or fewer when
+ *  leading zeros are dropped (`m_77c9d27d`; `m_a74036a` has 7). The floor of 5 allows for a few of them. A
+ *  class shorter still is not recognised as hashed, and a selector with no hashed class is KEPT, so the
+ *  floor errs toward keeping rules. */
 const HASHED_CLASS = /^m_[0-9a-f]{5,8}$/
 const HASHED_CLASS_ANYWHERE = /\bm_[0-9a-f]{5,8}\b/g
 

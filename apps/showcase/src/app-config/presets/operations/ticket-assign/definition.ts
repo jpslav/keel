@@ -7,7 +7,7 @@ import { staffOrgSlug } from '../../../abilities'
 /**
  * `ticket.assign` — the desk's own demo-preset operation kind: `by` hands a ticket in `org` to `to`, as
  * the ticket card's assignee picker does. This is the DEFINITION third (pure, so the static demo may
- * bundle it, and does: its valibot schema is ~2.8 KB of the demo, accepted — keel's own definitions are built
+ * bundle it, and does: its definition and valibot's schema functions are ~2.8 KB of the demo, accepted — keel's own definitions are built
  * by function to avoid exactly that, see keel/core/presets.ts, which also explains the three parts);
  * `./server.ts` and `./static.ts` are the halves that do it.
  *

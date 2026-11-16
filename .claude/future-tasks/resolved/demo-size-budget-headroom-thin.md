@@ -65,14 +65,16 @@ first commit, then every code commit of the one that jumped (a build is ~6 s).
   keep. The demo imports `core/presets` for `expandPreset` and never validates a preset, so valibot and four
   schemas shipped in the starter, which registers no preset. They are built by function now;
   `tests/tooling/static-demo-bundle.test.ts` bundles the entry the way the demo does and fails on the old
-  shape. A `/* @__PURE__ */` on the outer call does nothing: its arguments (`v.string()`) are calls too.
+  shape. A `/* @__PURE__ */` on the outer call alone does nothing: its arguments (`v.string()`) are calls too.
+  (The 2026-10-03 decision-log entry "Standard Schema, with Valibot for keel's own kinds" had measured this
+  ~3 KB and accepted it.)
 - **Mantine's whole stylesheet (130,247 starter / 129,257 showcase, 15% and 14%).** Not growth, a baseline
   nobody had looked at: the apps import `@mantine/core/styles.css` whole, 273 KB for ~100 components, and the
   starter's bundle reaches 33 (42 component directories in the module graph, 33 with a sheet of their own). `scripts/vite-prune-mantine-css.ts`, in each app's `vite.demo.config.ts`,
   drops every rule whose hashed class (`m_77c9d27d`) is in no shipped file. Nothing is reordered, a new
-  component brings its own hashes, and there is no list to keep. Per-component imports would have been the
-  documented route and were rejected: it is a list a person keeps, and a missing entry is an unstyled
-  component that passes every test. Verified by 17 unit tests with each of nine mutations seen red, by
+  component brings its own hashes, and there is no list to keep. Per-component imports (which Mantine's package ships as
+  `@mantine/core/styles/<Name>.css`) would have been the supported route and were rejected: it is a list a person keeps, and a missing entry is an unstyled
+  component that passes every test. Verified by 18 unit tests with each of eleven mutations seen red, by
   checking against Mantine's real stylesheet, and by comparing every element's computed style (pseudo
   elements included) between the pruned and unpruned demos across 27 starter and 29 showcase states.
 
@@ -101,7 +103,9 @@ notice by measuring.
 **Left over, deliberately:**
 
 - **An app's own preset operation definition still ships in its demo** (~2.8 KB on the showcase, for
-  `ticket.assign`'s valibot schema). It sits on the seam module the demo imports for `presets`. A fix is a
+  `ticket.assign`'s definition and valibot's schema functions). It sits on the seam module the demo imports
+  for `presets`. A `/* @__PURE__ */` on every call in the definition, outer and inner, removes it (measured:
+  814,660 to 811,907); it was not applied, because it would teach every app author the same five annotations. A fix is a
   seam change (definitions in a module the demo never imports), which touches ADR-0012, `init-app` and
   `/new-preset-operation`, for 0.3% of the artifact. Do it if an app registers many kinds.
 - **The Next apps still serve the whole Mantine stylesheet.** Nothing gates their page weight and the

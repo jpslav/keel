@@ -1608,7 +1608,7 @@ Requested by an adopter whose ejected app sat at 873,581 of its 880,000-byte bud
 
 - **Prune the demo's CSS instead of raising a budget.** The budget file's rule is that its tightness is
   deliberate, and the growth since 2026-08-01 (+18,787 showcase, +10,061 starter) was mostly the presets, a
-  feature. But the largest thing in the artifact was never growth: Mantine's whole stylesheet, 15% of it.
+  feature. But the most avoidable thing in the artifact was never growth: the dead 15% of it, rules of Mantine's whole stylesheet that no shipped component can match.
   Removing what no shipped component can match is a smaller change in what the artifact IS than raising the
   number 25 KB and calling the next 25 KB a decision. Rejected: per-component CSS imports (a hand-kept list
   whose misses are silent), and trimming only what grew.
@@ -1623,6 +1623,10 @@ Requested by an adopter whose ejected app sat at 873,581 of its 880,000-byte bud
   separates framework baseline from app growth (the bundle has no such attribution, and the adopter wants
   a ceiling, not a ledger); a tight starter budget plus a note (red on their second screen); raising 880,000.
   **JP's call to overrule:** if the starter's number should pace as tightly as the showcase's, set it to ~745,000 (721,386 plus 3%).
+- **Prior art, and what changes.** The 2026-10-03 entry "Standard Schema, with Valibot for keel's own kinds"
+  measured ~3 KB of valibot in each demo and accepted it (`/* @__PURE__ */` on the schema calls was tried and
+  rejected: every app author would repeat it). Building keel's own definitions by function takes keel's share
+  out without asking an author anything. An app's own definition still pays ~2.8 KB.
 - **The gate warns under 2% headroom** and says what to do, on CI as a workflow annotation. It passes: the
   cue to look while it is cheap. It would have fired through the whole of the presets work.
 - **`init-app` should say whose number it is.** `scripts/init-app.ts` is PR B's, so this is the proposed

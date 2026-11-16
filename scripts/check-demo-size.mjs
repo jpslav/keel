@@ -36,7 +36,7 @@
 //   definitions were module-level constants, so valibot and four schemas rode in every app's bundle
 //   although the demo never validates a preset. They are built by function now, and
 //   tests/tooling/static-demo-bundle.test.ts holds it. (An app's OWN definition is not covered: the
-//   showcase's `ticket.assign` still carries ~2.8 KB of valibot.)
+//   showcase's `ticket.assign` still carries ~2.8 KB: its definition and valibot's schema functions.)
 // - 130247 bytes on the starter (129257 on the showcase) were Mantine's stylesheet. The apps import
 //   `@mantine/core/styles.css` whole, 273 KB for ~100 components, of which the demo's bundle reaches 33. The
 //   static demo's build now drops every rule whose hashed class is in no shipped file
