@@ -1337,3 +1337,9 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   non-session caller as a machine. The adopter's token belongs to a person and acts as that person, so
   it needed a person actor with a credential, not a principal of its own. The difference decides
   which rules judge it.
+- **Two migration sequences interleaved by name need an unordered migrator, and CI cannot tell you.**
+  Framework migrations are 0001–0999 and app migrations 1001 and up, so a framework migration added in an
+  update sorts before app migrations a database already ran. Kysely's default refuses that. Every CI
+  database starts empty, so the gate was green; a reused local world (the starter's `.data`) was the only
+  place it showed. When a change adds a framework migration, run the e2e against an existing world, not
+  only a fresh one.

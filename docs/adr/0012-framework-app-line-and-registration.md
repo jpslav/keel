@@ -518,6 +518,15 @@ RLS proofs insert and read the new columns as `app_user` on both engines.
 their credential. A machine is recorded by its principal id. Keel's inbound intake and both apps' email
 handlers write it. The session routes still write `actorUserId` alone, so their rows record NULL.
 
+**The migrator now runs unordered.** 0014 is the first framework migration added after both apps had
+run their own (≥1001). It surfaced a defect in how the two numbered sequences compose: Kysely's default
+strict ordering refused it on any database that had run an app migration ("corrupted migrations:
+expected … 1001_items … but 0014_audit_credential was found"). So no framework migration could reach an
+existing database, an adopter's deployed one included. CI never saw this, because every CI database
+starts empty. A reused local world did. `migrateToLatest` now sets `allowUnorderedMigrations`: pending
+migrations still run in name order, and a migration the database ran that has since disappeared still
+fails. `packages/keel/src/db/migrate.test.ts` reproduces the upgrade and fails under strict ordering.
+
 **The `service/` exemption is retired.** The showcase's one mutating service route,
 `service/jobs/[id]/status/route.ts`, calls `authorize(actor, 'update', Job)` with the actor that
 `withServiceCaller` now passes. The fixture's `service/jobs/route.ts` is the scan's machine route, named

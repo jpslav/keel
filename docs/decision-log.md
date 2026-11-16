@@ -1668,3 +1668,9 @@ the calls the work made that no plan anticipated.
 - **Token storage stays in the app.** keel owns what `authorize()` needs, and the token itself is the
   app's for now: `.claude/future-tasks/personal-api-tokens.md` records the console's shape for when keel
   takes it.
+- **The migrator runs unordered, so a framework migration can reach an existing database.** The first
+  run of the full gate after 0014 failed the starter's e2e. Its local world had run `1001_items`, and
+  Kysely's strict ordering refused a new migration that sorts before it. The alternatives were worse.
+  Wiping `.data` fixes a laptop, not a deployment. Numbering framework migrations above the app's range
+  breaks the "framework first" order for a fresh database. `allowUnorderedMigrations: true` keeps
+  name order for pending migrations and keeps the missing-migration check.

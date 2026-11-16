@@ -18,7 +18,8 @@ import * as m0014 from './0014_audit_credential'
  * (0001–0999) with the app's registered migrations (src/app-config/db/migrations, ≥1001) exactly like
  * the schema composes framework tables with AppTables (ADR-0012). Kysely runs the merged set
  * name-sorted, so framework tables exist before any app table references them. Add new framework
- * migrations here in order; never edit an applied one.
+ * migrations here in order; never edit an applied one. A database that already ran app migrations
+ * applies a NEW framework migration after them: ../migrate.ts runs unordered for exactly that.
  */
 const frameworkMigrations: Record<string, Migration> = {
     '0001_tenants': m0001,
