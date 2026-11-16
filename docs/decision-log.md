@@ -1709,3 +1709,10 @@ worth keeping.
   its code was not exposed, but 16.4.2 is the version `next dev` stopped on (build-notes). 16.4.6 is the
   newest 16.4 patch and was published on 2026-11-09, past the two-day `minimumReleaseAge`.
   `@next/eslint-plugin-next` moves with it.
+- **`@axe-core/playwright` is held at `~4.12.1`.** The group took it to 4.14.0, whose `axe-core` turns
+  on `label-content-name-mismatch` by default. Twelve showcase e2e tests then failed on that one rule,
+  on four framework controls whose `aria-label` replaces their visible text. The finding is real (WCAG
+  2.5.3, Level A), but fixing it means choosing new accessible names in two locales, which is a11y design
+  work rather than part of a dependency catch-up. The tilde keeps the hold through a lockfile
+  regeneration: with 4.14.0 already in the lockfile, `^4.12.1` resolved to 4.14.0. The fix and the way to
+  lift the hold are in `.claude/future-tasks/label-in-name-axe-4-14.md`.
