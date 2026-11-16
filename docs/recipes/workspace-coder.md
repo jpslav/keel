@@ -24,7 +24,10 @@ no app's domain. §5 says how to get the one legitimate use of that first choice
 
 ## 2. The port
 
-Scaffold with `/new-port workspace` (`.claude/commands/new-port.md`). Be clear about where that lands:
+Scaffold with `/new-port workspace` (`.claude/commands/new-port.md`), which first asks whose port it is.
+This recipe predates app-owned ports and assumes keel's: if only your app will call it, the same three
+files can live in your app instead (`docs/recipes/app-owned-adapter.md`), and a fork is better off that
+way (ADR-0013). Be clear about where keel's answer lands:
 the command writes under `packages/keel/src/ports/`, `packages/keel/src/adapters/fake/` and
 `packages/keel/src/adapters/real/` and wires the registry in `packages/keel/src/adapters/index.ts` — in
 your repo that tree is yours to extend, but it is also the published surface. Nothing becomes importable
@@ -152,7 +155,7 @@ export const workspace: WorkspacePort = real?.workspace ?? fakeWorkspace
 ```
 
 Simulated mode serves the fake, always; that is what keeps `pnpm dev`, the e2e suite and the static demo
-hermetic. `process.env` is read only inside `packages/keel/src/adapters`, so config reaches the adapter
+hermetic. `process.env` is read only inside an adapters directory (here `packages/keel/src/adapters`), so config reaches the adapter
 there and nowhere else.
 
 The temptation is a demo that is _simulated everywhere except workspaces_ — a real backend proving

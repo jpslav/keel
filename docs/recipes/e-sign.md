@@ -94,7 +94,9 @@ in-place acceptance.
 ## 2. Sketch the vendor seam (a port, because it wraps an SDK)
 
 Unlike agreements (port-less, app-owned state), e-sign wraps a vendor, so it earns a port under the CLAUDE.md
-rule (vendor SDKs only in `packages/keel/src/adapters/`). Sketch only — do not build:
+rule (vendor SDKs only inside an adapters directory). The paths below put it in keel's tree, which this
+recipe predates an alternative to: if only your app calls the port, it can live in your app instead, with the
+same shape (`docs/recipes/app-owned-adapter.md`). Sketch only — do not build:
 
 ```ts
 // packages/keel/src/ports/esign.ts (SKETCH)

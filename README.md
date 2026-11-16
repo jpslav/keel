@@ -53,16 +53,16 @@ again. None of this reaches production: real builds ship zero Simulator client c
 Every architectural rule here is a check that fails, because a rule that lives only in a document is a rule
 that erodes on the first busy Friday:
 
-| Rule                                            | What stops you                                                                |
-| ----------------------------------------------- | ----------------------------------------------------------------------------- |
-| Vendor SDKs only inside adapters                | lint (`no-restricted-imports`)                                                |
-| No untenanted database access in a request path | lint bans raw `getDb()`                                                       |
-| Every mutating route authorizes                 | a build-time scan walks the routes and fails any that don't                   |
-| Tenant isolation actually isolates              | one RLS proof suite, run against both the in-process engine and real Postgres |
-| The framework never reaches into your app       | a package fence — one registration seam is the only door                      |
-| No hard-coded UI strings                        | lint, plus a test that both locale catalogs stay key-identical                |
-| Docs don't lie about paths                      | a test fails if a doctrine doc cites a path that doesn't exist                |
-| Dead code                                       | `knip` fails the build                                                        |
+| Rule                                            | What stops you                                                                     |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Vendor SDKs only inside adapters                | lint (`no-restricted-imports`, and `keel/no-dynamic-vendor-import` for `import()`) |
+| No untenanted database access in a request path | lint bans raw `getDb()`                                                            |
+| Every mutating route authorizes                 | a build-time scan walks the routes and fails any that don't                        |
+| Tenant isolation actually isolates              | one RLS proof suite, run against both the in-process engine and real Postgres      |
+| The framework never reaches into your app       | a package fence — one registration seam is the only door                           |
+| No hard-coded UI strings                        | lint, plus a test that both locale catalogs stay key-identical                     |
+| Docs don't lie about paths                      | a test fails if a doctrine doc cites a path that doesn't exist                     |
+| Dead code                                       | `knip` fails the build                                                             |
 
 One command runs all of it: `pnpm verify`.
 
@@ -101,9 +101,11 @@ which may itself begin from a preset. [docs/runbooks/demo.md](docs/runbooks/demo
 
 ## Architecture in one paragraph
 
-Vendor SDKs live only in [packages/keel/src/adapters/](packages/keel/src/adapters/) (lint-enforced);
-everything else codes against the narrow interfaces in [packages/keel/src/ports/](packages/keel/src/ports/)
-(`auth`, `db`, `storage`, `llm`, `email`, `analytics`, `jobs`). Domain logic is pure TypeScript in
+Vendor SDKs live only in [packages/keel/src/adapters/](packages/keel/src/adapters/), or, for a vendor
+keel has no port for, in an app's own `apps/<app>/src/adapters/real/`
+([recipe](docs/recipes/app-owned-adapter.md)), and both are lint-enforced. Everything else codes against
+the narrow interfaces in [packages/keel/src/ports/](packages/keel/src/ports/)
+(`auth`, `db`, `storage`, `llm`, `email`, `analytics`, `jobs`) or an app's own port. Domain logic is pure TypeScript in
 [packages/keel/src/core/](packages/keel/src/core/). Screens are router-agnostic — which is what makes the
 `file://` demo possible — and route files are thin wrappers. Tenancy is enforced _in the database_ by
 row-level security: every tenant-scoped query runs inside `withTenant()`. Inside a tenant, `authorize()` is

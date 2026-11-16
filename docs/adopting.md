@@ -301,6 +301,8 @@ apps/<app>/src/app/           Next route files (thin wrappers; framework routes 
 apps/<app>/src/app-config/    THE SEAM — your registrations
 apps/<app>/src/components/    your screens/cards
 apps/<app>/src/domain/        your domain modules
+apps/<app>/src/ports/         your own ports, for a vendor keel has no port for (docs/recipes/app-owned-adapter.md)
+apps/<app>/src/adapters/      their registry and fakes; adapters/real/ is the app's only vendor-SDK directory
 apps/<app>/src/demo-static/   your half of the file:// demo twin (the framework half is keel's)
 apps/<app>/src/seed/          your seed world (fills in keel/seed/contracts)
 apps/<app>/messages/          your i18n namespaces (the framework ships its own catalog)
@@ -372,7 +374,11 @@ walking end-to-end. You only write your DOMAIN half — `apps/<app>/src/demo-sta
 composition root that adds your rows and cards to the framework world `keel/demo-static` already
 simulates (people, mail, jobs, schedules, webhooks, notifications, agreements, audit, snapshots). For one
 table that is 74 lines; the showcase's, with three entities plus actors and the assistant, is 669.
-Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget). The same file is
+Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget). The starter's is
+the number you inherit, sized for YOUR growth (room to grow to the showcase's size), and it is yours to
+re-set in `apps/<app>/package.json`; the header of `scripts/check-demo-size.mjs` says what it guards and
+what to do when it goes red. The demo's build also drops every Mantine style rule no shipped component can
+match (`scripts/vite-prune-mantine-css.ts`), so a Mantine component you add needs no CSS import. The same file is
 the ONLY door for your shell, too: the `nav`, `welcome` and `dashboard` it passes `DemoShell` are what
 the demo shows, so a navigation you build for the real app is absent from the twin until you pass it
 there.

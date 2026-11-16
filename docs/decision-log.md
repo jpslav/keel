@@ -1602,6 +1602,48 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
 - **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
 
+## Demo size budgets re-based, and the starter's is the adopter's (2026-11-16, `demo-size-headroom`)
+
+Requested by an adopter whose ejected app sat at 873,581 of its 880,000-byte budget with one small screen.
+
+- **Prune the demo's CSS instead of raising a budget.** The budget file's rule is that its tightness is
+  deliberate, and the growth since 2026-08-01 (+18,787 showcase, +10,061 starter) was mostly the presets, a
+  feature. But the most avoidable thing in the artifact was never growth: the dead 15% of it, rules of Mantine's whole stylesheet that no shipped component can match.
+  Removing what no shipped component can match is a smaller change in what the artifact IS than raising the
+  number 25 KB and calling the next 25 KB a decision. Rejected: per-component CSS imports (a hand-kept list
+  whose misses are silent), and trimming only what grew.
+- **Budgets went down.** Showcase 950,000 → 840,000, starter 880,000 → 820,000, each below its unpruned
+  size, so the savings are not slack and a regression in the pruning is a red gate. The showcase keeps ~3%
+  headroom on purpose, as the Tours raise did.
+- **The starter's budget is the adopter's, and is sized for them.** An adopter inherits it. A budget kept
+  3% over the framework's own size is 3% for their first screens. So the two apps' numbers now have two jobs: the showcase's paces the
+  framework (every framework screen and twin is in it, so a framework change costs bytes there first); the
+  starter's lets the starter grow to the showcase's size before it asks anything, and still fails on gross
+  bloat and on the pruning stopping. Rejected: a gate that
+  separates framework baseline from app growth (the bundle has no such attribution, and the adopter wants
+  a ceiling, not a ledger); a tight starter budget plus a note (red on their second screen); raising 880,000.
+  **JP's call to overrule:** if the starter's number should pace as tightly as the showcase's, set it to ~745,000 (721,386 plus 3%).
+- **Prior art, and what changes.** The 2026-10-03 entry "Standard Schema, with Valibot for keel's own kinds"
+  measured ~3 KB of valibot in each demo and accepted it (`/* @__PURE__ */` on the schema calls was tried and
+  rejected: every app author would repeat it). Building keel's own definitions by function takes keel's share
+  out without asking an author anything. An app's own definition still pays ~2.8 KB.
+- **The gate warns under 2% headroom** and says what to do, on CI as a workflow annotation. It passes: the
+  cue to look while it is cheap. It would have fired through the whole of the presets work.
+- **`init-app` should say whose number it is.** `scripts/init-app.ts` is PR B's, so this is the proposed
+  wording for its "WHAT THIS DID NOT TOUCH" list, where it names deployment parameters and the cutover
+  checklist:
+
+    > • The demo size budget — apps/<slug>/package.json's `check:demo-size` passes the static demo's byte
+    > budget. It is yours now: the starter ships it with room to grow to the showcase's size, which is
+    > sized for an app's own screens, not for the framework's pace. Re-set it when you want a tighter
+    > gate (what your app measures plus the headroom you want, in its own commit). When it goes red,
+    > scripts/check-demo-size.mjs says what to look at first.
+
+- **Not done.** An app's own preset operation definition still ships in its demo (~2.8 KB on the showcase);
+  fixing it is a seam change for 0.3% of the file, recorded in
+  `.claude/future-tasks/resolved/demo-size-budget-headroom-thin.md`. The Next apps still serve the whole
+  Mantine stylesheet; nothing gates their page weight.
+
 ## Adopter papercuts: the repo name, the identity gate, one-tenant seeds (2026-11-16, `fix/adopter-papercuts`)
 
 Four gaps a first adopter reported, decided together. Each is a small change; the reasons are the part
@@ -1651,6 +1693,42 @@ worth keeping.
   `apps/*/src/app`.** The behaviour was right and stricter than the sentence: a mutating `route.ts` outside
   `api/` is scanned and, since exemption keys are measured from `src/app/api`, can match no exemption.
   Watched failing with a bare `POST` at `src/app/[locale]/danger/route.ts`.
+
+## App-owned vendor adapters (2026-11-16, `feat/app-owned-adapters`)
+
+- **An app may own a port, fake and real adapter, and the vendor zone is `apps/<app>/src/adapters/real/`,
+  not the whole adapters directory.** An adopter asked for a lint-allowed `apps/*/src/adapters/`. The
+  narrower zone keeps the app's registry and fakes under the same vendor and `process.env` bans as the
+  rest of the app, which is what makes them hermetic by construction. ADR-0012's 2026-11-16 addendum has
+  the full fence and the rejected alternatives.
+- **Declined: a key-value port in keel.** It was offered as the alternative and fails both the
+  universality and the new-class tests.
+- **The app's real adapters read `process.env`, not imported `params.ts` values.** keel's own real adapters
+  already work this way, and secret values cannot live in the repo. `params.ts` keeps recording names,
+  placeholders and cutover rows.
+- **A static import of an app's `adapters/real` is banned outside the adapters directory, and `import()` is
+  not.** The dynamic form inside an `!isSimulated` branch is how keel's own real-mode sign-in form is
+  loaded, so banning it would forbid the one legitimate case. Inside the directory it is stricter: the
+  registry reaches `real/` only by `import()`, and a fake not at all, statically or dynamically. The
+  pre-PR review found the static gap (and the first version's registry test passing vacuously); review
+  round 1 found the dynamic one, in that fix.
+- **`process.env` is now banned in `apps/*/config/` too.** Nothing there read it, and without the ban it was
+  the obvious place for a helper handing the registry its own reading of `APP_MODE` (pre-PR review).
+- **The app's registry does not import `server-only` itself.** It takes `isSimulated` from
+  `keel/adapters/index`, which imports `server-only`, so the guard arrives transitively. Neither app lists
+  `server-only` as a dependency, and knip flagged it as unlisted when a scratch registry imported it
+  directly.
+- **No lint rule keeps a registry out of the static demo.** The import arrives transitively in practice,
+  which lint cannot follow. The measured backstop is `check:demo-size` (54 MB against 880,000 bytes on the
+  starter) and then the static e2e.
+- **No worked example in the starter or the showcase.** A recipe (`docs/recipes/app-owned-adapter.md`), an
+  updated `/new-port` and a lint gate test (`tests/lint/app-owned-adapters.test.ts`) instead. The recipe was
+  checked by building a scratch port, fake, real adapter and registry in the starter: typecheck, lint and
+  knip passed, and the same files still lint clean under the final config. The scratch files were never
+  committed.
+- **Recipes that predate this** (`e-sign.md`, `workspace-coder.md`) still put their ports in keel's tree.
+  Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
+  (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).
 
 ## `authorize()` judges actors that are not sessions (2026-11-16, `feat/authorize-non-session-actors`)
 
