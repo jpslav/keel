@@ -1717,5 +1717,6 @@ worth keeping.
 - **Pinned in `tests/docs/adopter-identity.test.ts`.** The number is read back from the probe's own
   `package.json`, so a change to the starter's script fails the test rather than leaving the output wrong; the
   removal sentence is checked present after an eject and absent after a rename; the script must still carry
-  `DEFAULT_BUDGET_BYTES` and `WHEN IT GOES RED`; and the no-number branch is reached by a `--dry-run` rename
-  of the showcase. Each was watched failing against a deliberate break.
+  `DEFAULT_BUDGET_BYTES` and `WHEN IT GOES RED`; the no-number branch is reached by a `--dry-run` rename
+  of the showcase; a script that is neither shape gets no bullet; and a renamed showcase counts as still
+  there on a dry run and a real one alike. Each was watched failing against a deliberate break.

@@ -790,8 +790,9 @@ function readDemoBudget(onDisk: string): DemoBudget {
 /**
  * Why this is in "WHAT THIS DID NOT TOUCH" and not a rewrite: the budget is a number the adopter has to
  * own, and the script that enforces it carries the template's two-app history in its header. That header
- * is not rewritten for the same reason no prose is (`.claude/future-tasks/eject-rewrites-prose-into-
- * false-sentences.md`): a repair pass cannot tell a history from a claim. So it is pointed at instead.
+ * is not rewritten, for the reason the note at
+ * .claude/future-tasks/eject-rewrites-prose-into-false-sentences.md gives for prose in general: a repair
+ * pass cannot tell a history from a claim. So it is pointed at instead.
  */
 function demoBudgetBullet(survivor: string, budget: DemoBudget, showcaseGone: boolean): string {
     if (budget === null) return ''
