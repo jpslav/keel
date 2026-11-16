@@ -1,4 +1,4 @@
-import type { Kysely } from 'kysely'
+import { type Kysely, sql } from 'kysely'
 import { Migrator } from 'kysely/migration'
 import { migrations } from './migrations/index'
 import type { DB } from './schema'
@@ -35,6 +35,15 @@ export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
         executed,
         state.filter((m) => m.executedAt === undefined).map((m) => m.name),
     )
+    // A database that ran a migration this code no longer has (a rename) gets THAT error, as Kysely would
+    // raise it: getMigrations() lists only the registry, so the renamed one would otherwise look merely
+    // out of order here and the message would point at the wrong remedy.
+    if (stray.length > 0) {
+        const missing = await executedButUnknown(db)
+        if (missing.length > 0) {
+            throw new Error(`corrupted migrations: previously executed migration ${missing.join(', ')} is missing`)
+        }
+    }
     if (stray.length > 0) {
         throw new Error(
             `migrations out of order within their sequence: ${stray.join(', ')} would run after a later ` +
@@ -43,4 +52,14 @@ export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
     }
     const { error } = await migrator.migrateToLatest()
     if (error) throw error instanceof Error ? error : new Error(String(error))
+}
+
+/**
+ * The migrations the database recorded that the registry no longer has, read straight from Kysely's
+ * own table, since `Migrator.getMigrations()` reports only the registry's names. Only consulted when
+ * something already looks out of order, so a fresh database never reaches it.
+ */
+async function executedButUnknown(db: Kysely<DB>): Promise<string[]> {
+    const { rows } = await sql<{ name: string }>`SELECT name FROM kysely_migration`.execute(db)
+    return rows.map((row) => row.name).filter((name) => !Object.hasOwn(migrations, name))
 }

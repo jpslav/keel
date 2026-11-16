@@ -6,7 +6,7 @@ import { findOrg, people, type SeedPerson } from '@app-config/seed'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { LOCALES, type Locale } from '../../core/locale'
-import { isRole, type Role } from '../../core/roles'
+import { isRestricted, isRole, type Role } from '../../core/roles'
 import type {
     AuthPort,
     AuthUser,
@@ -125,7 +125,7 @@ function toUser(person: SeedPerson, activeOrgSlug: string): AuthUser {
         // Ambient site: a person's tenant is fixed, never the active org's business.
         tenantSlug: person.tenantSlug,
         orgSlug: membership.orgSlug,
-        restricted: person.restricted,
+        restricted: isRestricted(person.restricted, membership.role),
     }
 }
 
@@ -280,7 +280,7 @@ export const fakeAuth: AuthPort = {
         const person = findPerson(userId)
         const membership = person?.memberships.find((m) => m.orgSlug === orgSlug)
         if (!person || !membership) return null
-        return { role: membership.role, restricted: person.restricted }
+        return { role: membership.role, restricted: isRestricted(person.restricted, membership.role) }
     },
 
     async createInvite(invite: InviteInput): Promise<Membership> {

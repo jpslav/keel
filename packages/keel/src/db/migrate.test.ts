@@ -126,4 +126,20 @@ describe('migrateToLatest', () => {
             await db.destroy()
         },
     )
+
+    test(
+        "a renamed migration still gets Kysely's missing-migration error, not the out-of-order one",
+        { timeout: 30_000 },
+        async () => {
+            const renamed = Object.keys(frameworkMigrations).sort()[1]!
+            const db = new Kysely<DB>({ dialect: new PGliteDialect(openPglite()) })
+            await migrateToLatest(db)
+            // The database ran a migration under a name the code no longer has; the code's name is pending.
+            await sql`UPDATE kysely_migration SET name = ${`${renamed}_old_name`} WHERE name = ${renamed}`.execute(db)
+            await expect(migrateToLatest(db)).rejects.toThrow(
+                new RegExp(`previously executed migration ${renamed}_old_name is missing`),
+            )
+            await db.destroy()
+        },
+    )
 })

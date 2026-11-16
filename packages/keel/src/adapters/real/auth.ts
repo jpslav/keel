@@ -1,6 +1,7 @@
+import { isClerkAPIResponseError } from '@clerk/nextjs/errors'
 import { auth, clerkClient, currentUser } from '@clerk/nextjs/server'
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../../core/locale'
-import { isRole, type Role } from '../../core/roles'
+import { isRestricted, isRole, type Role } from '../../core/roles'
 import type {
     AuthPort,
     AuthUser,
@@ -30,17 +31,6 @@ interface AppPublicMetadata {
     locale?: string
     restricted?: boolean
     tenantSlug?: string
-}
-
-/**
- * Restricted by the user's own `restricted` flag OR by holding the `restricted` role in the org. Both
- * readings exist in this template: the fake world keeps them in step, and `createInvite` here writes
- * only the role. So reading the flag alone left a `restricted` invitee unrestricted in real mode. One
- * function, used for the caller (getCurrentUser) and for anyone else (getMember), so the two cannot
- * disagree.
- */
-function restrictedFrom(metadata: AppPublicMetadata, role: Role): boolean {
-    return metadata.restricted === true || role === 'restricted'
 }
 
 function roleFrom(metadata: unknown, fallback: Role): Role {
@@ -82,7 +72,7 @@ export const realAuth: AuthPort = {
             // Ambient site claim — never the active org's business.
             tenantSlug: metadata.tenantSlug ?? '',
             orgSlug: active ? (active.organization.slug ?? active.organization.id) : '',
-            restricted: restrictedFrom(metadata, role),
+            restricted: isRestricted(metadata.restricted, role),
         }
     },
 
@@ -130,15 +120,19 @@ export const realAuth: AuthPort = {
 
     async getMember(orgSlug: string, userId: string): Promise<MemberStanding | null> {
         // The two facts getCurrentUser reads, for a user who is not the caller: the role from the org
-        // membership, and `restricted` from the user's metadata and that role (restrictedFrom). The
+        // membership, and `restricted` from the user's metadata and that role (isRestricted). The
         // membership is looked up on the ORG, filtered to this user, so a person in many orgs is never cut
-        // off by a page size. No membership, no standing.
+        // off by a page size. No such org, or no membership, means no standing: null, as the port says,
+        // never a 404 thrown through to the caller.
         const client = await clerkClient()
-        const organizationId = await organizationIdForSlug(orgSlug)
-        const memberships = await client.organizations.getOrganizationMembershipList({
-            organizationId,
-            userId: [userId],
-        })
+        let memberships
+        try {
+            const organizationId = await organizationIdForSlug(orgSlug)
+            memberships = await client.organizations.getOrganizationMembershipList({ organizationId, userId: [userId] })
+        } catch (error) {
+            if (isClerkAPIResponseError(error) && error.status === 404) return null
+            throw error
+        }
         // Matched on the user, not taken as the first row: if the filter were ever ignored, the first row
         // would be someone else's membership, and their role.
         const membership = memberships.data.find((m) => m.publicUserData?.userId === userId)
@@ -146,7 +140,7 @@ export const realAuth: AuthPort = {
         const user = await client.users.getUser(userId)
         const metadata = (user.publicMetadata ?? {}) as AppPublicMetadata
         const role = roleFrom(membership.publicMetadata, 'guest')
-        return { role, restricted: restrictedFrom(metadata, role) }
+        return { role, restricted: isRestricted(metadata.restricted, role) }
     },
 
     async listMembers(orgSlug: string): Promise<Membership[]> {
