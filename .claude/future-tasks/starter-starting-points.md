@@ -51,8 +51,8 @@ Against, and these are the reasons this is a question rather than a task:
   (`route-glue-duplication.md`), and that file's trigger — promote glue into keel as re-exportable handlers —
   pulls the opposite way from "adopter-owned": a one-line re-export is merge-friendly and not the adopter's
   code. These two tasks are one decision.
-- **Bytes.** Anything the starter's static demo gains is paid against a budget with little room
-  (`demo-size-budget-headroom-thin.md`).
+- **Bytes.** Anything the starter's static demo gains is paid against the starter's budget, which an adopter
+  inherits and owns and which is sized for their growth (`resolved/demo-size-budget-headroom-thin.md`).
 
 ## Options, roughly
 
@@ -74,4 +74,4 @@ add the capability, `pnpm verify`.
   starter wires now is what that work has to keep working, so settle ownership of the accept route first.
 - `init-app-blank-option.md` — decides what "the minimum an adopter keeps" is, and a starter that carries
   more wiring has more for `--blank` to sweep.
-- `demo-size-budget-headroom-thin.md` — the byte cost of anything added to the static demo.
+- `resolved/demo-size-budget-headroom-thin.md` — the byte cost of anything added to the static demo, and whose budget it is.
