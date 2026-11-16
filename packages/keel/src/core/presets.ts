@@ -227,8 +227,9 @@ export interface PresetWorld {
 
 /**
  * One operation KIND: what its arguments look like, what the product would refuse, and which named
- * results it reads. Pure — imported by both hosts' conformance checks and bundled into the static demo —
- * so it never holds the kind's behaviour; that is the server and static halves (see the module comment).
+ * results it reads. Pure, and read only by `presetProblems` (the seam-conformance gate, in tests) — never by
+ * a replay — so it never holds the kind's behaviour; that is the server and static halves (see the module
+ * comment).
  *
  * `check` and `consumes` are METHOD signatures on purpose: method parameters are compared bivariantly, so
  * a definition typed for its own arguments still fits a `PresetOperationDefinition[]` registry.
@@ -251,7 +252,15 @@ export interface PresetOperationDefinition<Kind extends string = string, Args = 
 
 const EMAIL_SHAPE = /.+@.+\..+/
 
-const inviteOperation: PresetOperationDefinition<'invite', InviteArgs> = {
+// keel's own definitions are built BY FUNCTION, never at module scope, and that is load-bearing. The static
+// demo imports this module for `expandPreset` and `resolveWorldStart` and never validates a preset, but a
+// module-level `v.strictObject(...)` is a call the bundler must keep, so it carried valibot and every schema
+// into each app's `file://` bundle (3.2 KB on the starter, which registers no preset at all).
+// tests/tooling/static-demo-bundle.test.ts holds this. An app's own definitions are not covered: they sit on the seam module the
+// demo imports for `presets`, so a module-level schema call in one stays in the demo (~2.8 KB for the
+// showcase's `ticket.assign`, once).
+
+const inviteOperation = (): PresetOperationDefinition<'invite', InviteArgs> => ({
     kind: 'invite',
     args: v.strictObject({ by: v.string(), org: v.string(), email: v.string(), role: v.picklist(ROLES) }),
     check(args, world, earlier) {
@@ -282,9 +291,9 @@ const inviteOperation: PresetOperationDefinition<'invite', InviteArgs> = {
         }
         return problems
     },
-}
+})
 
-const inboundOperation: PresetOperationDefinition<'inbound', InboundArgs> = {
+const inboundOperation = (): PresetOperationDefinition<'inbound', InboundArgs> => ({
     kind: 'inbound',
     args: v.strictObject({
         org: v.string(),
@@ -306,28 +315,28 @@ const inboundOperation: PresetOperationDefinition<'inbound', InboundArgs> = {
         }
         return problems
     },
-}
+})
 
-const flagOperation: PresetOperationDefinition<'flag', FlagArgs> = {
+const flagOperation = (): PresetOperationDefinition<'flag', FlagArgs> => ({
     kind: 'flag',
     args: v.strictObject({ flag: v.string(), enabled: v.boolean() }),
     check: (args, world) => (world.flags.includes(args.flag) ? [] : [`unknown flag "${args.flag}"`]),
-}
+})
 
-const actorHoldOperation: PresetOperationDefinition<'actor.hold', ActorHoldArgs> = {
+const actorHoldOperation = (): PresetOperationDefinition<'actor.hold', ActorHoldArgs> => ({
     kind: 'actor.hold',
     args: v.strictObject({ actor: v.string(), held: v.boolean() }),
     check: (args, world) => (world.actors.includes(args.actor) ? [] : [`unknown actor "${args.actor}"`]),
-}
+})
 
 /** keel's own operation kinds. An app may replace any of them by registering a definition of the same
  *  `kind` in its `appPresetOperations` (`/new-preset-operation --from <kind>` copies one to start from;
  *  `composePresetOperations([])[kind]` reaches keel's to wrap). */
-const frameworkPresetOperations: readonly PresetOperationDefinition[] = [
-    inviteOperation,
-    inboundOperation,
-    flagOperation,
-    actorHoldOperation,
+const frameworkPresetOperations = (): readonly PresetOperationDefinition[] => [
+    inviteOperation(),
+    inboundOperation(),
+    flagOperation(),
+    actorHoldOperation(),
 ]
 
 /**
@@ -339,7 +348,7 @@ export function composePresetOperations(
     appDefinitions: readonly PresetOperationDefinition[],
 ): Readonly<Record<string, PresetOperationDefinition>> {
     const composed: Record<string, PresetOperationDefinition> = {}
-    for (const definition of [...frameworkPresetOperations, ...appDefinitions]) composed[definition.kind] = definition
+    for (const definition of [...frameworkPresetOperations(), ...appDefinitions]) composed[definition.kind] = definition
     return composed
 }
 

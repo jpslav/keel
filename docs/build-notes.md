@@ -1313,6 +1313,59 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
   error contract onto callers that each want a different one.
 
+## The static demo's size budget (2026-11-16, `demo-size-headroom`)
+
+- **Bisecting a size is cheap here, so do it instead of guessing.** A demo build is ~6 s. Building every
+  first-parent merge since the first commit (eight builds), then every code commit inside the one that
+  jumped (eleven more), showed where it went: one merge (#26) was 90% of the showcase's growth and 87% of the
+  starter's. A throwaway worktree plus `pnpm install
+--frozen-lockfile` per commit is all it takes; never `git checkout` in your own worktree for it.
+- **`renderedLength` is a map, not the output.** A module-size recorder (a Vite plugin reading
+  `chunk.modules` at `generateBundle`) sums pre-minification sizes, so it ranks things but does not add up
+  to the file, and it lists modules whose bodies the bundler later dropped. Use it to find suspects, and
+  take the number from the built file. The first suspect list put valibot at 6.9 KB; valibot and the four schemas it served cost 3.2 KB in the file.
+- **A module-level call is a side effect the bundler must keep.** `export const op = { args:
+v.strictObject(...) }` keeps valibot in every bundle that imports the module for something else, even
+  when `op` is never used. `/* @__PURE__ */` on the outer call alone did nothing, because its arguments
+  (`v.string()`) are calls too and are kept; on every call, outer and inner, it did work (showcase 814,660 to
+  811,907). The 2026-10-03 entry in `docs/decision-log.md` ("Standard Schema, with Valibot for keel's own
+  kinds") measured the same ~3 KB and accepted it, because every app author would have to repeat the
+  annotation. Building keel's OWN definitions inside a function takes keel's share out and asks nothing of an
+  author. An app's own definitions still pay.
+  `tests/tooling/static-demo-bundle.test.ts` bundles the entry the way the demo does (esbuild's metafile
+  reports bytes per input) and fails on the old shape.
+- **The apps shipped the whole Mantine stylesheet: 15% of the demo.** `@mantine/core/styles.css` is every
+  component's CSS, 273 KB, and the starter's bundle reaches 33 of ~100 component stylesheets. Mantine ships per-component
+  sheets (`@mantine/core/styles/<Name>.css`, exported as `./styles/*`), which is a list someone keeps; a missing entry unstyles one component and every test
+  still passes. The pruning plugin asks the bundle instead: Mantine's CSS-module class names are hashed
+  (`m_77c9d27d`), and those hashes are written in the component's JavaScript and nowhere else.
+- **Things the pruning had to get right, each pinned by a test:** a hash is 7 or 8 hex digits (`m_a74036a`:
+  a leading zero is trimmed; `{8}` alone silently skips 28 of 404 classes); a hashed class inside `:not()`,
+  `:is()`, `:where()`, `:has()` or an attribute is no requirement, since `.a:not(.m_x)` matches exactly when
+  `.m_x` is absent; a bracket inside a quoted attribute value is not nesting; a selector list goes only when
+  every selector is dead; the stylesheet's own selectors are not evidence that a class ships; an at-rule goes only
+  if the pruning emptied it (an app's own `@layer base {}` still orders a layer). Each of eleven mutations of
+  the plugin was seen red.
+- **A plugin that finds nothing must fail, not pass.** The first run left the size unchanged and printed
+  nothing: Vite emits the one stylesheet in its own `generateBundle`, which runs after every ordinary plugin's,
+  so the plugin saw only the JS chunk. It needs `enforce: 'post'` and a place before `viteSingleFile()`
+  (another `post` plugin; the order within a phase is array order). It now throws when it sees no stylesheet.
+  The re-based budgets are the second net: both sit below the unpruned size, so a plugin that stops pruning
+  turns the gate red. Seen: the unpruned starter, 851,633 bytes, against its 820,000 budget, exits 1.
+- **How the pruning was checked for visible change.** A script (not in the repo) opened the pruned and the
+  unpruned demo in Chromium and dumped every element's full computed style, `::before` and `::after`
+  included, for 27 starter and 29 showcase states: welcome, picker, three sign-ins, user menu, profile and
+  org screens, every Simulator tab, the locale control, notification bell, dark scheme. Identical, with two
+  things to know for a re-run. Mantine's generated ids are random per load (`mantine-<random>-label`), so key
+  elements by test id and class, never id. And in one state (the Events tab) text widths differ by a fraction of a pixel, and
+  they differ the same way when the SAME unpruned build is compared with itself, so leave the layout-derived
+  properties (`width`, `height`, `inline-size`,
+  `block-size`, `perspective-origin`, `transform-origin`) out of the comparison; every other property
+  of the same elements matched.
+- **The gate used to be invisible until red.** `check-demo-size` now prints the headroom and warns under 2%,
+  as a workflow annotation on CI. The 2%-headroom trigger of the old future-task was something a person had
+  to notice by measuring, and nobody had: the showcase sat at 99.4% for the length of the presets work.
+
 ## A test of the adoption tool must vary the inputs that must not matter (2026-11-16, `fix/adopter-papercuts`)
 
 - **A gate that pins the output for one hard-coded input passes in exactly the tree that matches it.**

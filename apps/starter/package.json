@@ -11,7 +11,7 @@
         "typecheck": "next typegen && tsc --noEmit",
         "test:e2e": "NEXT_TELEMETRY_DISABLED=1 playwright test",
         "build:demo-static": "vite build --config vite.demo.config.ts",
-        "check:demo-size": "node ../../scripts/check-demo-size.mjs 880000",
+        "check:demo-size": "node ../../scripts/check-demo-size.mjs 820000",
         "e2e:demo-static": "playwright test --config playwright.demo.config.ts"
     },
     "dependencies": {
