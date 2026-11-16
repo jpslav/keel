@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
     transpilePackages: ['@app/seed', 'keel'],
     // Native/WASM server deps stay external so their runtime file loading keeps working.
     serverExternalPackages: ['@electric-sql/pglite', 'pg'],
+    // Without this, `next dev` writes an AGENTS.md into the app whenever it detects an AI coding agent,
+    // and an agent's `pnpm verify` leaves it untracked. keel's agent guide is the root CLAUDE.md
+    // (decision-log, 2026-11-16). Option defined in
+    // node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/agentRules.md
+    agentRules: false,
 }
 
 // Sentry wraps the build ONLY when a DSN exists (cutover row `errors`) — hermetic builds make

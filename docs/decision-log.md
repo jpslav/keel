@@ -1716,3 +1716,11 @@ worth keeping.
   work rather than part of a dependency catch-up. The tilde keeps the hold through a lockfile
   regeneration: with 4.14.0 already in the lockfile, `^4.12.1` resolved to 4.14.0. The fix and the way to
   lift the hold are in `.claude/future-tasks/label-in-name-axe-4-14.md`.
+- **Next's generated `AGENTS.md` is switched off (`agentRules: false` in both apps' `next.config.ts`).**
+  With next 16.4, `next dev` writes `apps/<app>/AGENTS.md` whenever it detects an AI coding agent, and
+  the block it writes tells the agent to commit the file. CI is not an agent and never sees it, but every
+  agent's `pnpm verify` starts `next dev` for e2e, so the file appeared untracked in agent worktrees, one
+  add-everything commit away from landing in a PR. keel's agent guide is the root `CLAUDE.md`, so a
+  second, generated one in each app is not wanted. The Next docs the block pointed to still ship with the
+  installed version, under `node_modules/next/dist/docs/` (resolved from an app directory). The manager
+  session that ran this catch-up decided this on JP's behalf; JP can overrule it when approving the PR.
