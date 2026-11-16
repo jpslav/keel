@@ -10,7 +10,8 @@ the entity arrives without its own UI (or before it):
 1. **Subject + rules**: add the type to `AppSubjectType` and its rules to `appAbilityRules` in
    `apps/showcase/src/app-config/abilities.ts` (two-sided org fields go in `AppSubjectFields`; `Escalation` is the
    two-sided reference, `Ticket`/`Attachment` the single-org ones). Deny-by-default is framework-owned —
-   you only add allows. Cover the rules in `apps/showcase/src/app-config/abilities.test.ts`.
+   you only add allows. Those rules are for PEOPLE: if a machine caller (a service key, a token verifier
+   the app owns) must act on the entity, grant it in `appMachineAbilityRules` too, or every machine gets a 403. Cover the rules in `apps/showcase/src/app-config/abilities.test.ts`.
 2. **Table**: interface in `AppTables` (`apps/showcase/src/app-config/db/schema.ts`); migration numbered ≥1001 in
    `apps/showcase/src/app-config/db/migrations/` + registered in its `index.ts`; copy the RLS pattern from
    `1001_tickets.ts` (enable RLS + tenant policy; app tables may reference framework tables, never the

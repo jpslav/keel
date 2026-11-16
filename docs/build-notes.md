@@ -1312,3 +1312,19 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   `sendInvite` turns into its form error and the replay into a failure. A preset is held to "no
   duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
   error contract onto callers that each want a different one.
+
+## Machine actors in `authorize()` (2026-11-16, `feat/authorize-non-session-actors`)
+
+- **An exemption justified "by construction" names a check that isn't there.** The scan's `service/`
+  entry was honest about its gate: `mustMatch` proved the route used `withServiceCaller`. The reason,
+  "org-scoped by construction", was the absence of a per-action check, and no rule said what a service
+  caller could do. So when a mechanism arrives that can make the check, retire the exemption. Leaving it
+  beside the new path keeps a second way through the gate.
+- **Don't hand a new kind of caller to rules written for an old kind.** The cheap version of this change
+  gave a machine a role and passed it to `appAbilityRules`. It would have compiled and passed every
+  existing test. It would also have handed every machine a member's authoring powers, because every
+  person rule in both apps and in the console allows authoring to any non-restricted member. A separate
+  rule function with a `false` default is the version that fails closed.
+- **Make "decide this for every member" a type error.** `frameworkMachineRules` is a
+  `Record<BaseSubjectType, …>`, so adding a framework subject without a machine decision fails
+  `tsc` (seen: TS2741). The person rules' `switch` has no such check.

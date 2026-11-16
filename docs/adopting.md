@@ -295,7 +295,7 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 
 | Seam module                                   | You register                                                                                       | Empty looks like                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `abilities.ts`                                | your subject types + authorization rules + staff org                                               | (starter registers one)                    |
+| `abilities.ts`                                | your subject types + staff org + rules for people and for machines (`appMachineAbilityRules`)      | (starter registers one)                    |
 | `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001                                             | (starter registers one)                    |
 | `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
 | `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
