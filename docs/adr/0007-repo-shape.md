@@ -96,3 +96,9 @@ one-app default in its normal form, reached by a supported command rather than b
   not part of an app, and moving it into a dedicated infrastructure repo stays a one-line change.
 - Two apps mean two e2e suites and two demo artifacts on every verify. That is the cost of the falsifier,
   and it is the cheapest place the repo spends time.
+
+## Addendum — 2026-11-16: the authorization scan's root
+
+The "authorization scan generalized" consequence names `apps/*/src/app/api`. The scan walks each app's whole
+`src/app` and keys its exemptions from `src/app/api` (ADR-0012, addendum of 2026-11-16). The consequence it
+describes, that no app escapes the choke point by existing, holds more strongly than stated.

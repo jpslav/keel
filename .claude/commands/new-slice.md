@@ -29,8 +29,10 @@ House shape for a slice:
 4. **New table**: add its interface to `AppTables` in `apps/showcase/src/app-config/db/schema.ts` (the framework `DB`
    type `extends AppTables`, so `import type { DB }` keeps working), and a migration numbered ≥1001 under
    `apps/showcase/src/app-config/db/migrations/` registered in that dir's `index.ts`. Copy the RLS pattern from
-   `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (enable RLS + the tenant policy). Prove it with BOTH
-   `pnpm test:unit` and `pnpm test:contract` (the RLS proofs on real Postgres).
+   `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (enable RLS + the tenant policy). Add the table's
+   section to `apps/showcase/src/app-config/db/rls-proofs.ts`, using BOTH tenants its runner hands it
+   (`alphaTenantId`, `demoTenantId`): isolated reads both ways and a cross-tenant INSERT rejected by `WITH CHECK`.
+   Run it under BOTH `pnpm test:unit` and `pnpm test:contract` (the same proofs on real Postgres).
 5. **App vocabulary** registers through the matching seam module — never a framework union: job kinds +
    handlers in `apps/showcase/src/app-config/jobs.ts`, notification kinds/payloads/copy in `apps/showcase/src/app-config/notifications.ts`,
    outbound webhook event kinds in `apps/showcase/src/app-config/webhooks.ts`, inbound-email handlers in

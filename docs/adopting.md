@@ -4,7 +4,7 @@ Adoption is one command:
 
 ```sh
 pnpm install                                # boots hermetically: no docker, no credentials, no network
-pnpm init-app acme --name "Acme Research"   # rename the app you keep; --dry-run previews it
+pnpm init-app acme --name "Acme Research" --repo acme-research   # rename the app you keep; --dry-run previews it
 pnpm install && pnpm verify                 # the workspace changed; prove it still holds
 ```
 
@@ -13,7 +13,8 @@ changes too — and CI installs with `--frozen-lockfile` by default, so a commit
 fails your first push with an error that never mentions `init-app`.
 
 That middle line renames the app you keep and repoints every file that named it. What it deliberately
-leaves for you — deployment params, seed data, cutover rows — it prints when it finishes.
+leaves for you — deployment params, seed data, cutover rows, your GitHub owner and repo name — it prints when
+it finishes.
 
 Adding `--eject-showcase` also deletes the demo app, and the gate stays green when you do — keel's own
 tests run against keel's own fixture seam (`packages/keel/test-fixture`), not against the demo's world.
@@ -74,12 +75,17 @@ must pick ONE app (`pnpm dev`, `pnpm start`, and the showcase-only `pnpm ladle`,
 ```
 pnpm init-app <slug> [options]        rename the app you keep
 pnpm init-app --eject-showcase        delete the demo app (slug optional; both can run at once)
+pnpm init-app --repo <name>           fill in the repository name on a tree adopted without it
 
   <slug>              the new APP_SLUG: lowercase letters, digits and dashes. Also becomes the app's
                       directory name and package name (the workspace root becomes <slug>-workspace,
                       so `pnpm --filter <slug>` can only ever mean the app).
   --name "<Name>"     display name for UI copy and titles (default: title-cased <slug>)
   --app <dir>         which directory under apps/ to rename (default: starter, else the only app)
+  --repo <name>       the GitHub repository NAME this will live in: not the owner, and not the app slug
+                      (an app can live in a repo of another name). Used in the advisory and discussions links of
+                      SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md. Without it those
+                      links say PLACEHOLDER_GITHUB_REPO, next to PLACEHOLDER_GITHUB_OWNER, for you to replace
   --eject-showcase    remove apps/showcase and every reference to it
   --dry-run           print the plan and change nothing
   --yes               skip the confirmation prompt (required when stdin is not a terminal)
@@ -99,31 +105,52 @@ renaming (`APP_DATA_DIR`, the `app-simulator-*` browser keys, the `@app/*` works
 dev-server port key — see below). What is left is display copy, package naming, and the handful of
 files that name the app's directory:
 
-| Where                                                                                  | What                                                                             |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `apps/<app>/config/app.ts`                                                             | `APP_SLUG`                                                                       |
-| `apps/<app>/package.json`                                                              | package `name` + `description`                                                   |
-| `apps/<app>/messages/en.json` + `es.json`                                              | `welcome.appName` (the header prop) and the `welcome.title`                      |
-| `apps/<app>/src/app/[locale]/layout.tsx`                                               | the document `metadata.title`                                                    |
-| `apps/<app>/src/demo-static/index.html`                                                | the static demo's `<title>`                                                      |
-| `package.json` (root)                                                                  | `name` (`<slug>-workspace`), `description`, `--filter` scripts                   |
-| `knip.json`, `vitest.config.ts`                                                        | the workspace key; the app list (`APPS`)                                         |
-| `vitest.contract.config.ts`, `tsconfig.json`, `infra/*.ts`                             | the single app each one names                                                    |
-| `apps/<app>/` itself                                                                   | the directory, renamed last                                                      |
-| `docs/`, `.claude/`, README, CLAUDE, CONTRIBUTING                                      | every backticked `apps/<app>/…` citation the path gate checks                    |
-| `CODEOWNERS`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/config.yml`, `CODE_OF_CONDUCT.md` | the maintainer's GitHub handle and the advisory URL → `PLACEHOLDER_GITHUB_OWNER` |
+| Where                                                                                  | What                                                                                             |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `apps/<app>/config/app.ts`                                                             | `APP_SLUG`                                                                                       |
+| `apps/<app>/package.json`                                                              | package `name` + `description`                                                                   |
+| `apps/<app>/messages/en.json` + `es.json`                                              | `welcome.appName` (the header prop) and the `welcome.title`                                      |
+| `apps/<app>/src/app/[locale]/layout.tsx`                                               | the document `metadata.title`                                                                    |
+| `apps/<app>/src/demo-static/index.html`                                                | the static demo's `<title>`                                                                      |
+| `package.json` (root)                                                                  | `name` (`<slug>-workspace`), `description`, `--filter` scripts                                   |
+| `knip.json`, `vitest.config.ts`                                                        | the workspace key; the app list (`APPS`)                                                         |
+| `vitest.contract.config.ts`, `tsconfig.json`, `infra/*.ts`                             | the single app each one names                                                                    |
+| `apps/<app>/` itself                                                                   | the directory, renamed last                                                                      |
+| `docs/`, `.claude/`, README, CLAUDE, CONTRIBUTING                                      | every backticked `apps/<app>/…` citation the path gate checks                                    |
+| `CODEOWNERS`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/config.yml`, `CODE_OF_CONDUCT.md` | the maintainer's handle and links → `PLACEHOLDER_GITHUB_OWNER` and `--repo` (or its placeholder) |
 
 **The last row runs even on a rename-only adoption, with no `--eject-showcase`.** Those four files
 route YOUR users to the TEMPLATE maintainer — a security report, a code-owner review, a conduct
 complaint — and that is wrong the moment you fork, not only once you delete the showcase. `init-app`
-rewrites `@jpslav` and every `github.com/jpslav/keel` advisory link to `PLACEHOLDER_GITHUB_OWNER`, and
-prints a "WHAT NOW NEEDS YOUR DETAILS" section naming exactly what to fill in. Left as
-`PLACEHOLDER_GITHUB_OWNER`, `CODEOWNERS` names an account GitHub cannot resolve, and turning on
-"require review from Code Owners" branch protection makes every PR unmergeable. `LICENSE` and the
-`docs/adr/` approver lines are the two places the maintainer's name correctly survives — the first
-because MIT requires the notice, the second because it is honest provenance for keel's own decisions.
+rewrites `@jpslav` to `PLACEHOLDER_GITHUB_OWNER`, and the `github.com/jpslav/keel` advisory and
+discussions links to `github.com/PLACEHOLDER_GITHUB_OWNER/<repo>`, and prints a "WHAT NOW NEEDS YOUR DETAILS" section naming
+exactly what to fill in. Left as `PLACEHOLDER_GITHUB_OWNER`, `CODEOWNERS` names an account GitHub cannot
+resolve, and turning on "require review from Code Owners" branch protection makes every PR unmergeable.
+`LICENSE` and the `docs/adr/` approver lines are the two places the maintainer's name correctly
+survives — the first because MIT requires the notice, the second because it is honest provenance for
+keel's own decisions.
 
-Filling in the owner is necessary and not sufficient: **two of those links depend on repository
+`tests/docs/adopter-identity.test.ts` ships with you and keeps guarding this, in a form that fits your
+repo. In the template it runs `init-app` on a scratch copy and checks the result. In yours, where the
+rewrite has already happened, it skips that half (you will see the skips) and runs one direct check: none
+of those four files may name the template's maintainer. That is what turns red if a later
+`git merge upstream/main` adds a line owned by `@jpslav` to your `CODEOWNERS`.
+
+**`<repo>` is the repository's name, which is not the app's slug.** An app called `console` can live in
+a repo called `pages`, and a link that says `…/console/security/advisories/new` 404s while looking
+right. So pass the name you will push to: `pnpm init-app console --repo pages`. It takes the NAME only
+— not `owner/name`, because the owner also fills `CODEOWNERS`, where it may be a team. Without `--repo`
+the links say `PLACEHOLDER_GITHUB_REPO` beside the owner placeholder, and the closing output says so;
+replace both (`git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github` finds
+them). Forgot it? Run `pnpm init-app --repo pages` afterwards: it replaces `PLACEHOLDER_GITHUB_REPO` in those
+three files, whatever you have put for the owner by then, and does nothing else (no citation rewrite, no
+`pnpm install` to run). On a tree `init-app` has not adopted yet it refuses, because it would scrub the
+maintainer's identity and leave the rest. Once the links name a repository, a further `--repo` is reported
+as ignored (the run says so rather than claiming a change), so edit the files directly then. `init-app` does not
+read the name from `git remote`: at adoption time `origin` is often still the template, or a fork under
+its default name, and a derived value would be plausible and wrong.
+
+Filling in the owner and repository is necessary and not sufficient: **two of those links depend on repository
 settings that are off by default.** `/security/advisories/new` resolves for a non-maintainer only once
 **private vulnerability reporting** is on (Settings → Code security), and `/discussions` 404s until
 **Discussions** is enabled (Settings → General → Features). Leave the first off and your security
@@ -200,8 +227,17 @@ What does read them by literal id is yours to change in the same commit:
 
 What the seed must keep is its SHAPE, not its content: the exports the framework reads through
 `@app-config/seed` (`tenants`, `organizations`, `people`, `agreements`, `jobSchedules`, `findTenant`,
-`findOrg` — `keel/seed/contracts` types the data), at least one person to sign in as, and two tenants for as long as you want tenant isolation to be
-something a test can observe. WHERE it lives is yours.
+`findOrg` — `keel/seed/contracts` types the data), at least one tenant and one person to sign in as,
+and — if your deployment serves more than one tenant — two tenants, so that tenant isolation is something
+you can see by using the app and not only in tests. WHERE it lives is yours.
+
+**An app deployed one tenant per deployment may seed one tenant**
+([ADR-0004](adr/0004-tenancy-rls.md), addendum of 2026-11-16), as long as the isolation proofs for your own
+tables still use two. They always can: `apps/<app>/src/app-config/db/rls-proofs.ts` is handed two tenants and an
+organization in each by the framework's proof runner, which creates them on every run and never reads your
+seed. Drop the second tenant's sign-in and its cross-tenant assertions from the specs above in the same commit,
+and keep the cross-tenant proofs. Nothing gates that last part — the RLS coverage check proves every table
+is protected, not that your proofs exercise two tenants — so it is yours to keep honest.
 
 **The Items slice is a worked example, so take what it teaches before you delete it.**
 `apps/<app>/src/app-config/db/migrations/1001_items.ts` is a worked RLS migration — after an eject, the only one left — and its

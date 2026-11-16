@@ -425,6 +425,14 @@ corrected. CLAUDE.md now says what the fixture registers ("every `@app-config/*`
 reads"), and the seam-conformance suites, not a number, are what hold the fixture to it. The published
 and internal counts above keep their numbers, because each has a stated rule and a test.
 
+## Addendum — 2026-11-16: the scan walks each app's whole `src/app`
+
+The section on the authorization choke point says the scan walks every app's `apps/*/src/app/api`. It
+walks every `route.{ts,tsx,js,jsx,mjs}` under each app's whole `src/app`, because Next serves a `route.ts`
+from anywhere there and not only under `api/`. Exemption keys are still paths relative to `src/app/api`, so
+a mutating route outside `api/` can match no exemption and must call `authorize(...)` itself. The fixture
+root, `packages/keel/test-fixture/api`, is unchanged, and so is the rest of the decision.
+
 ## Addendum (2026-11-16): `authorize()` judges actors that are not sessions
 
 **Why.** `authorize()` took only a session's `AuthUser`, so a caller that was not a browser session

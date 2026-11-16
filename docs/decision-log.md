@@ -1602,6 +1602,56 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
 - **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
 
+## Adopter papercuts: the repo name, the identity gate, one-tenant seeds (2026-11-16, `fix/adopter-papercuts`)
+
+Four gaps a first adopter reported, decided together. Each is a small change; the reasons are the part
+worth keeping.
+
+- **The repo name is a flag, `--repo`, and a placeholder without it. It is not read from `git remote`.**
+  `init-app` wrote the app's slug into the repository position of the advisory and discussions links, which
+  is right only when a repo is named after its one app (an app `console` kept in a repo `pages` got
+  `…/console/security/advisories/new`, a link that 404s and looks plausible). Rejected: deriving it from
+  `origin`. At adoption time that remote is often still the template, or a fork under its default name, so
+  the derived value would be plausible and wrong with nothing to flag it, and `--dry-run` would print a
+  different plan on each machine. The flag takes the NAME only (not `owner/name`, because the owner also
+  fills CODEOWNERS, where it may be a team). Without it the links carry `PLACEHOLDER_GITHUB_REPO` beside
+  `PLACEHOLDER_GITHUB_OWNER`, which the closing output names and `git grep` finds. "I forgot the flag" is a
+  re-run: `pnpm init-app --repo <name>` alone replaces the placeholder segment in the three files (whatever
+  the owner says by then, since filling the owner first is the natural order) and does nothing else; it
+  refuses on a tree init-app has not adopted, where it would scrub the identity and nothing else. On links that already
+  name a repository a `--repo` is reported as ignored, and the summary and closing text are driven by the
+  state the run found in the files, not by the flag, so they never claim a change that did not happen.
+- **`tests/docs/adopter-identity.test.ts` classifies its tree before asserting, rather than skipping.** It
+  ran `init-app acme --eject-showcase` on a copy of whatever tree it was in and asserted what the rewrite
+  produced. In an adopted tree the rewrite has nothing to replace (it replaces the template's literals),
+  so the assertions read the adopter's own files and went red on their slug and, once filled in, their
+  owner. It was green in the `adoption-probe` job only because that job also adopts as `acme`. The test
+  now runs the `init-app` suite only in the pristine template, which it recognises by STRUCTURE
+  (`apps/showcase` exists and the root package is still `keel-workspace`; every adopting `init-app` run
+  renames the root or deletes the showcase). Everywhere else it checks the real files directly: none may
+  name the template's maintainer, which is also the check that catches an upstream merge adding a
+  `@jpslav`-owned line to an adopter's CODEOWNERS. In the template all four must name him. The first
+  version recognised the template by the identity strings themselves, and review found the hole in that:
+  move the maintainer's identity in the four files and nothing else, and every file reads as "adopted", the
+  suite switches itself off and `init-app` silently stops scrubbing anything. A sentinel comparing the
+  test's constants with `init-app`'s literals was added to patch it, then dropped once the structural
+  test made it redundant (and it was red in adopters who scrubbed the script). Exact-spelling matching is
+  deliberate: the template's files use one spelling and the rewrite is a literal replace.
+  Rejected: skipping on "`apps/showcase` is absent" (the probe's ejected tree has none, so it would switch
+  the gate off where it is meant to run), and having `init-app` delete the test (ADR-0013 makes updates a
+  merge, so a file deleted in the fork and edited upstream is a modify/delete conflict on every merge).
+- **ADR-0004's two-seeded-tenants rule is scoped, by an addendum, with no new gate.** keel's own apps and
+  multi-tenant adopters keep two; a one-tenant-per-deployment app may seed one if its RLS proof half still
+  uses two tenants. Nothing in the framework reads the seed's tenant count, and the proof runner makes its
+  own two tenants per run, so the seed cannot starve a proof. No cheap check says whether an app's proof half
+  crosses a tenant boundary (a comment satisfies a presence check, and an app with no tables legitimately has
+  an empty half), so it stays a convention, and `/new-entity` and `/new-slice` now say to write the
+  table's proof section with both tenants. That convention was not written down anywhere before.
+- **`CLAUDE.md` said the authorization scan walks `apps/*/src/app/api`; it walks the whole
+  `apps/*/src/app`.** The behaviour was right and stricter than the sentence: a mutating `route.ts` outside
+  `api/` is scanned and, since exemption keys are measured from `src/app/api`, can match no exemption.
+  Watched failing with a bare `POST` at `src/app/[locale]/danger/route.ts`.
+
 ## `authorize()` judges actors that are not sessions (2026-11-16, `feat/authorize-non-session-actors`)
 
 The design is in the ADR-0012 addendum of the same date. The port method is in ADR-0003's. These are
