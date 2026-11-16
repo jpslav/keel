@@ -216,7 +216,8 @@ const REQUIRED_ALONGSIDE: Record<string, Exemption> = {
     'service/': {
         reason:
             'a service route verifies its caller with withServiceCaller, which builds the machine actor ' +
-            '(ctx.actor) the route then authorizes; an actor the route built itself proves nothing',
+            '(ctx.actor) the route should authorize. The gate proves the wrapper is present, not that the ' +
+            'actor authorized is the one it built (ADR-0012: a gate proves the KIND of route)',
         mustMatch: /withServiceCaller\s*[(<]/,
     },
 }

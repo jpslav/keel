@@ -547,7 +547,17 @@ numbered into the framework range. Both are now a seam-conformance test,
   indexes with a fresh one.
 
 Under strict ordering the upgrade fails with the production error. A catalog-sweeping `GRANT` fails the
-comparison.
+comparison, and so does a migration that un-forces RLS.
+
+Unordered mode had also stopped Kysely refusing an app migration that runs after a later app migration,
+as two branches' 1005 and 1006 can. So `migrateToLatest` runs a preflight first: a pending migration that
+sorts before an executed one of its OWN sequence is refused, and only framework-before-app may run out
+of order. The preflight leaves one Kysely behaviour alone: a database that ran a migration the registry
+no longer has still gets the "is missing" error, not a misleading out-of-order one.
+
+The preflight reads the migration table outside Kysely's lock. Two migrators running the SAME release
+are safe. Two different releases migrating one database at the same moment could each pass the check
+on a stale read. That is accepted: keel migrates once per deploy.
 
 **The `service/` exemption is retired.** The showcase's one mutating service route,
 `service/jobs/[id]/status/route.ts`, calls `authorize(actor, 'update', Job)` with the actor that
@@ -555,6 +565,15 @@ comparison.
 as an invariant and no longer backed by an exemption. The body's "a service or webhook route must
 contain its signature wrapper" now holds only for webhook routes. The cost falls on adopters: a mutating
 route under `api/service/` must now call `authorize(...)`, and the scan's message says how.
+
+What the old exemption also guaranteed is kept: under `service/` the scan requires `withServiceCaller`
+**in addition to** `authorize(` (`REQUIRED_ALONGSIDE`). Otherwise a route could satisfy the scan by
+authorizing a machine literal built from the request. The gate proves the wrapper is present, not that
+the actor authorized is the one the wrapper built. That is the kind-not-claim limit stated above.
+
+The broader fix was considered and not built. A lint rule banning `kind: 'machine'` literals outside
+`keel/authz` would catch a fabricated actor anywhere. But keel has never guarded against a route
+fabricating an `AuthUser` either, and the fixture's own routes build actors by hand to be scanned.
 
 **What stays in the app.** keel owns the vocabulary, the constructors, the fresh standing, the
 `manageAll` rule and the audit columns. A personal token's storage, hashing, issuance and revocation

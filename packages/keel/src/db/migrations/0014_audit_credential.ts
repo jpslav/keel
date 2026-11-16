@@ -8,7 +8,8 @@ import { Kysely, sql } from 'kysely'
  * 2026-11-16):
  *
  * - `credential_kind`: `session`, `inbound-email`, `service-key`, or a kind the app registers
- *   (keel/core/abilities `PersonCredentialKind` / `MachineCredentialKind`).
+ *   (keel/core/abilities `PersonCredentialKind` / `MachineCredentialKind`). No session route records
+ *   `session` yet: they still pass `actorUserId` alone, so their rows are NULL.
  * - `credential_id`: WHICH one, such as a token's row id, a service key's id, or the inbound email's
  *   id. Never a secret. NULL when there is nothing to name (a session).
  *

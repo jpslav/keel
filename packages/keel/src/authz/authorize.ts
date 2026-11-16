@@ -65,8 +65,8 @@ export function abilityActorFromUser(user: AuthUser, activeOrgId: string): Abili
  * way the auth port names orgs, and applied to the id every sameOrg check compares. Resolve one from the
  * other (`orgIdForSlug`) rather than taking either from the request.
  *
- * Returns null when the person is no longer an active member of that org: their credential is dead,
- * and a route answers 401. The actor never wields `manageAll`, even acting in the staff org; that power
+ * Returns null when the person is no longer an active member of that org: their credential is dead. A
+ * route answers 401; the inbound-email handlers file the message 'unmatched'. The actor never wields `manageAll`, even acting in the staff org; that power
  * belongs to a session, and keel/core/abilities enforces it whatever this field says.
  *
  * @throws Error (a programming error, never a 403) when handed a `session` credential: a session's

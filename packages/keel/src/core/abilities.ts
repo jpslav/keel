@@ -147,7 +147,9 @@ export interface AbilityActor {
 /**
  * A MACHINE acting in one org: a caller that is not a person — keel's own service keys, or a verifier
  * the app owns (a CI identity, an integration). Built by `abilityActorFromService` or `machineActor`
- * (../authz/authorize.ts), from a credential the route has already VERIFIED; never from request input.
+ * (../authz/authorize.ts), from a credential the route has already VERIFIED. Nothing in the type can
+ * tell a verified machine from a literal built out of request input. Under `service/` the authorize
+ * scan also requires `withServiceCaller`; anywhere else, the route is the only guard.
  *
  * Deliberately has no `role`, no `restricted` and no `manageAll`: a machine is not a member of anything,
  * so nothing written for people can be satisfied by one. What a machine may do is exactly what

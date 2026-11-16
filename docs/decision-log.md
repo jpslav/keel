@@ -1691,3 +1691,19 @@ the calls the work made that no plan anticipated.
       database. The docstring now requires both from one organizations row.
     - `machineActor` is kept although only the fixture calls it. Its consumer is the first adopter's
       planned CI identity, and its run-time checks are what a hand-written `MachineActor` would lack.
+- **What three review rounds changed** (a pre-PR review and two code rounds, all on Opus):
+    - `service/` routes still need their verifying wrapper (`REQUIRED_ALONGSIDE`). Without it,
+      retiring the exemption had let a request-built machine literal pass the scan.
+    - Restriction has one rule, `isRestricted(flag, role)`, in both adapters. This changes real-mode
+      sessions.
+    - The credential-kind check runs in both directions and refuses `string`.
+    - The migrator refuses an out-of-order migration within its own sequence and keeps Kysely's "is
+      missing" error. `schemaOf` now covers RLS flags, constraints, triggers, functions and column grants.
+    - The intake's system rows record no credential.
+    - The real `getMember` matches the membership by user and returns null for an unknown org.
+- **Declined after review, with reasons:**
+    - A lint ban on hand-built `kind: 'machine'` literals: keel never guarded against a route building
+      an `AuthUser` either, and the fixture builds actors by hand on purpose.
+    - Requiring `authorize(ctx.actor…)` by name under `service/`: brittle, and bypassable by renaming.
+    - An advisory lock around the migration preflight: two releases migrating one database at the same
+      moment is outside keel's deploy model.
