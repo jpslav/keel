@@ -1701,7 +1701,8 @@ worth keeping.
   survivor's own `check:demo-size` script instead of fixed text, because what is true depends on it. The
   starter passes a number, which is stated back as read from `package.json`; a survivor that passes none
   (a renamed showcase) is told `DEFAULT_BUDGET_BYTES` is its budget and that it is thin on purpose; an app
-  without the script gets no bullet. `<slug>` is the survivor's directory name, as everywhere else in that
+  without the script, or whose script is neither of those two shapes (a number then more shell, a quoted or
+  underscored number the script would reject), gets no bullet rather than a wrong one. `<slug>` is the survivor's directory name, as everywhere else in that
   list. The "roomy on purpose" wording is only used where a number is passed, since that is the starter's.
   The proposal's "room to grow to the showcase's size" is dropped: after an eject there is no showcase to
   measure against.

@@ -778,9 +778,13 @@ function readDemoBudget(onDisk: string): DemoBudget {
     const file = `apps/${onDisk}/package.json`
     if (!existsSync(abs(file))) return null
     const script = readJson<PackageJson>(file).scripts?.['check:demo-size']
-    if (script === undefined || !script.includes('check-demo-size.mjs')) return null
-    const bytes = /check-demo-size\.mjs\s+([0-9][0-9_]*)\s*$/.exec(script)?.[1]
-    return bytes ? { kind: 'explicit', bytes } : { kind: 'default' }
+    if (script === undefined) return null
+    // Only the two shapes the template ships. Anything else (a `&&` after the number, a quoted or
+    // underscored one, extra arguments) is the adopter's own and gets no bullet rather than a wrong one:
+    // `Number('820_000')` is NaN, so the script would refuse a number this would have printed back.
+    const bytes = /check-demo-size\.mjs\s+(\d+)\s*$/.exec(script)?.[1]
+    if (bytes) return { kind: 'explicit', bytes }
+    return /check-demo-size\.mjs\s*$/.test(script) ? { kind: 'default' } : null
 }
 
 /**
@@ -920,6 +924,9 @@ async function main(): Promise<void> {
 
     const apps = listApps()
     if (apps.length === 0) fail('no apps found under apps/')
+    // Before anything is renamed: a `--app showcase` rename moves the directory, and "is the showcase gone"
+    // must mean the same on a dry run, which moves nothing, and on the real one.
+    const showcaseAtStart = apps.includes(SHOWCASE)
 
     // Default target: the starter (the app the template tells you to keep), else the first app that
     // is not the demo, else whatever single app is left.
@@ -1021,7 +1028,7 @@ async function main(): Promise<void> {
         options.ejectShowcase || existsSync(abs(`apps/${survivorOnDisk}/config/params.ts`)),
         existsSync(abs(`apps/${survivorOnDisk}/src/seed`)),
         readDemoBudget(survivorOnDisk),
-        options.ejectShowcase || !existsSync(abs(`apps/${SHOWCASE}`)),
+        options.ejectShowcase || !showcaseAtStart,
     )
 }
 

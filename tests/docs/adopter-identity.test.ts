@@ -470,7 +470,45 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
             expect(flat(result.stdout)).toContain(
                 "apps/demo/package.json's check:demo-size passes no number, so DEFAULT_BUDGET_BYTES in scripts/check-demo-size.mjs is your budget",
             )
-            expect(flat(result.stdout)).not.toContain('still describe the showcase you removed')
+        })
+
+        it('says nothing, rather than guess, when the script is not one of the two shapes it knows', () => {
+            // A copy of the untouched tree whose showcase script is the adopter's own: a number followed by
+            // more shell, an underscored number the script would reject, and no script at all.
+            for (const [label, script] of [
+                ['a number then more shell', 'node ../../scripts/check-demo-size.mjs 820000 && echo ok'],
+                ['an underscored number', 'node ../../scripts/check-demo-size.mjs 820_000'],
+                ['no script', undefined],
+            ] as const) {
+                const dir = makeTestTmpDir('keel-adopter-identity-budget-')
+                copyTree(ROOT, dir)
+                const file = path.join(dir, 'apps/showcase/package.json')
+                const pkg = JSON.parse(readFileSync(file, 'utf8')) as { scripts: Record<string, string> }
+                if (script === undefined) delete pkg.scripts['check:demo-size']
+                else pkg.scripts['check:demo-size'] = script
+                writeFileSync(file, JSON.stringify(pkg, null, 4))
+                const result = spawnInitApp(dir, ['demo', '--app', 'showcase', '--dry-run'])
+                expect(result.status, `${label}: ${result.stderr}`).toBe(0)
+                expect(flat(result.stdout), label).not.toContain('The demo size budget')
+            }
+        })
+
+        it('counts a renamed showcase as still there, on a dry run and on a real one alike', () => {
+            // A number passed, so the stale-header sentence is the only thing that could differ between them.
+            const dir = makeTestTmpDir('keel-adopter-identity-budget-')
+            copyTree(ROOT, dir)
+            const file = path.join(dir, 'apps/showcase/package.json')
+            const pkg = JSON.parse(readFileSync(file, 'utf8')) as { scripts: Record<string, string> }
+            pkg.scripts['check:demo-size'] = 'node ../../scripts/check-demo-size.mjs 900000'
+            writeFileSync(file, JSON.stringify(pkg, null, 4))
+            const dry = spawnInitApp(dir, ['demo', '--app', 'showcase', '--dry-run'])
+            const real = spawnInitApp(dir, ['demo', '--app', 'showcase', '--yes'])
+            expect(dry.status, dry.stderr).toBe(0)
+            expect(real.status, real.stderr).toBe(0)
+            for (const run of [dry, real]) {
+                expect(flat(run.stdout)).toContain("passes the static demo's byte budget, 900000.")
+                expect(flat(run.stdout)).not.toContain('still describe the showcase you removed')
+            }
         })
     })
 
