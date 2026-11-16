@@ -177,7 +177,7 @@ If a screen the demo bundles imports the registry, `pnpm build:demo-static` stil
 keel's adapter registry, pglite and your real adapter (single-file builds inline every dynamic import),
 along with `server-only`'s throw. What fails is `pnpm check:demo-size`, which `pnpm verify` runs right
 after the build, and then the static-demo e2e. Measured once by wiring a registry into the starter's
-twin: the bundle grew to 54 MB against an 880,000-byte budget, and the starter's static e2e failed with
+twin: the bundle grew to 54 MB against the starter's budget (880,000 bytes then), and the starter's static e2e failed with
 `element(s) not found`. No lint rule catches this earlier, because the import usually arrives
 transitively, through a domain module. So keep the rule screens already follow: they take data as props
 and never import `@/adapters`.
