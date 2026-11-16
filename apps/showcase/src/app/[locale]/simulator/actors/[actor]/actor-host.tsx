@@ -38,6 +38,16 @@ export function ActorHost({ actor }: { actor: ActorId }) {
         [actor, t],
     )
 
+    // The world's hold on THIS actor (the `actors-held` Snapshots flag, or a preset's per-actor hold),
+    // asked before every autonomous tick — the frame is its own document, so it asks the server, which
+    // answers exactly this question.
+    const held = useCallback(async () => {
+        const res = await fetch(`/api/simulator/actors/held?actor=${encodeURIComponent(actor)}`)
+        if (!res.ok) throw new Error(`held → ${res.status}`)
+        const { held: isHeld } = (await res.json()) as { held: boolean }
+        return isHeld
+    }, [actor])
+
     const [mounted, setMounted] = useState(false)
     const [startPaused, setStartPaused] = useState(false)
 
@@ -55,7 +65,7 @@ export function ActorHost({ actor }: { actor: ActorId }) {
     // inside the dashboard's own <main>, so only this full-page host adds the wrapper.
     return (
         <main style={{ minHeight: '100vh' }}>
-            <ActorShell actor={actor} tick={tick} startPaused={startPaused} />
+            <ActorShell actor={actor} tick={tick} startPaused={startPaused} held={held} />
         </main>
     )
 }

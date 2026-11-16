@@ -8,6 +8,10 @@
     "fixture": {
         "title": "Keel test fixture",
         "docketsHeading": "Dockets",
-        "docketOpenedBy": "Opened by {name}"
+        "docketOpenedBy": "Opened by {name}",
+        "presetBusyTitle": "Busy harbor",
+        "presetBusySummary": "A pending invite, a fresh docket and held jobs.",
+        "presetBusyLeadTitle": "Busy harbor, as the lead",
+        "presetBusyLeadSummary": "The busy harbor, signed in as the depot lead."
     }
 }

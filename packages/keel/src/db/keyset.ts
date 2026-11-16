@@ -38,6 +38,26 @@ import type { DB } from './schema'
  * exact meaning of "strictly after this position in `created_at DESC, id DESC`" and the form Postgres
  * can satisfy from an index on `(…, created_at DESC, id DESC)` — see
  * each app’s own `1004_*_keyset_index` migration for the index a paged table wants.
+ *
+ * **Ordering by another column.** `created_at` is the default ordering key, and the optional trailing
+ * `orderBy` argument swaps it for any other NOT NULL `timestamptz` column of the paged table — a list
+ * that wants "most recently touched first", say. It replaces the key in all three places the pager
+ * uses it (the row-value comparison, the cursor's rendered position, and the `ORDER BY`), because a
+ * cursor is only correct when those three agree. Everything else is untouched: `withTenant` on every
+ * page, the `id` tiebreak, the full-precision cursor, the one-extra-row probe, and the server-side
+ * clamp. Leave `orderBy` out and the SQL is exactly what it was before the argument existed.
+ *
+ * **What a cursor does not say.** `keel/core/keyset`'s cursor grammar is `at` + `id` and nothing
+ * else — it names no column. A cursor minted while paging by one column is therefore
+ * indistinguishable from one minted while paging by another, and replaying it under the wrong
+ * ordering is not rejected: it is read as a position in THAT ordering and quietly skips or repeats
+ * rows. So the ordering must never be something the client chooses. Each list route owns ONE fixed
+ * ordering, picked server-side when the route is written. A route that wants to offer its caller a
+ * choice of orderings has to make that choice at the route level — separate routes, or separate
+ * server-side functions each passing its own `orderBy` — not carry it in the cursor or in a request
+ * parameter that reaches this function. The rest of the cursor contract is unchanged: the parser is
+ * total (`invalid` becomes a 400), the page size is clamped on the server, and every page is scoped
+ * the same.
  */
 
 /**
@@ -49,6 +69,26 @@ import type { DB } from './schema'
 export type KeysetTableName = {
     [K in keyof DB & string]: DB[K] extends { id: unknown; created_at: unknown } ? K : never
 }[keyof DB & string]
+
+/**
+ * The columns of table `TB` that `keysetPage` accepts as its `orderBy`: those declared NOT NULL.
+ *
+ * A nullable ordering column would be a silent trap. The page predicate is a row-value comparison,
+ * `(col, id) < (x, y)`, and once `col` is NULL that comparison is never true — so rows with a NULL
+ * key would drop out of the walk after the first page rather than raising anything. Excluding
+ * nullable columns turns that into a compile error.
+ *
+ * What the types cannot say is that the column is a `timestamptz`: the schema has no nominal
+ * timestamp type, so `created_at: Generated<string>` is the same TypeScript type as a text column
+ * such as `JobsTable.status`, and this type admits both. That half is enforced at the SQL boundary
+ * instead. The column goes in through `sql.ref` — a quoted identifier, never an interpolated string —
+ * and is then fed to `to_char(… at time zone 'UTC', …)` and compared against a `::timestamptz`
+ * parameter, so naming a non-timestamp column fails with a Postgres type error on the first page.
+ * It is loud, not a silently wrong order.
+ */
+export type KeysetOrderColumn<TB extends KeysetTableName> = {
+    [K in keyof DB[TB] & string]: null extends DB[TB][K] ? never : K
+}[keyof DB[TB] & string]
 
 /** One page, plus the token for the next one (null when this page is the last). */
 export interface KeysetPage<TRow> {
@@ -73,7 +113,8 @@ export function parseDbKeysetCursor(raw: string | null | undefined): KeysetCurso
 }
 
 /**
- * Reads one page of `build`'s query, newest-first, inside a tenant-scoped transaction.
+ * Reads one page of `build`'s query, newest-first (by `created_at`, or by `orderBy` when given),
+ * inside a tenant-scoped transaction.
  *
  * `build` supplies the table, the columns, and the APP-LEVEL scope (the org filter, the two-sided
  * one, whatever the table's boundary is). It must select `id`. Everything that makes the read a
@@ -83,34 +124,48 @@ export function parseDbKeysetCursor(raw: string | null | undefined): KeysetCurso
  * `limit` is clamped here as well as at the route: the cap is a property of the primitive, not a
  * discipline the caller has to remember.
  *
+ * `orderBy` (optional, last) names a NOT NULL timestamptz column to order by instead of `created_at`;
+ * see the file header for what it changes and why it must be fixed per route, never client-chosen.
+ * Type inference note: pass `orderBy` with a `build` whose parameter is typed (a named function, or
+ * `(trx: Transaction<DB>) => …`). With an inline arrow whose `trx` is left to be inferred, TypeScript
+ * has to settle `TB` while checking the literal `orderBy` — before `build` has been read — and falls
+ * back to the whole `KeysetTableName` bound, which then rejects `build`'s return type.
+ *
  * Two things `build` must NOT do. It must not add its own `orderBy` — the total order is what makes the
  * cursor mean anything, and a caller's ordering would silently take precedence over it. And it should
  * select the columns it wants rather than `selectAll()`, because the returned rows also carry the
  * pager's internal `keyset_at` column; map to a view before anything reaches a client (the callers here
- * all do).
+ * all do). The ordering column and `id` are referenced UNQUALIFIED, so a `build` that joins another table
+ * carrying a column of the same name gets Postgres's "column reference is ambiguous".
  */
 export async function keysetPage<TB extends KeysetTableName, O extends { id: string }>(
     db: DbPort,
     request: { tenantId: string; after: KeysetPosition | null; limit: number },
     build: (trx: Transaction<DB>) => SelectQueryBuilder<DB, TB, O>,
+    orderBy?: KeysetOrderColumn<TB>,
 ): Promise<KeysetPage<O>> {
     const limit = clampKeysetLimit(request.limit)
     const after = request.after
+    // ONE reference to the ordering column, used by the comparison, the cursor rendering and the
+    // ORDER BY below. `sql.ref` quotes it as an identifier; the type already restricted it to a real
+    // column of `TB`, and nothing from a request ever reaches it.
+    const orderColumn = (orderBy ?? 'created_at') as KeysetOrderColumn<TB>
+    const orderRef = sql.ref(orderColumn)
     return db.withTenant(request.tenantId, async (trx) => {
         // The caller's scope, applied on EVERY page — this is the query, not a first-page-only one.
         const scoped = build(trx)
         // The cursor can only ADD a conjunct to it. Both halves are bound parameters, and both were
         // pattern-checked before they got here (parseDbKeysetCursor).
         const windowed = after
-            ? scoped.where(sql<SqlBool>`(created_at, id) < (${after.at}::timestamptz, ${after.id}::uuid)`)
+            ? scoped.where(sql<SqlBool>`(${orderRef}, id) < (${after.at}::timestamptz, ${after.id}::uuid)`)
             : scoped
         // One extra row is the "is there a next page" probe — cheaper and race-free compared with a
         // COUNT(*), which would be a second query against a moving table.
         const probed = await windowed
             .select(
-                sql<string>`to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('keyset_at'),
+                sql<string>`to_char(${orderRef} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('keyset_at'),
             )
-            .orderBy(sql`created_at`, 'desc')
+            .orderBy(orderRef, 'desc')
             .orderBy(sql`id`, 'desc')
             .limit(limit + 1)
             .execute()

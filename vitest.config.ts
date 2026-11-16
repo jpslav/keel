@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 const at = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
 
@@ -36,13 +36,18 @@ const aliasesFor = (app: string) => ({
 /**
  * The framework tests that must hold for EVERY app, re-run against each app's seam:
  * - the i18n pair proves the namespace partition and en/es parity over that app's MERGED catalog;
- * - the pglite RLS suite proves that app's own tables through keel's composed proof runner.
+ * - the pglite RLS suite proves that app's own tables through keel's composed proof runner;
+ * - the demo-presets check holds that app's registered presets to its own seed, registries and catalogs.
  *
  * These are the SEAM-CONFORMANCE tests, and running them per app is the point: they are what proves
  * the seam is honest against real apps rather than only against the fixture. The REST of keel's suite
  * runs once, in the `keel` project below, against the framework's own fixture seam.
  */
-const SEAM_CONFORMANCE_TESTS = ['packages/keel/src/i18n/*.test.ts', 'packages/keel/src/db/rls-pglite.test.ts']
+const SEAM_CONFORMANCE_TESTS = [
+    'packages/keel/src/i18n/*.test.ts',
+    'packages/keel/src/db/rls-pglite.test.ts',
+    'packages/keel/src/server-lib/demo-presets-seam.test.ts',
+]
 
 // The first test to touch the fake DB cold-migrates + seeds pglite in-process; under full-suite
 // parallel load that can exceed vitest's 5s default and flake the unit job (which, unlike e2e, has no
@@ -91,6 +96,8 @@ const keelProject = {
         name: 'keel',
         environment: 'happy-dom',
         include: ['packages/*/src/**/*.test.{ts,tsx}'],
+        // Real-Postgres proofs belong to `pnpm test:contract` (vitest.contract.config.ts), not the unit run.
+        exclude: [...configDefaults.exclude, '**/*.contract.test.ts'],
         setupFiles: [at('./tests/vitest.setup.ts')],
         // The fake LLM adapter resolves fixtures from the working directory, which for `next dev` is
         // the app — but this suite runs from the REPO ROOT, so it points the adapter at the fixture's

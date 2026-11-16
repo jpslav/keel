@@ -1,10 +1,15 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { StoragePort, StoredObject, UploadConstraints, UploadTarget } from '../../ports/storage'
 import { writeFileAtomic, writeFileAtomicSync } from './atomic-write'
 import { dataDir } from './data-dir'
+
+const META_SUFFIX = '.meta.json'
+const UPLOAD_SECRET_FILE = 'upload-secret'
+/** In-flight temp file from writeFileAtomic (`<target>.<pid>.<uuid>.tmp`). */
+const TEMP_FILE = /\.\d+\.[0-9a-f-]{36}\.tmp$/
 
 /** Resolve a storage key inside the base dir, refusing path escapes. */
 function resolveKey(key: string): string {
@@ -12,6 +17,35 @@ function resolveKey(key: string): string {
     const resolved = path.resolve(base, key)
     if (!resolved.startsWith(base + path.sep)) throw new Error(`invalid storage key: ${key}`)
     return resolved
+}
+
+/**
+ * The store shares one directory with the fake's own bookkeeping (a `<key>.meta.json` sidecar per
+ * object, plus the upload secret at the root), and `list` hides those by name. So a key that could BE
+ * one is never an object: `put` refuses it rather than silently overwriting the bookkeeping, `get`
+ * finds nothing, and `delete` leaves it alone. Real S3 would accept such a key; keep keys off these names.
+ */
+function isReserved(key: string): boolean {
+    return key.endsWith(META_SUFFIX) || resolveKey(key) === path.join(dataDir('storage'), UPLOAD_SECRET_FILE)
+}
+
+/** Every file under `dir`, as `/`-separated paths relative to `root`. A missing `dir` is empty. */
+async function walk(root: string, dir: string): Promise<string[]> {
+    let entries
+    try {
+        entries = await readdir(dir, { withFileTypes: true })
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+        throw error
+    }
+    const nested = await Promise.all(
+        entries.map(async (entry) => {
+            const full = path.join(dir, entry.name)
+            if (entry.isDirectory()) return walk(root, full)
+            return [path.relative(root, full).split(path.sep).join('/')]
+        }),
+    )
+    return nested.flat()
 }
 
 /**
@@ -85,6 +119,7 @@ export function verifyUploadFields(fields: Record<string, string | undefined>): 
 
 export const fakeStorage: StoragePort = {
     async put(key, body, contentType) {
+        if (isReserved(key)) throw new Error(`invalid storage key: ${key} (reserved by the fake store)`)
         const file = resolveKey(key)
         await mkdir(path.dirname(file), { recursive: true })
         await writeFileAtomic(file, body)
@@ -94,10 +129,31 @@ export const fakeStorage: StoragePort = {
     },
 
     async get(key): Promise<StoredObject | null> {
+        if (isReserved(key)) return null
         const file = resolveKey(key)
         if (!existsSync(file)) return null
         const [body, meta] = await Promise.all([readFile(file), readFile(`${file}.meta.json`, 'utf8')])
         return { body: new Uint8Array(body), contentType: (JSON.parse(meta) as { contentType: string }).contentType }
+    },
+
+    async list(prefix): Promise<string[]> {
+        // dataDir creates the store, so a fresh checkout lists as empty; the ENOENT guard in walk
+        // covers the store being wiped (world reset) between that call and the read.
+        const base = dataDir('storage')
+        const files = await walk(base, base)
+        return files
+            .filter((file) => !file.endsWith(META_SUFFIX) && file !== UPLOAD_SECRET_FILE && !TEMP_FILE.test(file))
+            .filter((key) => key.startsWith(prefix))
+            .sort()
+    },
+
+    async delete(keys) {
+        for (const key of keys) {
+            if (isReserved(key)) continue
+            const file = resolveKey(key)
+            await rm(file, { force: true })
+            await rm(`${file}${META_SUFFIX}`, { force: true })
+        }
     },
 
     async getSignedDownloadUrl(key): Promise<string> {

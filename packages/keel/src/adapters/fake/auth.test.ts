@@ -1,13 +1,11 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { APP_SLUG } from '@app-config/identity'
 
 // No fake-auth unit tests existed before Simulator slice 1 — devSignIn/session both round-trip
 // through next/headers' cookies(), which throws outside a request scope, so both need the same
 // throwaway-dir + mocked-cookie-jar setup as simulator.test.ts.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-auth-'))
+const tmp = makeTestTmpDir('app-auth-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

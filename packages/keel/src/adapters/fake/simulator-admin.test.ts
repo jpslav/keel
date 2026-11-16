@@ -1,12 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the module (fake-adapters.test.ts /
 // simulator.test.ts pattern). closeFakeDb() no-ops here since these tests never spin up pglite —
 // resetWorld/saveSnapshot/restoreSnapshot only touch it if some earlier code in THIS process already did.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-simulator-admin-'))
+const tmp = makeTestTmpDir('app-simulator-admin-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })
@@ -69,6 +69,50 @@ describe('simulator-admin snapshots', () => {
         expect(existsSync(path.join(emailsDir, 'leftover.json'))).toBe(false)
     })
 
+    test('reset clears per-actor holds, and a snapshot saves and restores them', async () => {
+        const { readActorHolds, setActorHold } = await import('./simulator')
+        const { resetWorld, saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
+
+        setActorHold('fixture-tug', true)
+        await saveSnapshot('holds-checkpoint')
+        setActorHold('fixture-tug', false)
+        setActorHold('fixture-barge', true)
+
+        await restoreSnapshot('holds-checkpoint')
+        expect(readActorHolds()).toEqual({ 'fixture-tug': true })
+
+        await resetWorld()
+        expect(readActorHolds()).toEqual({})
+    })
+
+    test("reset clears the fake LLM's request catch, as it clears the mailbox", async () => {
+        const { dataDir } = await import('./data-dir')
+        const { resetWorld } = await import('./simulator-admin')
+        const { fakeLlm, listCaughtLlmRequests } = await import('./llm')
+
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'before reset' }] })
+        expect(listCaughtLlmRequests()).toHaveLength(1)
+
+        await resetWorld()
+
+        expect(readdirSync(dataDir('llm-requests'))).toEqual([])
+        expect(listCaughtLlmRequests()).toEqual([])
+    })
+
+    test('a snapshot carries the caught LLM requests it was taken with', async () => {
+        const { saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
+        const { fakeLlm, listCaughtLlmRequests, clearCaughtLlmRequests } = await import('./llm')
+
+        clearCaughtLlmRequests()
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'kept' }] })
+        await saveSnapshot('with-llm-catch')
+        await fakeLlm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'after' }] })
+
+        await restoreSnapshot('with-llm-catch')
+
+        expect(listCaughtLlmRequests().map((c) => c.messages[0]!.content)).toEqual(['kept'])
+    })
+
     test('snapshot name validation rejects path traversal and uppercase', async () => {
         const { saveSnapshot, restoreSnapshot } = await import('./simulator-admin')
 
@@ -82,5 +126,17 @@ describe('simulator-admin snapshots', () => {
         const { restoreSnapshot } = await import('./simulator-admin')
 
         await expect(restoreSnapshot('never-saved-snapshot')).rejects.toThrow(/unknown snapshot/)
+    })
+
+    test('a rewrite requested from inside another is refused, not deadlocked, and the queue keeps working', async () => {
+        const { resetWorld, resetWorldThen, saveSnapshot } = await import('./simulator-admin')
+
+        // An app's preset half calling resetWorld() from inside the replay's turn would chain onto that
+        // very turn and wait for itself forever. It must fail fast instead.
+        await expect(resetWorldThen(() => resetWorld())).rejects.toThrow(/would deadlock/)
+        // ...and the queue is not poisoned: the next rewrite runs normally.
+        await expect(saveSnapshot('after-reentry')).resolves.toBeUndefined()
+        // Ordinary concurrent callers (not re-entrant) still queue rather than being refused.
+        await expect(Promise.all([resetWorld(), resetWorld()])).resolves.toEqual([undefined, undefined])
     })
 })

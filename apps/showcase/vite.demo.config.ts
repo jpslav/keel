@@ -2,6 +2,7 @@ import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
+import { pruneMantineCss } from '../../scripts/vite-prune-mantine-css'
 
 /**
  * Builds the hash-routed static demo shell (src/demo-static) that runs from file://.
@@ -12,7 +13,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 export default defineConfig({
     root: path.resolve(__dirname, 'src/demo-static'),
     base: './',
-    plugins: [react(), viteSingleFile()],
+    plugins: [react(), pruneMantineCss(), viteSingleFile()],
     css: {
         postcss: __dirname,
     },

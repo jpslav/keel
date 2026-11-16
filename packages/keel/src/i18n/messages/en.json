@@ -98,6 +98,7 @@
         "mailToLine": "to {to}",
         "mailLinksHeading": "Links in this message",
         "peopleInvitedBadge": "invited",
+        "peopleOrgRole": "{org} · {role}",
         "peopleHint": "Click a person to sign in as them; choosing an invited person only switches whose world you see.",
         "snapshotsTab": "Snapshots",
         "snapshotsResetHeading": "Reset the world",
@@ -157,6 +158,7 @@
         "actorFrameTitle": "Actor: {actor}",
         "actorRunning": "Running",
         "actorPaused": "Paused",
+        "actorHeld": "Held",
         "actorPauseButton": "Pause",
         "actorResumeButton": "Resume",
         "actorStepButton": "Step",
@@ -241,7 +243,14 @@
         "tourMiss": "Not found ({action}): {target}",
         "tourReportClean": "Tour finished: {steps} steps, nothing missing.",
         "tourReportProblems": "Tour finished: {steps} steps, {count} missing.",
-        "tourReportDismiss": "Dismiss"
+        "tourReportDismiss": "Dismiss",
+        "presetsHeading": "Start from a preset",
+        "presetsHint": "Reset the world and replay a scripted starting point — works in every demo, including the single-file one.",
+        "presetsLoad": "Load",
+        "noticePresetLoaded": "Preset loaded: {name}",
+        "snapshotsNameReserved": "That name belongs to reset or a preset — pick another.",
+        "noticePresetFailed": "Preset couldn't load: {name}. The world is only partly set up — reset it to start clean.",
+        "noticePresetFailedStale": "Preset couldn't load: {name}. The world was reset but not fully set up, and this page still shows the old one — reset the world to start clean."
     },
     "acceptInvite": {
         "title": "Join {org}",

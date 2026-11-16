@@ -56,10 +56,52 @@ export interface DemoInboundContext {
 }
 
 /** Same two outcomes the real handler contract has: it produced its effect, or it declined with a
- *  reason. (A throw is the real contract's third outcome; the twin has no poison-message channel.) */
-export type DemoInboundResult = { status: 'handled'; actorUserId: string } | { status: 'unmatched'; reason: string }
+ *  reason. A throw is the third, as in the real contract: the twin's intake files the message `failed`.
+ *  Like
+ *  the real contract, 'handled' may name the row it created (`subjectId`), which is what a demo preset's
+ *  `inbound` step binds to its `as` name. */
+export type DemoInboundResult =
+    { status: 'handled'; actorUserId: string; subjectId?: string } | { status: 'unmatched'; reason: string }
 
 export type DemoInboundHandler = (ctx: DemoInboundContext) => DemoInboundResult
+
+/**
+ * What a STATIC half of a demo-preset operation kind is given (keel/core/presets.ts) — the twin of the
+ * server half's context, plus the handful of world operations an app twin needs to act as an EXPLICIT
+ * actor in an EXPLICIT team. Never "whoever is signed in": a preset replays before anyone is, and the
+ * world's ambient helpers (`logAudit`, the signed-in person) would attribute the step to the wrong desk.
+ */
+export interface StaticPresetOperationContext {
+    /** Named results bound so far in this replay. `resolve` throws for a name no earlier step bound, and
+     *  the replay then settles false — the twin of the server half's throw. */
+    refs: { resolve(name: string): string }
+    /** A person by id: the seed plus everyone who has accepted an invite in this world. */
+    findPerson: (personId: string) => SeedPerson | undefined
+    /** Append an audit row attributed to `entry.actorUserId`, in the named tenant and team — the twin of
+     *  `recordAuditEvent` with the ids the server half resolved. */
+    recordAudit: (
+        entry: { action: string; subjectType: string; subjectId: string | null; actorUserId: string },
+        scope: { tenantSlug: string; orgSlug: string },
+    ) => void
+    /** The world's single-recipient notification twin (`DemoWorld.notifyMemberOf`). */
+    notifyMemberOf: DemoWorld['notifyMemberOf']
+    /** keel's own static halves, so an app entry that REPLACES a framework kind can wrap keel's twin
+     *  rather than re-implement world state the context does not expose. */
+    framework: Readonly<Record<string, StaticPresetOperationHandler>>
+}
+
+/**
+ * One operation kind's STATIC half: perform the step in the in-memory world, answering `{ ref }` with the
+ * id of what it created (when it created something, so `as` can name it) or `false` when this world
+ * cannot perform it — which abandons the replay and settles it false, like the server half's throw.
+ * Synchronous: the replay runs one step per commit (keel/demo-static/world.ts `applyPreset`).
+ *
+ * Written as a method type on purpose: method parameters are compared bivariantly, so a half typed for
+ * its own kind's arguments fits the `Record<string, StaticPresetOperationHandler>` registry.
+ */
+export type StaticPresetOperationHandler<Args = unknown> = {
+    method(args: Args, ctx: StaticPresetOperationContext): { ref?: string } | false
+}['method']
 
 export interface DemoWorldOptions {
     /**
@@ -83,6 +125,14 @@ export interface DemoWorldOptions {
     initialMail?: { to: string; subject: string; html: string }[]
     /** Clears the composition root's OWN rows when the world resets — the twin of wiping `.data/`. */
     onReset?: () => void
+    /**
+     * Static halves of the app's demo-preset operation kinds, keyed by kind — the twins of its server
+     * halves (`@app-config/preset-operations`), supplied here for the same reason `inboundHandlers` are:
+     * they act on the composition root's own rows, and a server half could never be bundled. Composed over
+     * keel's own halves, so an entry with a framework kind's name replaces keel's. A registered kind with
+     * no static half makes any preset using it settle false in this world.
+     */
+    presetOperations?: Record<string, StaticPresetOperationHandler>
 }
 
 // ── What the composition root gets back ───────────────────────────────────────────────────────────
@@ -217,8 +267,16 @@ export interface DemoWorld {
     failingEndpointIds: string[]
     toggleEndpointFailure: (endpointId: string, failing: boolean) => void
     runDueDeliveriesNow: () => void
+    /** The actors a demo preset has individually held (`actor.hold`), by actor id; `true` = held. An actor
+     *  host answers its shell's `held()` with this OR the app's world-wide hold flag — the twin of the
+     *  server's per-actor `held` route. Cleared on reset. */
+    actorHolds: Record<string, boolean>
     featureFlags: FeatureFlag[]
     setFeatureFlag: (flag: string, enabled: boolean) => void
     demoBannerOn: boolean
     resetWorld: () => void
+    /** Load a registered demo preset (keel/core/presets.ts): reset, replay its operations, sit down as its
+     *  viewpoint. Resolves true once the world is ready; false when no preset has that id, or when the
+     *  replay was abandoned (a reset or another load mid-replay) or hit a step it could not perform. */
+    applyPreset: (id: string) => Promise<boolean>
 }

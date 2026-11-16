@@ -73,11 +73,14 @@ export interface ToursHandle {
 export function useTours(
     options: {
         /**
-         * Put the world into the snapshot a tour declares, before its first step. `'reset'` is the snapshot
-         * every host has (the seeded world); a server host may also restore a named snapshot. On a host
-         * where that reloads the page, the tour resumes itself afterwards.
+         * Put the world into the start a tour declares, before its first step — resolved by the host with
+         * keel/core/presets.ts `resolveWorldStart`: `'reset'` (the seeded world) and every registered demo
+         * preset work on every host; a server host may also restore a saved snapshot. On a host where that
+         * reloads the page, the tour resumes itself afterwards. Answer `false` when this host cannot
+         * produce that world: the tour still runs, but its start is recorded as a miss, which fails the
+         * CI walkthrough rather than letting a tour quietly begin in the wrong world.
          */
-        onSnapshot?: (snapshot: string) => void | Promise<void>
+        onSnapshot?: (snapshot: string) => void | boolean | Promise<void | boolean>
     } = {},
 ): ToursHandle {
     const { onSnapshot } = options
@@ -172,7 +175,15 @@ export function useTours(
         // Snapshot first: a tour begins from a world it can describe, not from wherever the last person
         // clicked. On a server host this reloads, and the resume marker takes over.
         writeResumeMarker({ tourId, idx: 0 })
-        if (target.snapshot && onSnapshot) await onSnapshot(target.snapshot)
+        if (target.snapshot && onSnapshot) {
+            // A host that could not produce the world answers false; one whose request failed outright
+            // (a network error, a throw) is the same miss, never an unhandled rejection that leaves the
+            // resume marker pointing at a tour that never began.
+            const produced = await Promise.resolve()
+                .then(() => onSnapshot(target.snapshot!))
+                .catch(() => false as const)
+            if (produced === false) addMiss({ action: 'snapshot', target: target.snapshot })
+        }
         goto(tourId, 0)
     }
 

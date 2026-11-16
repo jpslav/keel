@@ -349,6 +349,18 @@ signatures, render purity. Skim the bold lead-ins; they are the index._
   path trips the purity lint. Fix: capture the anchor ONCE in a lazy `useState(() => Date.now())`
   initializer (the one place an impure read is allowed) and read `mountedAtMs + offset` everywhere —
   render-pure, and consistent with the seed schedule's `next_run_at` basis (also computed at mount).
+- **An iframe in server-rendered HTML holds up the host page's `load` event.** Making the Simulator's
+  actor frames mount from page load put two same-origin iframes into every page's SSR output. A
+  document's `load` waits for its subframes, so every page — and every Playwright
+  `waitForURL(..., 'load')` — also waited on two dev-server builds of the actor page. The e2e suite went
+  from 1.7m to 3.1m with two minute-long timeouts. Mounting background iframes just after the host's own
+  `load` (`tab-mount.ts`'s `pageLoaded`) brought it back to 1.8m with none (2026-10-03).
+- **`react-hooks/purity` can blame a `Date.now()` you didn't touch.** In
+  `packages/keel/src/demo-static/world.ts`, adding any CALL on a seed person's `memberships` inside
+  `useDemoWorld` (an inline `.map`, or a module-level helper taking the array) made the rule flag the
+  `Date.now()` in `startJob`, ~400 lines away, inside an event handler. Passing the array through
+  untouched (`orgs: p.memberships`) and shaping it in the consumer clears it. If purity fires on a line
+  you didn't change, look for a new call on a captured value in the same hook (2026-10-03).
 - **A raw cross-tenant scan of a FORCE-RLS table only _appears_ to work on pglite.** The due-scan's
   first draft read `job_schedules` via `db.getDb()` with no tenant set — green everywhere locally
   because pglite's default role is a superuser that bypasses RLS. On a real Postgres role (Aurora's
@@ -1192,3 +1204,184 @@ pass got no exclusion list; prior claims were handed to it as hypotheses to re-d
   "126 published subpaths" figure out of `CLAUDE.md` and fails if it is wrong — and 126 was right in
   all three places it appears. Its complement, "the other 33 modules are internal", was ungated and
   was 34, in three files. A gate on half a derived pair is a gate on half a derived pair.
+
+## `keysetPage` alternate ordering (2026-10-03, `feat/upstream-date-storage-keyset`)
+
+- **A literal `orderBy` next to an inline arrow `build` makes TypeScript abandon `TB`, and `NoInfer`
+  does not help.** `keysetPage(db, req, (trx) => trx.selectFrom('dockets')…, 'last_touched_at')` fails
+  to typecheck: `build`'s return type is rejected against `SelectQueryBuilder<DB, KeysetTableName, …>`
+  and `O` collapses to `{ id: string }`. The checker has to resolve `KeysetOrderColumn<TB>` to test the
+  literal, which happens before the context-sensitive arrow (untyped `trx`) is read, so `TB` is fixed
+  at its constraint. Typing the parameter (`(trx: Transaction<DB>) => …`) or passing a named `build`
+  restores inference, and a nullable, missing or other-table column is then rejected naming
+  `KeysetOrderColumn<"dockets">`. Wrapping the parameter in `NoInfer<TB>` produced byte-identical results
+  in all three shapes (tsc 5.9.3), so it is not used. The type-level assertions are in
+  `packages/keel/src/db/keyset.test.ts`.
+- **"Is a timestamptz" is a runtime guarantee, and it holds.** The schema has no nominal timestamp
+  type, so `KeysetOrderColumn` cannot exclude a text column; pointing the proof at `dockets.label`
+  failed on the first page with `function pg_catalog.timezone(unknown, text) does not exist`, from the
+  `to_char(… at time zone 'UTC', …)` cursor render. A wrong-typed key errors, it does not mis-order.
+- **The proof only counts because the tie and the two orderings disagree.** Three sabotage runs, each
+  red on both pglite and real Postgres: ordering by `created_at` regardless of `orderBy` (first row
+  wrong), comparing on `created_at` while ordering by the alternate column (the walk never
+  terminates), and rendering the cursor from `created_at` (the walk stops after 3 of 6 rows). That
+  needs a row that is oldest by one column and newest by the other, and a tie wider than the page
+  size.
+
+## Test temp directories are cleaned up by construction (2026-10-03)
+
+Twenty-three test files made a scratch directory with a raw `mkdtempSync` and never removed it, so every
+`pnpm test:unit` left roughly that many directories (several of them holding a pglite data dir) in
+`$TMPDIR`. Run often enough across worktrees, that has filled a developer's temp filesystem past
+100GB without anything ever failing.
+
+- **One helper, `tests/support/tmp-dir.ts`.** `makeTestTmpDir(prefix)` / `makeTestTmpDirAsync(prefix)`
+  create the directory, write an EMPTY SIBLING marker file (`<dir>.keel-test-tmp`), and queue both for
+  removal. The marker is a sibling and not a file inside the directory because some tests assert the
+  exact contents of their directory (`atomic-write.test.ts` lists it). The directory is removed first
+  and the marker second, in one `try`, so a directory that cannot be deleted keeps its marker and the
+  leak guard still sees it. The suffix lives in `tests/support/tmp-dir-marker.mjs` because the guard is
+  plain node and cannot import a `.ts` file.
+- **The `afterAll` is registered at the module's top level, and the functions register nothing.**
+  Vitest silently drops a hook registered at run time from inside another hook, so a helper that
+  registered its own cleanup on first use would leak exactly when a test file called it from a
+  `beforeAll` — no error, just no cleanup. Registering nothing in the functions is what makes them
+  callable from module scope, `beforeAll`, `beforeEach` or a test body. Vitest isolates each test file
+  (`isolate` is left at its default), so the module and its one hook exist once per file. `afterAll`
+  hooks run in reverse registration order; this was checked rather than assumed, by logging from
+  `db/jobs.test.ts`'s own `afterAll` and from the helper's — the file's own hook ran first, the
+  directory removal second, so a handle closed in a test's own `afterAll` is closed before its
+  directory goes.
+- **`scripts/check-tmpdir-leak.mjs` runs `vitest` with `TMPDIR` pointed at a fresh per-run directory**
+  (`test:unit`, `test:coverage`, `test:contract`), counts the marker files left in it, and deletes it
+  whether or not the run passed. The per-run directory is the point. The obvious design — count markers
+  in the shared tmpdir before and after — reports a leak whenever a second worktree runs its tests in
+  the same window, and this repo is worked from several worktrees at once; with a private tmpdir the
+  count is exactly this run's. It also bounds the damage from a leak the lint rule cannot see (an
+  aliased `mkdtemp`, a vendor library that makes its own temp dir): that directory lands in the per-run
+  directory, which is removed, so it cannot accumulate across runs. A failing child's exit status wins;
+  a clean child with surviving markers exits 1 and names them.
+  One macOS constraint to know: `tsx` (used by `adopter-identity.test.ts`) opens a unix socket under
+  `$TMPDIR`, and a socket path is limited to about 104 characters. The run-directory name is kept short
+  for that reason; a long `TMPDIR` of your own can reproduce `listen EINVAL` in that test.
+- **`keel/no-direct-mkdtemp` is its own rule id**, not a `no-restricted-syntax` selector — that rule's
+  config merges by key, and a later block re-declaring it for overlapping files replaces the earlier
+  selectors without a word (the trap this file's lint config already documents). It matches the call by
+  name, bare or as a member (`fs.mkdtempSync`, `fsp.mkdtemp`), over `**/*.test.{ts,tsx}`,
+  `apps/*/tests/**` and `packages/keel/test-fixture/**`. The second covers the Playwright specs and
+  their helpers, which `test:e2e` runs outside any leak guard; the helper registers a vitest hook and
+  cannot run there, so the message also names Playwright's own `testInfo.outputPath()`, which Playwright
+  clears at the start of every run. The third is named explicitly, as every framework-invariant gate
+  is, so a non-`.test` fixture helper is covered. It does not see a renamed import or a computed key;
+  the guard above is what covers those. Both `keel/*` rules now share ONE plugin object, since flat
+  config compares plugin identity across overlapping blocks. The rule is exported from
+  `eslint.config.mjs` for `tests/lint/no-direct-mkdtemp.test.ts` — in the alias-free `repo` vitest
+  project, since it pins repo tooling rather than framework code — which pins what it matches.
+- **Seen to fail, both gates.** A bare `mkdtempSync(...)`, an `fs.mkdtempSync(...)` in a test file, a
+  bare call in a `test-fixture/*.test.ts`, one in a non-test `test-fixture/*.ts` and one in an
+  `apps/showcase/tests/e2e/*.spec.ts` each turned
+  `pnpm lint` red with `keel/no-direct-mkdtemp` ("`mkdtempSync()` leaves its directory behind on every
+  test run. Use makeTestTmpDir() / makeTestTmpDirAsync() ..."). With the helper's directory removal
+  made to throw, `pnpm test:unit packages/keel/src/db/audit.test.ts` passed its tests and then exited 1
+  with `check-tmpdir-leak: 1 test temp dir(s) outlived the run: app-audit-db-xfn0R5.keel-test-tmp`.
+  Restored, two full `pnpm test:unit` runs reported 0 unremoved and left no `keel-test-run-*` behind.
+  Worth knowing from that run: the helper's `console.error` for the failed removal appeared under
+  `--reporter=verbose` but not under vitest's default reporter, so the guard — not that log line — is
+  what makes a failed removal visible.
+- **`scripts/e2e-profile.mjs` is left alone**: it already `rmSync`s its scratch directory, and it is a
+  script, outside the rule's scope (test files).
+
+## Demo presets (2026-10-03, `prebaked-demo-presets`)
+
+- **Replaying a script in a React-state world needs one step per commit.** The static twin's operations
+  read the world through the render's closure: the invite's duplicate check reads `invites`, and the
+  inbound twin reads the member list and the app's ticket list. A loop that calls `resetWorld()` and
+  then every operation in the same handler runs every step against the world as it was BEFORE the
+  reset. Functional `setX(prev => …)` updates queue correctly, but the reads do not. `world.ts` drains a
+  queue instead, one step per zero-delay timer after each commit, which is what the server gets for free
+  by writing to disk between steps. The timer is there for the `set-state-in-effect` rule, and its
+  cleanup makes a reset mid-replay drop the rest of the queue.
+- **A handler that starts a full reload should never resolve.** The server glue's reset fired its
+  fetch and returned, so a tour's `start()` went straight on to show step 1 on a document that was about
+  to be replaced. An e2e that pressed Next promptly lost the press to the reload. Returning a promise
+  that never settles on success, and settles `false` on refusal, is the honest type. Found by walking the
+  whole preset tour on the server host, which CI does not do; CI walks tours only from `file://`.
+- **The server's duplicate check is the caller's, not the shared invite core's.** `sendOrgInvite` starts
+  after the org route's 409 check, and keel's server half of the `invite` kind makes the same check
+  before calling it. The static twin's `inviteInto` keeps the check itself and answers false, which
+  `sendInvite` turns into its form error and the replay into a failure. A preset is held to "no
+  duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
+  error contract onto callers that each want a different one.
+
+## The static demo's size budget (2026-11-16, `demo-size-headroom`)
+
+- **Bisecting a size is cheap here, so do it instead of guessing.** A demo build is ~6 s. Building every
+  first-parent merge since the first commit (eight builds), then every code commit inside the one that
+  jumped (eleven more), showed where it went: one merge (#26) was 90% of the showcase's growth and 87% of the
+  starter's. A throwaway worktree plus `pnpm install
+--frozen-lockfile` per commit is all it takes; never `git checkout` in your own worktree for it.
+- **`renderedLength` is a map, not the output.** A module-size recorder (a Vite plugin reading
+  `chunk.modules` at `generateBundle`) sums pre-minification sizes, so it ranks things but does not add up
+  to the file, and it lists modules whose bodies the bundler later dropped. Use it to find suspects, and
+  take the number from the built file. The first suspect list put valibot at 6.9 KB; valibot and the four schemas it served cost 3.2 KB in the file.
+- **A module-level call is a side effect the bundler must keep.** `export const op = { args:
+v.strictObject(...) }` keeps valibot in every bundle that imports the module for something else, even
+  when `op` is never used. `/* @__PURE__ */` on the outer call alone did nothing, because its arguments
+  (`v.string()`) are calls too and are kept; on every call, outer and inner, it did work (showcase 814,660 to
+  811,907). The 2026-10-03 entry in `docs/decision-log.md` ("Standard Schema, with Valibot for keel's own
+  kinds") measured the same ~3 KB and accepted it, because every app author would have to repeat the
+  annotation. Building keel's OWN definitions inside a function takes keel's share out and asks nothing of an
+  author. An app's own definitions still pay.
+  `tests/tooling/static-demo-bundle.test.ts` bundles the entry the way the demo does (esbuild's metafile
+  reports bytes per input) and fails on the old shape.
+- **The apps shipped the whole Mantine stylesheet: 15% of the demo.** `@mantine/core/styles.css` is every
+  component's CSS, 273 KB, and the starter's bundle reaches 33 of ~100 component stylesheets. Mantine ships per-component
+  sheets (`@mantine/core/styles/<Name>.css`, exported as `./styles/*`), which is a list someone keeps; a missing entry unstyles one component and every test
+  still passes. The pruning plugin asks the bundle instead: Mantine's CSS-module class names are hashed
+  (`m_77c9d27d`), and those hashes are written in the component's JavaScript and nowhere else.
+- **Things the pruning had to get right, each pinned by a test:** a hash is 7 or 8 hex digits (`m_a74036a`:
+  a leading zero is trimmed; `{8}` alone silently skips 28 of 404 classes); a hashed class inside `:not()`,
+  `:is()`, `:where()`, `:has()` or an attribute is no requirement, since `.a:not(.m_x)` matches exactly when
+  `.m_x` is absent; a bracket inside a quoted attribute value is not nesting; a selector list goes only when
+  every selector is dead; the stylesheet's own selectors are not evidence that a class ships; an at-rule goes only
+  if the pruning emptied it (an app's own `@layer base {}` still orders a layer). Each of eleven mutations of
+  the plugin was seen red.
+- **A plugin that finds nothing must fail, not pass.** The first run left the size unchanged and printed
+  nothing: Vite emits the one stylesheet in its own `generateBundle`, which runs after every ordinary plugin's,
+  so the plugin saw only the JS chunk. It needs `enforce: 'post'` and a place before `viteSingleFile()`
+  (another `post` plugin; the order within a phase is array order). It now throws when it sees no stylesheet.
+  The re-based budgets are the second net: both sit below the unpruned size, so a plugin that stops pruning
+  turns the gate red. Seen: the unpruned starter, 851,633 bytes, against its 820,000 budget, exits 1.
+- **How the pruning was checked for visible change.** A script (not in the repo) opened the pruned and the
+  unpruned demo in Chromium and dumped every element's full computed style, `::before` and `::after`
+  included, for 27 starter and 29 showcase states: welcome, picker, three sign-ins, user menu, profile and
+  org screens, every Simulator tab, the locale control, notification bell, dark scheme. Identical, with two
+  things to know for a re-run. Mantine's generated ids are random per load (`mantine-<random>-label`), so key
+  elements by test id and class, never id. And in one state (the Events tab) text widths differ by a fraction of a pixel, and
+  they differ the same way when the SAME unpruned build is compared with itself, so leave the layout-derived
+  properties (`width`, `height`, `inline-size`,
+  `block-size`, `perspective-origin`, `transform-origin`) out of the comparison; every other property
+  of the same elements matched.
+- **The gate used to be invisible until red.** `check-demo-size` now prints the headroom and warns under 2%,
+  as a workflow annotation on CI. The 2%-headroom trigger of the old future-task was something a person had
+  to notice by measuring, and nobody had: the showcase sat at 99.4% for the length of the presets work.
+
+## A test of the adoption tool must vary the inputs that must not matter (2026-11-16, `fix/adopter-papercuts`)
+
+- **A gate that pins the output for one hard-coded input passes in exactly the tree that matches it.**
+  `adopter-identity.test.ts` adopted as `acme` and asserted `…/acme/…`, and the `adoption-probe` job adopts
+  as `acme` too, so the second run of that test inside the probe's ejected tree was green by coincidence.
+  Any other slug turned three tests red in an adopter's repo, and the same coincidence hid that the slug
+  was being written where the repository name belongs. The suite now uses a slug (`acme`) and a repo
+  (`pages`) that differ, so a link that carries the wrong one fails by name. The general rule: pick test
+  values so that confusing two inputs is visible.
+- **`describe.runIf` collects its suite and skips it; it does not run its `beforeAll`.** The adopter-side
+  runs show the template suite as skipped rather than absent. Decide the condition once at module load,
+  and make it independent of what the suite tests. The first version keyed on "do the files still name the
+  maintainer", which is exactly the thing `init-app` is supposed to change, so changing it in the template
+  switched the suite off with nothing red. Structure (the demo app exists, the root package keeps the
+  template's name) is what an adoption always changes and a maintainer's edit to contact files never does.
+- **Write a test file that ships to adopters as if it will be read in a tree you cannot see.** This repo is
+  taken by fork and updated by merge (ADR-0013), so a template-maintenance test lands in every adopter's
+  `pnpm verify` and returns with every merge. Deleting it on adoption conflicts on every later edit; a test
+  that recognises which tree it is in does not.

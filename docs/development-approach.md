@@ -188,7 +188,9 @@ every developer and every agent. Determinism also makes tests trustworthy.
 
 **Tradeoff.** Fakes can drift from real behavior — mitigated by running the _same_ suite against the real
 engine. Here, `pnpm test:contract` runs the identical row-level-security proofs on real Postgres (embedded
-binaries locally, a service container in CI); if the fake ever drifts, one of the two runs breaks.
+binaries locally, a service container in CI); if the fake ever drifts, one of the two runs breaks. keel's
+own fixture runs there too, in a database of its own, which is how a driver-level difference between the
+engines (a `date` column read back as a different value on each) is caught the same way.
 
 ## LLM stubbing — record / replay by default ✅
 
@@ -199,6 +201,12 @@ adapter. **Demo mode is always canned.**
 
 **Why.** Dev, demo, and test want determinism, speed, and zero setup; local models provide none of those,
 plus worse quality. Canned demos never lose "live-demo roulette."
+
+**The request side is caught too.** The fake adapter writes every request it is sent (purpose, system,
+messages, and a tool loop's tool definitions) to `.data/llm-requests/` before it looks up a fixture, the
+way the fake email adapter catches a send. A fixture proves what the app does with an answer; the catch
+proves what the app put into the prompt — including for a request that matches no fixture. A world reset
+clears it and a snapshot carries it.
 
 **Tradeoff.** Fixtures must be re-recorded when prompts or models change — a one-command chore (`pnpm
 llm:record` / `.claude/commands/record-fixtures.md`), with the diff reviewed like any other change. See ADR
@@ -253,7 +261,7 @@ whole simulated-world panel described next, is walkable there too.
 **The static demo maintains feature parity — always.** Every feature ships its in-memory twin in the same
 change: the same router-agnostic components driven by in-memory state instead of server routes. The static
 demo degrades only where physics forbid — no server means no real HTTP or byte downloads, no filesystem
-means Snapshots is reset-only — and every such degrade is noted where it happens. Pure world _logic_ (flags,
+means Snapshots cannot SAVE (reset and the demo presets still work: they are scripts, not files) — and every such degrade is noted where it happens. Pure world _logic_ (flags,
 held jobs, advancing state) is never a physics degrade: if it can run in memory, the twin runs it. An empty
 tab in the flagship portable demo would undermine the very proof it exists to make. The budget guard
 (`scripts/check-demo-size.mjs`) keeps parity honest: hand-built twins over vendored libraries, per the
@@ -283,7 +291,7 @@ deliveries, with the signed body/header inspectable per delivery, a per-endpoint
 "deliver due now" control that drains on the same ticks as Jobs' schedule runner;
 _Actors_ (below) runs simulated counterparties that drive that same job timeline
 autonomously; _Snapshots_ snapshots and restores the entire world — world state is `.data/`, so a snapshot is a
-directory copy — plus an **Agreements** section (access gates): every tenant's agreements with
+directory copy — and loads the app's **demo presets** (below), plus an **Agreements** section (access gates): every tenant's agreements with
 acceptance tallies and a version-bump control that re-arms the gate for everyone still on an older
 version, the same "section, not a new tab" call the Events audit trail made. One surface serves demo'ers
 and developers alike: the friendly skin is what a stakeholder
@@ -296,7 +304,8 @@ are the worked examples of the pattern.
 a vendor the app calls _out_ to (Clerk, S3, Mailgun, Anthropic) — a world built entirely on outbound fakes
 has nothing that calls back _in_, so an async workflow just sits at `queued` with nobody to advance it.
 Simulator's **Actors** tab closes that gap: simulated counterparties (a bundle analyzer, a partner desk)
-run as independent client-side processes, in same-origin iframes, autonomous by default with pause/step,
+run as independent client-side processes, in same-origin iframes, autonomous by default with pause/step
+(mounted from page load and kept running whatever the panel shows — the world's `actors-held` flag pauses them all, and a demo preset's `actor.hold` pauses one),
 and they talk to the app only over the surfaces a genuine counterparty would use — `/api/service/*` polls
 and `/api/webhooks/*` POSTs, real inbound requests, never an in-process shortcut. A handful of mode-gated
 `/api/simulator/actors/*` routes give them a god's-eye work queue and produce the artifact a completion
@@ -306,7 +315,8 @@ it can act on its own.
 
 **Tours: the world's narrative, next to the world's state ✅.** A snapshot snapshots what the world IS; a
 **tour** is its temporal sibling — a scripted walkthrough that drives the running app for a watcher, with
-narration, starting from a snapshot it declares. The engine is the framework's
+narration, starting from a world it declares (`'reset'`, a demo preset, or — on a server only — a saved
+snapshot). The engine is the framework's
 (`packages/keel/src/demo-static/tour/`): a ghost cursor that glides to real elements, fires real clicks,
 types character by character, and drives Simulator itself through the panel's own controls; the Tours tab
 sits beside Snapshots and disappears entirely for an app that registers none. Each tour is APP content on the
@@ -321,6 +331,28 @@ recorded rather than swallowed and the run report has to come back clean: a tour
 an e2e walkthrough, so a screen change that breaks the story fails the build instead of embarrassing
 someone in front of a stakeholder. That gate is what makes it safe to email `dist-demo/index.html` to
 someone and let them press Start.
+
+**Presets: starting points every host can load ✅.** A saved snapshot is a binary copy of `.data/`, so it
+restores only where there is a server to copy it into. A **demo preset** is the other representation —
+the seed plus a script of world operations (`keel/core/presets.ts`: invite, inbound email, feature flag, holding one
+Simulator actor, and whatever kinds the app adds; each one that acts as someone or in a team names them) and an optional viewpoint — which each host replays its own way: the
+server through the same code the product runs (`keel/server-lib/demo-presets.ts`, sharing
+`sendOrgInvite` with the org route and the intake with the inbound webhook), the `file://` twin through
+its in-memory world, one step per commit so each step sees the world its predecessor left. So a preset
+works in `dist-demo/index.html`, and a tour may start from one on every host; `'reset'` → preset →
+saved snapshot is the one resolution order (`resolveWorldStart`), and saving a snapshot under a reserved
+name is refused so it can never mean two worlds. Preset content is app vocabulary, registered on its
+own seam module, `@app-config/presets` (one file per preset; a preset may `extends` one other, single
+inheritance), and every registered preset is held at build time to what the product itself would allow
+(`presetProblems`, run as seam conformance under every app) — a preset is a
+shortcut to a world someone could have clicked together, never a back door into one they could not.
+The operation kinds are a registry keel and the app both extend: each kind is a pure definition plus a
+server half and a static half that never share a module, and an app entry with keel's kind name replaces
+keel's. An app kind calls the same named core function its route calls — the showcase's `ticket.assign`
+step and its ticket PATCH route both call `applyTicketChanges` — so a script step and a click cannot
+drift apart. The
+viewpoint rides along as **who the restorer sits down as**, not as captured state: it is a per-browser
+cookie and the world is shared, so loading a preset signs in only the browser that loaded it.
 
 Three boundary rules keep Simulator honest. **Feedback stays inside Simulator** — transient confirmations
 render as a notice overlay anchored to the panel's bottom edge (absolute, so a notice never shifts the
@@ -353,8 +385,11 @@ linking, tenant-level governance, isolation audits.
 classic one-way door. No early slice needs the expensive 80%.
 
 **Keep-honest trick.** A second, fake tenant exists in tests from day one and the E2E suite runs against
-both, so any accidental single-tenant assumption breaks a test the day it's written. Multi-tenant shaped,
-single-tenant operated. See ADR [0004](adr/0004-tenancy-rls.md); the one enforced path is `db.withTenant()`
+both, so any accidental single-tenant assumption breaks a test the day it's written. The RLS proofs get that
+second tenant from the proof runner, not from an app's seed, so an app deployed one tenant per deployment may
+seed one and keep the guarantee for its own tables (ADR [0004](adr/0004-tenancy-rls.md), addendum of
+2026-11-16); what it gives up is seeing isolation by using the app. Multi-tenant shaped, single-tenant
+operated. See ADR [0004](adr/0004-tenancy-rls.md); the one enforced path is `db.withTenant()`
 (raw `getDb()` in request paths is lint-banned).
 
 **Teams — the in-tenant layer, one door in.** A tenant stays the ambient, separately-branded site — never

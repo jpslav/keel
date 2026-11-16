@@ -34,14 +34,14 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   explicitly — the ESLint fence and the ports/hermetic bans, `.jscpd.json`, `knip.json`'s `project`,
   and the root `tsconfig.json`. It sat outside the fence once, which made it the one directory in
   `packages/keel` where importing an app's `@/*` or `@app/seed` was legal; a location is not a
-  boundary. It is a conforming 17-module registration with its own seed
-  world, table + migration, job/webhook/notification kinds, inbound handler, catalog and route tree,
+  boundary. It is a conforming registration of every `@app-config/*` module the framework reads, with its own seed
+  world, table + its migrations, job/webhook/notification kinds, inbound handler, catalog and route tree,
   and the ROOT `tsconfig.json` resolves `@app-config/*` there. Its vocabulary
   (`harbor`/`lakeside`, `depot`/`annex`/`steward`/`wharf`, `fixture-*`, `dockets`) is deliberately
   neither app's: **never reach for an app's slugs, tables or job kinds in a `packages/keel` test** —
   that regression is what the odd vocabulary exists to make obvious, and it is what used to leave
   `pnpm init-app --eject-showcase` with a red gate.
-- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 126 published subpaths
+- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 130 published subpaths
   (its `exports` keys minus `.` and `./package.json`; count it, never remember it);
   the rest of the package is internal and reachable only by relative import inside it. Lint-enforced
   (`keel/public-surface`, which reads that map, so the map is the only list). Adding a module does NOT
@@ -70,13 +70,15 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `pnpm exec playwright install chromium`.
 - `pnpm verify` does NOT run `test:contract`, jscpd, coverage, or gitleaks — CI runs those
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
-  same RLS proofs on real Postgres); after renumbering/renaming a migration, wipe local `.data` first.
+  same RLS proofs on real Postgres, for the contract app AND keel's fixture seam, each in its own
+  database); after renumbering/renaming a migration, wipe local `.data` first.
   **Also wipe `apps/*/.data` after changing `packages/seed`** — the app seeder is guarded by "does this
   world have any rows yet", so new seed rows are invisible on an existing world and only CI sees them.
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The
   primitive opens `withTenant` itself and re-runs your whole scoped query on every page, so page two
   cannot be scoped differently from page one; the cursor is client input, parsed by a total function
-  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Worked example:
+  (`parseDbKeysetCursor` → 400 on `invalid`) and the page size is clamped server-side. Its optional
+  `orderBy` column is fixed per route (a cursor names no column), never client-chosen. Worked example:
   `apps/showcase/src/domain/db/tickets.ts` + `apps/showcase/src/app/api/tickets/route.ts`, with the
   index in `apps/showcase/src/app-config/db/migrations/1004_tickets_keyset_index.ts` and proofs in both
   RLS suites.
@@ -84,13 +86,16 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   new tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
   migrations are numbered ≥1001; framework migrations 0001–0999 live in
   `packages/keel/src/db/migrations` — ADR-0012).
-- **Every mutating API route (POST/PUT/PATCH/DELETE) must call `authorize(...)`**
+- **Every mutating route handler (POST/PUT/PATCH/DELETE) must call `authorize(...)`**
   (`keel/authz/authorize.ts`) — a build-time scan
-  (`packages/keel/src/authz/authorized-mutations.test.ts`, which walks EVERY app's `apps/*/src/app/api`
-  **plus the framework's own reference tree, `packages/keel/test-fixture/api`**) fails any route that
-  neither calls it nor has a justified entry in that file's exemption map. The exemption map's
-  staleness is measured against the FIXTURE tree, so a new exemption needs a file there to demonstrate
-  it; the fixture's routes are scanned, never served. **Every exemption MUST carry a `mustMatch`** —
+  (`packages/keel/src/authz/authorized-mutations.test.ts`) walks every `route.{ts,tsx,js,jsx,mjs}` under
+  EVERY app's whole `apps/*/src/app` tree, not only `api/` (Next serves a `route.ts` from anywhere
+  there), **plus the framework's own reference tree, `packages/keel/test-fixture/api`**. It fails any
+  file that exports a mutating verb and neither calls `authorize(...)` nor has a justified entry in that
+  file's exemption map. Exemption keys are paths relative to each app's `apps/<app>/src/app/api`, so a
+  mutating route OUTSIDE `api/` can match no exemption and must call `authorize(...)` itself. The
+  exemption map's staleness is measured against the FIXTURE tree, so a new exemption needs a file there
+  to demonstrate it; the fixture's routes are scanned, never served. **Every exemption MUST carry a `mustMatch`** —
   entries are matched by relative path in every root, so a gateless one would exempt an adopter's
   same-named route from authorization entirely. It proves the route is the KIND the reason describes,
   never the reason's whole claim; ADR-0012 states the limit.
@@ -104,12 +109,17 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   because `@app-config/*` is a bare specifier and a single alias can only name one app, PLUS a `keel`
   project that runs the packages' suites against the framework's own seam
   (**`packages/keel/test-fixture`** — see below). keel's seam-conformance tests (i18n partition/parity,
-  the pglite RLS suite) run under every app project as well, and that is what proves the seam against
+  the pglite RLS suite, the demo-presets check) run under every app project as well, and that is what proves the seam against
   real apps rather than only against the fixture. E2E
   lives in `apps/*/tests/e2e/` (showcase on :3000, starter on :3100). In a LINKED WORKTREE both ports
   are derived per checkout by `scripts/ports.mjs`, so parallel agent sessions don't adopt each other's
   dev server; `SHOWCASE_PORT`/`STARTER_PORT`/`LADLE_PORT`/`CONTRACT_PG_PORT` override it (the last
   also isolates `pnpm test:contract` between worktrees), and `print-port.mjs` reports it.
+- **A test that needs a scratch directory calls `makeTestTmpDir()` / `makeTestTmpDirAsync()`**
+  (`tests/support/tmp-dir.ts`) — never `mkdtemp`/`mkdtempSync`, which `keel/no-direct-mkdtemp` bans in test
+  files. The helper removes the directory when the file finishes; `test:unit`, `test:coverage` and
+  `test:contract` run through `scripts/check-tmpdir-leak.mjs`, which fails the run if one survives. Do not
+  call `vitest run` directly in a new script that is meant to gate — route it through that script.
 - **E2E `workers` stays 1.** Every worker shares one `.data` behind one dev server, so parallelism buys
   flakes, not speed (measured; the old "10GB VM / OOM" reason was wrong). Parallelism belongs where the
   worlds are separate: across apps locally, across CI shards. Read
@@ -145,7 +155,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   grep for survivors and check each one against that list.
 - Commands: `/verify`, `/new-port`, `/new-slice`, `/record-fixtures`, `/pre-pr`, `/branch-review`,
   `/sub-review`, `/repo-health`, `/a11y-review`, `/design-review`; capability scaffolds `/new-entity`,
-  `/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`.
+  `/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`,
+  `/new-preset`, `/new-preset-operation`.
 - Record important lessons in `docs/build-notes.md`; unplanned decisions in `docs/decision-log.md`;
   designed-but-unbuilt work in `.claude/future-tasks/` (one file per item, listed in its `index.md`).
   Amend an ADR by appending a dated addendum — never by editing what its body said.
@@ -155,7 +166,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   records (`build-notes.md`, `decision-log.md`, ADR bodies and anything appended to them) are exempt — see
   `docs/README.md` for the split. If you move a directory, the gate is what tells you which docs you
   just falsified.
-- **The app's identity is a script, not a checklist**: `pnpm init-app <slug> [--eject-showcase]`
+- **The app's identity is a script, not a checklist**: `pnpm init-app <slug> [--repo <name>] [--eject-showcase]`
   (`scripts/init-app.ts`). Anything that names an app directory or the product's display name belongs
   in the surface that script covers — and **never hard-code the product name in a test**; specs read
   the app's own catalog via `apps/*/tests/catalog.ts`. See `docs/adopting.md`.

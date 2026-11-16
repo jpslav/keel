@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import en from '../../messages/en.json'
 import es from '../../messages/es.json'
+import { resolveWorldStart } from 'keel/core/presets'
+import { presets } from './presets'
 import { tours } from './tours'
 
 /**
@@ -24,7 +26,7 @@ function resolve(catalog: Catalog, key: string): string | undefined {
 
 describe('registered tours', () => {
     it('registers the desk walkthrough with a step count worth watching', () => {
-        expect(tours.map((tour) => tour.id)).toEqual(['ticket-end-to-end'])
+        expect(tours.map((tour) => tour.id)).toEqual(['ticket-end-to-end', 'invite-from-preset'])
         for (const tour of tours) {
             // The house pacing rule: one idea per step, 8 to 20 steps.
             expect(tour.steps.length).toBeGreaterThanOrEqual(8)
@@ -54,6 +56,19 @@ describe('registered tours', () => {
                 expect(step.advance !== undefined, `${where}: promises an action but has no advance`).toBe(promises)
                 expect(step.advance?.length ?? 1, `${where}: empty advance`).toBeGreaterThan(0)
             }
+        }
+    })
+
+    it('starts every tour from a world EVERY host can produce', () => {
+        // `'reset'` or a registered demo preset — never a saved snapshot, which lives in one server's
+        // `.data/` and does not exist in the `file://` demo. The static walkthrough would catch it too (a
+        // start the host cannot honour is a recorded miss); this says so without building a bundle.
+        for (const tour of tours) {
+            if (tour.snapshot === undefined) continue
+            expect(
+                resolveWorldStart(tour.snapshot, presets).kind,
+                `${tour.id} starts from "${tour.snapshot}"`,
+            ).not.toBe('snapshot')
         }
     })
 })

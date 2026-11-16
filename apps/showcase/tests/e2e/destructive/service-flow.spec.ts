@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { signInAs } from '../support/people'
+import { setWorldFlag } from '../support/world-flags'
 
 /**
  * THE MANUAL ACTOR. This spec performs BY HAND exactly the loop the simulated-world iframe actors
@@ -25,15 +26,7 @@ import { signInAs } from '../support/people'
  * webhook calls additionally present their own Bearer credential (a JWT / the shared secret).
  */
 
-const flagsFile = path.resolve(__dirname, '../../../.data/analytics/flags.json')
 const simulatorState = path.resolve(__dirname, '../../../.data/simulator/state.json')
-
-function setJobsHeld(enabled: boolean) {
-    const flags = existsSync(flagsFile) ? (JSON.parse(readFileSync(flagsFile, 'utf8')) as Record<string, boolean>) : {}
-    flags['jobs-held'] = enabled
-    mkdirSync(path.dirname(flagsFile), { recursive: true })
-    writeFileSync(flagsFile, JSON.stringify(flags, null, 2))
-}
 
 function clearSimulatorState() {
     try {
@@ -46,11 +39,14 @@ function clearSimulatorState() {
 // Normalize before and restore after: a prior aborted run could have left the flag ON or stale
 // continuity behind, and we must hand the world back to the other specs exactly as we found it.
 test.beforeAll(() => {
-    setJobsHeld(false)
+    setWorldFlag('jobs-held', false)
+    // The actors run from page load and would claim a held job before this spec drives it by hand.
+    setWorldFlag('actors-held', true)
     clearSimulatorState()
 })
 test.afterAll(() => {
-    setJobsHeld(false)
+    setWorldFlag('jobs-held', false)
+    setWorldFlag('actors-held', false)
     clearSimulatorState()
 })
 

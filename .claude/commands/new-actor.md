@@ -29,7 +29,10 @@ hosting, `packages/keel/src/components/simulator/actor-runtime.ts`) is framework
    twin, just a scoped factory call and a tick wired into `actorSlots` in `apps/showcase/src/demo-static/app.tsx`,
    so the `file://` demo can step the same story (static-demo parity is doctrine). A driver over a
    surface keel doesn't own is a new twin beside it.
-5. Exercise it from the Simulator Actors tab (the tab itself is registered via
+5. **Holds**: nothing to wire — both hosts already ask the world whether THIS actor is held before every
+   autonomous tick (the `actors-held` flag for all of them, a demo preset's `{ op: 'actor.hold', actor: '<id>',
+held: true }` for one). The preset gate checks `actor` against the `actors` list you registered in step 1.
+6. Exercise it from the Simulator Actors tab (the tab itself is registered via
    `apps/showcase/src/app-config/simulator.ts`; each registered actor becomes a card + slot, titled from your
    registration's keys) and cover the flow in `apps/showcase/tests/e2e/destructive/actors.spec.ts` style. Finish
    with `pnpm verify`.

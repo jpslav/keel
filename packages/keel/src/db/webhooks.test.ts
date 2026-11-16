@@ -1,7 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import { orgIdForSlug } from './org-lookup'
 import { tenantIdForSlug } from './tenant-lookup'
 import { backoffDelayMs } from '../core/webhook-events'
@@ -10,7 +8,7 @@ import { verifyWebhookSignature, WEBHOOK_REPLAY_TOLERANCE_MS, WEBHOOK_SIGNATURE_
 // Point all fake-adapter state at a throwaway dir BEFORE importing anything that touches pglite / the
 // webhook catch-store. Simulated mode is the default (APP_MODE !== 'real'), so the drain uses the fake
 // dispatch (catch-store + failure toggle) under this dir.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-webhooks-db-'))
+const tmp = makeTestTmpDir('app-webhooks-db-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

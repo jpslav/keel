@@ -1,7 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../../../tests/support/tmp-dir'
 import { fakeStorage } from 'keel/adapters/fake/storage'
 import { POST } from './route'
 
@@ -10,7 +8,7 @@ import { POST } from './route'
 // (vi.mock is hoisted above the imports) to the REAL fake storage singleton, so signatures verify
 // against the same secret, with a toggleable isSimulated; verifyUploadFields (imported directly by the
 // route from @/adapters/fake/storage) stays real.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-upload-'))
+const tmp = makeTestTmpDir('app-upload-')
 const adaptersState = vi.hoisted(() => ({ fake: true }))
 vi.mock('keel/adapters/index', async () => {
     const actual = await import('keel/adapters/fake/storage')

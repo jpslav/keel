@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { writeFileAtomic, writeFileAtomicSync, writeJsonAtomic, writeJsonAtomicSync } from './atomic-write'
 
 function freshDir(): string {
-    return mkdtempSync(path.join(tmpdir(), 'atomic-write-'))
+    return makeTestTmpDir('atomic-write-')
 }
 
 describe('atomic-write', () => {

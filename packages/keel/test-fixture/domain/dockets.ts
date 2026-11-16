@@ -22,3 +22,24 @@ export async function insertDocket(
             .executeTakeFirstOrThrow(),
     )
 }
+
+/**
+ * Marks one docket of one team `flagged` — the fixture's own preset operation kind, `docket.flag`, does
+ * this to the docket an earlier `inbound` step opened (app-config/presets/operations/docket-flag). Scoped
+ * by org as well as by tenant, so an id from another team updates nothing: false, never a cross-team write.
+ */
+export async function flagDocket(
+    db: DbPort,
+    input: { tenantId: string; orgId: string; docketId: string },
+): Promise<boolean> {
+    const row = await db.withTenant(input.tenantId, (trx) =>
+        trx
+            .updateTable('dockets')
+            .set({ status: 'flagged' })
+            .where('id', '=', input.docketId)
+            .where('org_id', '=', input.orgId)
+            .returning('id')
+            .executeTakeFirst(),
+    )
+    return row !== undefined
+}

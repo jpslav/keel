@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { makeTestTmpDir } from '../support/tmp-dir'
 import { citedPaths, generalizeAppCitations } from './doc-set'
 
 /**
@@ -14,7 +14,7 @@ import { citedPaths, generalizeAppCitations } from './doc-set'
  * later simplification of the parser has to break a test rather than a promise.
  */
 function citationsIn(markdown: string) {
-    const dir = mkdtempSync(path.join(tmpdir(), 'doc-set-'))
+    const dir = makeTestTmpDir('doc-set-')
     const file = path.join(dir, 'doc.md')
     writeFileSync(file, markdown)
     return citedPaths(file).map(({ path: cited }) => cited)
@@ -70,7 +70,7 @@ describe('citedPaths', () => {
     })
 
     it('keeps `raw` as the whole span, which is what init-app rewrites on', () => {
-        const dir = mkdtempSync(path.join(tmpdir(), 'doc-set-'))
+        const dir = makeTestTmpDir('doc-set-')
         const file = path.join(dir, 'doc.md')
         writeFileSync(file, '`pnpm --filter showcase exec vitest apps/showcase/src`')
         expect(citedPaths(file)).toEqual([

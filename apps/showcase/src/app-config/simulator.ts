@@ -3,8 +3,9 @@
  * ADR-0012). The framework panel (packages/keel/src/components/simulator/simulator-panel.tsx) owns its subsystem
  * tabs (people, mail, messages, events, jobs, hooks, errors, snapshots) and its two feature flags
  * (demo-banner, jobs-held — KNOWN_FLAGS in packages/keel/src/adapters/fake/analytics.ts); the app registers its OWN
- * Simulator tabs + flags HERE. A real adopter replaces this file (its own tabs/flags, or none). PURE
- * TypeScript, no framework imports — shared by the server glue and the static-demo twin.
+ * Simulator tabs + flags HERE (its demo presets are their own seam module, `./presets.ts`). A real adopter
+ * replaces this file (its own, or none). PURE TypeScript, no framework imports — shared by the server glue and the
+ * static-demo twin.
  *
  * labelKey is resolved by the HOST glue from the `simulator` i18n namespace (matching how the panel
  * labels its own tabs): the seam carries the key, the host translates it and supplies the ReactNode
@@ -15,13 +16,18 @@
 interface AppSimulatorTab {
     id: string
     labelKey: string
+    /** Mount the content from page load and keep it running, hidden whenever its tab isn't showing — the
+     *  panel's `SimulatorExtraTab.keepMounted`. */
+    keepMounted?: boolean
 }
 
 /**
  * The demo's one Simulator tab: Actors — in-page automations driving the real service/webhook surfaces
  * (see src/app-config/actors.ts). Rendered between Hooks and Errors via the panel's `extraTabs` prop.
  */
-export const tabs: AppSimulatorTab[] = [{ id: 'actors', labelKey: 'actorsTab' }]
+// keepMounted: the actors' tick loops live in this tab's content, and the counterparties are part of the
+// world — they run from page load whether or not anyone opens the tab (held by the `actors-held` flag).
+export const tabs: AppSimulatorTab[] = [{ id: 'actors', labelKey: 'actorsTab', keepMounted: true }]
 
 /** One app-registered Snapshots feature flag. `labelKey` is a FULLY-QUALIFIED path into the APP catalog
  *  (`namespace.key`) — a flag an app invents is app vocabulary, so its copy ships with the app. */
@@ -29,6 +35,9 @@ interface AppSimulatorFlag {
     id: string
     labelKey: string
 }
+
+/** The flag id the actor hosts (server glue + static twin) consult before every autonomous tick. */
+export const actorsHeldFlag = 'actors-held'
 
 /**
  * App feature flags for the Snapshots tab, composed into KNOWN_FLAGS
@@ -39,5 +48,12 @@ interface AppSimulatorFlag {
  * knob (highlight tickets past their SLA) that no framework flag could reasonably own, flipped from the
  * same Snapshots tab as the framework's own two. It is read by the tickets card, so flipping it changes
  * the product, not just the panel.
+ *
+ * `actors-held` is the world's hold on its counterparties. The actors run from page load, like the real
+ * services they stand in for; while this is on, each one keeps its schedule but does nothing on its own
+ * (a manual Step still works). Specs that drive held jobs by hand turn it on so no actor races them.
  */
-export const flags: AppSimulatorFlag[] = [{ id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' }]
+export const flags: AppSimulatorFlag[] = [
+    { id: 'sla-breach-banner', labelKey: 'tickets.slaFlagLabel' },
+    { id: actorsHeldFlag, labelKey: 'actors.heldFlagLabel' },
+]

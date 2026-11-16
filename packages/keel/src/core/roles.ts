@@ -23,6 +23,15 @@ export function isRole(value: string): value is Role {
     return (ROLES as readonly string[]).includes(value)
 }
 
+/**
+ * The invite-path check: is `value` a role an org manager may grant? Narrower than `isRole`, which
+ * accepts `'admin'`. One predicate shared by the real invite route and the static demo's invite twin,
+ * so the two cannot disagree about who may be minted.
+ */
+export function isAssignableRole(value: string): value is Role {
+    return (ORG_ASSIGNABLE_ROLES as readonly string[]).includes(value)
+}
+
 export function canManageOrg(role: Role): boolean {
     return ORG_MANAGER_ROLES.includes(role)
 }

@@ -1,7 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import { devWebhookSecret } from '../adapters/fake/service-auth'
 import { AuthRequiredError } from '../ports/errors'
 import { verifyWebhookCaller } from './webhook'
@@ -15,7 +13,7 @@ vi.mock('../adapters/index', () => ({
     },
 }))
 
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-webhook-'))
+const tmp = makeTestTmpDir('app-webhook-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

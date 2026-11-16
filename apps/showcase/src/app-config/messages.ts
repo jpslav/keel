@@ -7,11 +7,11 @@ import type { MessageTree } from 'keel/i18n/messages'
  * Together they partition the merged catalog (DISJOINT + exhaustive), enforced by
  * keel/i18n/namespaces.test.ts.
  *
- * `actors`, `appNotifications` and `tours` are here because the copy for an app-registered Simulator
- * actor, an app-registered notification kind and an app-registered walkthrough belongs to the app that
- * registered it — the framework renders all three surfaces but is handed finished strings (actors),
+ * `actors`, `appNotifications`, `tours` and `presets` are here because the copy for an app-registered
+ * Simulator actor, notification kind, walkthrough and demo preset belongs to the app that
+ * registered it — the framework renders those surfaces but is handed finished strings (actors),
  * told which namespace to resolve in (notifications), or given a fully-qualified key to resolve with
- * the root translator (tours). A real adopter replaces this list — and the catalogs — with its own.
+ * the root translator (tours, presets). A real adopter replaces this list — and the catalogs — with its own.
  */
 export const APP_NAMESPACES = [
     'welcome',
@@ -24,6 +24,7 @@ export const APP_NAMESPACES = [
     'actors',
     'appNotifications',
     'tours',
+    'presets',
 ] as const
 
 /**

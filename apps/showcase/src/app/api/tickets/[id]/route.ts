@@ -1,9 +1,8 @@
 import { auth, db } from 'keel/adapters/index'
 import { authorize } from 'keel/authz/authorize'
 import { recordAuditEvent } from 'keel/db/audit'
-import { notifyMember } from 'keel/server-lib/notify'
-import { makeNotifyDeps } from 'keel/server-lib/notify-deps'
-import { deleteTicket, ticketForOrg, updateTicket } from '@/domain/db/tickets'
+import { deleteTicket, ticketForOrg } from '@/domain/db/tickets'
+import { applyTicketChanges, type TicketChanges } from '@/domain/ticket-changes'
 import { isTicketStatus } from '@/domain/tickets'
 import { resolveOrgContext } from '../../org-context'
 import { withPortErrors } from '../../respond'
@@ -17,6 +16,10 @@ import { withPortErrors } from '../../respond'
  * the one app table granted DELETE — see migration 1001). Both resolve the row ORG-SCOPED first, so a
  * ticket belonging to another team is indistinguishable from a missing one and ids cannot be probed
  * (the jobForOrg doctrine), and both re-authorize with the row's real org id rather than a slug anchor.
+ *
+ * PATCH is the boundary half of a ticket edit — parse, validate, resolve, authorize — and hands the edit
+ * itself (write, audit verb, assignee notification) to `applyTicketChanges` (src/domain/ticket-changes.ts),
+ * the same named operation the `ticket.assign` demo-preset step calls.
  */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
     return withPortErrors(async () => {
@@ -26,7 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
         // Validate at the boundary, explicitly, before anything is resolved: an unknown status is a
         // 400, not a state machine surprise later.
-        const changes: { status?: 'open' | 'pending' | 'resolved'; assigneeUserId?: string | null } = {}
+        const changes: TicketChanges = {}
         if (payload.status !== undefined) {
             if (typeof payload.status !== 'string' || !isTicketStatus(payload.status)) {
                 return Response.json({ error: 'unknown-status' }, { status: 400 })
@@ -55,40 +58,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
         // An illegal status hop (open → open, or anything the machine forbids) throws
         // InvalidTransitionError inside the transaction → 409 via withPortErrors, and no row is written.
-        const ticket = await updateTicket(db, tenantId, orgId, id, changes)
-        if (!ticket) return Response.json({ error: 'not found' }, { status: 404 })
-
-        const reassigned = changes.assigneeUserId !== undefined && changes.assigneeUserId !== before.assigneeUserId
-        await recordAuditEvent(db, {
+        const ticket = await applyTicketChanges(db, {
             tenantId,
             orgId,
-            actorUserId: user.id,
-            // Two verbs, because "who did this ticket get handed to" is a question an audit log should
-            // answer without the reader diffing payloads.
-            action: reassigned ? 'ticket.assigned' : 'ticket.updated',
-            subjectType: 'Ticket',
-            subjectId: ticket.id,
+            orgSlug: user.orgSlug,
+            ticket: before,
+            changes,
+            actor: { id: user.id, name: user.name },
         })
-
-        // Notification fan-out: being handed a ticket is news for the ASSIGNEE, not for the team's
-        // admins — the registry's second recipient shape. Claiming a ticket yourself notifies nobody
-        // (excludeUserId), and unassigning notifies nobody either. After-commit, like every emission.
-        if (reassigned && ticket.assigneeUserId) {
-            await notifyMember(await makeNotifyDeps(), {
-                members: await auth.listMembers(user.orgSlug),
-                tenantId,
-                orgId,
-                recipientUserId: ticket.assigneeUserId,
-                excludeUserId: user.id,
-                kind: 'ticket.assigned',
-                payload: {
-                    ticketId: ticket.id,
-                    ref: ticket.ref,
-                    subject: ticket.subject,
-                    assignedByName: user.name,
-                },
-            })
-        }
+        if (!ticket) return Response.json({ error: 'not found' }, { status: 404 })
         return Response.json({ ticket })
     })
 }

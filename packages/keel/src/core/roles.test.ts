@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { canManageOrg, isRole, ROLES } from './roles'
+import { canManageOrg, isAssignableRole, isRole, ROLES } from './roles'
 
 describe('roles', () => {
     test('admin and staff manage orgs; others do not', () => {
@@ -13,5 +13,10 @@ describe('roles', () => {
     test('isRole narrows arbitrary strings', () => {
         for (const role of ROLES) expect(isRole(role)).toBe(true)
         expect(isRole('superuser')).toBe(false)
+    })
+
+    test('isAssignableRole is every role but admin — what an invite may grant', () => {
+        expect(ROLES.filter(isAssignableRole)).toEqual(['staff', 'member', 'guest', 'restricted'])
+        expect(isAssignableRole('superuser')).toBe(false)
     })
 })

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import type { LlmMessage, LlmPort, LlmRequest, LlmToolDef, LlmToolLoopRequest, LlmTurn } from '../../ports/llm'
+import { writeJsonAtomic } from './atomic-write'
+import { dataDir } from './data-dir'
 
 /**
  * Deterministic replay of versioned fixtures (ADR-0009). Fixture files live in fixtures/llm/
@@ -17,6 +19,11 @@ import type { LlmMessage, LlmPort, LlmRequest, LlmToolDef, LlmToolLoopRequest, L
  * fixture never stores tool results. Matching is the same purpose+hash idea, extended to cover the
  * tools + messages shape, with the same default-entry fallback (a `response`-only default becomes
  * a one-turn text conversation).
+ *
+ * REQUEST CATCH: before any fixture lookup, every request is also written to .data/llm-requests/
+ * (the same port-as-catch-point shape as the fake email adapter, ADR-0011). A fixture proves what
+ * the app does with an answer; the catch proves what the app put into the prompt. It is recorded
+ * first so a request that matches no fixture — and so throws — is still inspectable.
  */
 
 interface LlmFixtureEntry {
@@ -34,6 +41,37 @@ interface LlmFixtureEntry {
 export interface LlmFixtureFile {
     purpose: string
     entries: LlmFixtureEntry[]
+}
+
+export interface CaughtLlmRequest {
+    id: string
+    at: string
+    purpose: string
+    system: string | null
+    messages: LlmMessage[]
+    /** Tool loops only: the model-facing tool definitions. The app's `execute` closure is never caught. */
+    tools: LlmToolDef[] | null
+}
+
+let counter = 0
+
+/** Writes the request into the catch store. Ids sort oldest-first as strings; the counter breaks ties
+ *  within one millisecond of one process (its six-digit pad keeps a long-lived process's ids sorting
+ *  numerically), and the pid keeps two processes sharing one `.data` (a dev server and a script) from
+ *  minting the same id and overwriting each other's catch. */
+async function catchRequest(
+    request: { purpose: string; system?: string; messages: LlmMessage[] },
+    tools: LlmToolDef[] | null,
+): Promise<void> {
+    const caught: CaughtLlmRequest = {
+        id: `${Date.now()}-${process.pid}-${(counter++).toString().padStart(6, '0')}`,
+        at: new Date().toISOString(),
+        purpose: request.purpose,
+        system: request.system ?? null,
+        messages: request.messages,
+        tools: tools && tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+    }
+    await writeJsonAtomic(path.join(dataDir('llm-requests'), `${caught.id}.json`), caught)
 }
 
 function hashLlmRequest(request: LlmRequest): string {
@@ -129,15 +167,20 @@ function textOf(turn: LlmTurn): string {
 
 export const fakeLlm: LlmPort = {
     async complete(request) {
+        await catchRequest(request, null)
         return { text: lookup(request) }
     },
 
     async *stream(request) {
+        // A generator body runs on first iteration, so the catch lands when the stream is consumed —
+        // the point a real adapter would open its connection too.
+        await catchRequest(request, null)
         // Word-chunked so streaming UIs exercise their incremental path deterministically.
         for (const chunk of lookup(request).split(/(?<= )/)) yield chunk
     },
 
     async runToolLoop(request) {
+        await catchRequest(request, request.tools)
         const conversation = lookupToolLoop(request)
         const turns: LlmTurn[] = []
         const maxTurns = request.maxTurns ?? 6
@@ -166,4 +209,22 @@ export const fakeLlm: LlmPort = {
         const lastAssistant = [...turns].reverse().find((t) => t.role === 'assistant')
         return { text: lastAssistant ? textOf(lastAssistant) : '', turns }
     },
+}
+
+/** Simulated-mode-only: every caught request, oldest first, optionally narrowed to one purpose (NOT part of LlmPort). */
+export function listCaughtLlmRequests(purpose?: string): CaughtLlmRequest[] {
+    const dir = dataDir('llm-requests')
+    return readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as CaughtLlmRequest)
+        .filter((caught) => purpose === undefined || caught.purpose === purpose)
+        .sort((a, b) => (a.id < b.id ? -1 : 1))
+}
+
+/** Simulated-mode-only: forget every caught request (NOT part of LlmPort). */
+export function clearCaughtLlmRequests(): void {
+    const dir = dataDir('llm-requests')
+    for (const file of readdirSync(dir)) {
+        if (file.endsWith('.json')) rmSync(path.join(dir, file), { force: true })
+    }
 }

@@ -28,7 +28,7 @@ would be revisionist — so their paths are corrected opportunistically, never g
 - [app-coverage-gaps.md](app-coverage-gaps.md) — the capability triage: what the template ships vs defers,
   and the doctrine for deciding the next case
 - [recipes/](recipes/) — capabilities the template deliberately doesn't ship: vendor integrations
-  (e-sign, SMS, web push) and generic UI it has no invariant to encode (the list/table kit); copy one
+  (e-sign, SMS, web push, per-person cloud workspaces) and generic UI it has no invariant to encode (the list/table kit); copy one
   when an instance needs the capability
 - [runbooks/](runbooks/) — [demo.md](runbooks/demo.md), the guided tour of everything the scaffold does,
   and [deploy.md](runbooks/deploy.md), the deploy shape

@@ -54,8 +54,9 @@ import { keysetPage, parseDbKeysetCursor } from 'keel/db/keyset'
 
 - `keysetPage(db, { tenantId, after, limit }, build)` — opens the `withTenant` transaction itself and
   runs your `build` callback (the table, the columns, the org filter) on **every** page, so page two
-  cannot be scoped differently from page one. It adds the total order (`created_at DESC, id DESC`), the
-  cursor predicate, the capped limit, and the next cursor.
+  cannot be scoped differently from page one. It adds the total order (`created_at DESC, id DESC`, or
+  the same with an optional trailing `orderBy` column — see §3.1), the cursor predicate, the capped
+  limit, and the next cursor.
 - `parseDbKeysetCursor(raw)` — total; returns `start` / `after` / `invalid`. A route turns `invalid`
   into a 400.
 - `clampKeysetLimit(raw, fallback)` — the server decides the page size; the query string may ask.
@@ -78,14 +79,20 @@ matters for a reason worth stating: they must be part of the same query the curs
 becomes incoherent (a filter applied after the page is read silently produces short pages, and a sort
 applied after it produces a list whose order does not match the cursor's).
 
-**Sorting on a column other than `created_at` is the one real extension.** The current pager hard-codes
-the ordering key, which is right for a template — a list ordered by anything else needs its own index
-and its own tiebreak, and picking those is a decision per table, not a default. When you need it:
-generalise `keysetPage`'s ordering to a `{ column, direction }` pair (still with the primary-key
-tiebreak, still rendered by Postgres via `to_char` for a timestamp, still a row-value comparison), and
-**allow-list** the sortable columns per list rather than accepting a column name from the query string.
-A sort key from the client that reaches SQL unvalidated is the injection hole this design otherwise does
-not have.
+**Sorting on a column other than `created_at` is the one real extension, and the pager has half of it.**
+`keysetPage`'s optional trailing `orderBy` argument swaps `created_at` for another NOT NULL
+`timestamptz` column of the paged table, in the comparison, the cursor and the `ORDER BY` together
+(still with the primary-key tiebreak, still rendered by Postgres via `to_char`). Its type
+(`KeysetOrderColumn`) refuses nullable and non-existent columns. Two things are still yours. First, the
+ordering is **fixed per route, never client-chosen**: the cursor names no column, so a cursor minted
+under one ordering is indistinguishable from one minted under another and a client-supplied sort key
+would silently skip or repeat rows. A list that offers several orderings makes the choice at the route
+level (separate routes, or separate server functions each passing its own `orderBy`). Second, a
+non-timestamp key (a name, a number, a nullable column) is not covered: that needs its own index, its
+own tiebreak and its own cursor rendering, a decision per table. Generalise the pager to a
+`{ column, direction }` pair when you need it, and **allow-list** the sortable columns per list rather
+than accepting a column name from the query string. A sort key from the client that reaches SQL
+unvalidated is the injection hole this design otherwise does not have.
 
 **Filtering** is ordinary `where` clauses in the callback, built from validated query parameters.
 Free-text search is a separate capability, still on the recipe list (`docs/app-coverage-gaps.md`:

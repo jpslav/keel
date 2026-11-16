@@ -1,15 +1,13 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { exportSPKI, generateKeyPair, SignJWT } from 'jose'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import { fakeDb } from '../adapters/fake/db'
 import { AuthRequiredError } from '../ports/errors'
 import { SERVICE_JWT_AUDIENCE, verifyServiceCaller } from './verify'
 
 // Real RS256 crypto against real pglite rows in a throwaway data dir — verify.ts imports no vendor
 // adapters, so nothing here trips `server-only` and the whole verification path runs for real.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-svc-verify-'))
+const tmp = makeTestTmpDir('app-svc-verify-')
 
 interface OrgRef {
     tenantId: string

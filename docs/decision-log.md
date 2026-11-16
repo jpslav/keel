@@ -1294,3 +1294,402 @@ AppJobKind`, `isJobKind` composed. Because the fence bans framework files from i
   header-only no-team case. keel's test now asserts only the framework's half.
 - **No `FRAMEWORK_SUITE_APP` any more.** `vitest.config.ts` had to name one app to carry keel's suite;
   that choice is gone, and with it the reason `init-app` had to rewrite a second literal in that file.
+
+## The starter's leftover content is documented, not gated (2026-10-02, `docs/adopting-starter-content`)
+
+An adopter reported that their product's static demo opened on the starter's tenants and Items card
+four days after adoption. `docs/adopting.md` had told them to "keep the shape" of the seed world, they
+read that as "keep the fixtures", and built their own world beside the starter's.
+
+- **The fix is the sentence, plus an inventory.** `docs/adopting.md` gains "The starter's content is
+  still wired into your UI" — the seed world, `welcome.subtitle`, the Items slice and the static demo's
+  composition root, each with where it shows — and `scripts/init-app.ts` prints the same four as their
+  own closing section — only when the app being kept has the starter's layout, since `--app showcase`
+  keeps an app with neither that seed directory nor an Items slice. The advice is to REPLACE the seed world: only the starter's own two specs and
+  `staffOrgSlug` read its names, and all three are the adopter's files.
+- **No residue check.** The report proposed a scan for UI code still importing the starter's fixtures.
+  There is no symbol to scan for: the seed is one world behind `@app-config/seed`, so starter content
+  is identifiable only by its VALUES. A check would need a manifest of those values, which drifts from
+  the seed, cannot run in `pnpm verify` (it is red on keel itself by definition), and goes meaningless
+  the first time an adopter renames a tenant.
+- **No "not offered at sign-in" flag on `SeedPerson`.** The adopter's local fix hid the starter's
+  people from the product pickers while leaving them reachable from the Simulator. Putting that in
+  `keel/seed/contracts` would make the framework support the arrangement the doc now tells adopters not
+  to build — two worlds in one seed — and would touch both apps, the fixture seam and the static demo
+  to do it.
+- **The printed section is pinned by a test, and the pin checks paths, not prose.**
+  `tests/docs/adopter-identity.test.ts` asserts the section is printed and that the seed, seam,
+  catalog and demo paths it names exist in the ejected tree. Watched failing with the heading changed
+  and one path misspelled.
+- **Removing the content by command is deferred**, not rejected:
+  `.claude/future-tasks/init-app-blank-option.md`. The seed cannot go to zero and the Items slice can,
+  but an app with no tables and no subjects has never been built here, and deleting Items deletes the
+  RLS example the scaffolds cite.
+
+## Simulator People `orgs` mirrors `SeedMembership`; actor keep-alive is lazy, then sticky (2026-10-03, `feat/simulator-people-orgs-actor-keepalive`)
+
+- **`Person.orgs` is `{ orgSlug, role }[]`, not the `{ slug, role }` the task sketched.** It is
+  `SeedMembership`'s own shape, so both row builders pass `memberships` through untouched. Renaming the
+  key needs a call on the array, which trips a misdirected `react-hooks/purity` error in the static twin
+  (see build-notes). `role` stays on `Person` so an app that never sets `orgs` renders as before.
+- **`keepMounted` is lazy, then sticky, not always-on.** An always-on Actors tab would start its tick
+  loops at page load, so every spec and tour would begin in a world that is already moving. Nothing
+  mounts until the tab is first opened; from then on it stays mounted, hidden, through tab switches and
+  collapse. The collapsed panel keeps its hidden aside at the same tree position, because an iframe
+  that moves reloads. Replaced: "a host-built tab's content exists only while that tab is active".
+- **Actors off the page stay undecided.** Running an actor with no page open contradicts the stated
+  "client-side processes, in same-origin iframes" design and can never work on the `file://` host; it
+  stays open in `.claude/future-tasks/actors-as-independent-systems.md`.
+
+## Simulator actors run from page load, held by a world flag; People chips show only what distinguishes (2026-10-03, `feat/actors-always-on`)
+
+- **Actors are always on.** Replaced: the same day's "`keepMounted` is lazy, then sticky". A real
+  counterparty doesn't wait for someone to open a Simulator tab, so the Actors tab now mounts from page
+  load. Lazy mounting existed only to keep specs and tours quiet; that job moves to an explicit world
+  switch, the showcase's `actors-held` Snapshots flag. `ActorShell` asks its host's `held()` before
+  every autonomous tick, keeps its schedule while held, and shows a `held` state; a manual Step ignores
+  the hold, because stepping is an explicit operator act. Specs that drive held jobs by hand turn it on.
+- **The flag is the app's, not the framework's.** Actors are app content (`@app-config/actors`), so the
+  switch that holds them is registered on the same seam (`@app-config/simulator` flags). The framework
+  supplies only the `held` hook, so an app with no actors — the starter — shows no such toggle.
+- **People chips derive from the rows, not from configuration.** Every keel app HAS a tenant and an org
+  for every person (the auth port requires both), but many only ever run one of each. The tenant chip
+  shows only when the rows span more than one tenant, and the org name only when they span more than
+  one org (`people-dimensions.ts`); role always shows. A second tenant or team makes the chip appear on
+  its own.
+
+## A `date` column reads as a string, on both engines (2026-10-03, `feat/upstream-date-storage-keyset`)
+
+- **The return type is the wire string, `'YYYY-MM-DD'`, not a `Date`.** A `date` is a calendar day
+  with no time and no zone; any `Date` built from it has to pick a zone, and each driver's default
+  picks a different one. `pg` builds local midnight, so a server east of UTC hands back the previous
+  day once the value is read as UTC (watched: `2026-10-03` came back as `2026-10-02T15:00:00.000Z`
+  under `TZ=Asia/Tokyo`). pglite builds UTC midnight, so the fake and the real engine disagreed on the
+  same row. The string is also what the schema types already promised (`string`), it sorts and
+  compares correctly as-is, and `'infinity'` survives (pglite's default turned it into `null`).
+  `date[]` reads as `string[]` for the same reason.
+- **Per pool, not process-global.** The real adapter passes a `types` override to its own `Pool`
+  rather than calling `pg.types.setTypeParser`, which would rewrite the parser for every `pg` client
+  in the process from whichever module happened to load first. Only text-format `date`/`date[]` are
+  overridden; everything else falls through to `pg`'s defaults.
+- **pglite gets the same override, and the tests use it.** The claim that pglite could not take a
+  parser was wrong: `PGliteOptions.parsers` does exactly this. Every pglite the framework opens now
+  comes from one factory (`openPglite`, `packages/keel/src/adapters/fake/pglite-dialect.ts`), and the
+  pglite RLS suite builds its engine there too. Before this it called `new PGlite()` directly, so it
+  proved a configuration the app never ran.
+- **keel's fixture got its own contract database.** The proof is a `date` column on the fixture's
+  `dockets` table (`1002_dockets_due_on`), and the fixture's migrations had never run on real Postgres:
+  the contract runner held a single app. `vitest.contract.config.ts` now has a second project, `keel`,
+  aliased at the fixture seam. Its harness
+  (`packages/keel/src/adapters/real/db.contract.test.ts`) creates `keel_contract` on whichever server
+  it is given and drives the real adapter's `createRealDb`, so the contract run proves the pool
+  configuration production uses. Files run one at a time because both harnesses default to the same
+  derived embedded-postgres port. The showcase harness is unchanged. It still builds its own `Pool`,
+  and with no `date` columns in its proofs that difference is harmless today. Watched failing:
+  removing the `date` override, then the `date[]` override, from the real adapter turns the `keel`
+  contract project red, and removing pglite's turns the pglite suite red.
+
+## Per-person cloud workspaces: a recipe, not a port (2026-10-03, `upstream-mechanical-bundle`)
+
+A future task proposed a `workspace` port generic over the backend, with its adapter selection gated
+independently of `APP_MODE`. It is resolved the other way, as `docs/recipes/workspace-coder.md`.
+
+- **Fails both vendor-code tests.** Almost no instance provisions per-person dev environments
+  (universality), and an authenticated REST vendor behind a polled long-running operation is a class
+  the LLM, email and webhook-dispatch adapters already teach (new-class).
+- **The implementation it was drawn from broke doctrine twice**: it chose its adapter from the
+  backend's own env vars rather than `APP_MODE`, and it let product vocabulary into the adapter
+  registry. Writing the plan down, rather than lifting the code, is what keeps both out.
+- **The one legitimate need survives as an explicit override.** A real backend inside an otherwise
+  simulated demo is allowed only as a named, fail-closed switch with its costs stated in the recipe —
+  never an adapter that turns itself on because its env vars happen to be present.
+
+## What a derived app's mechanical changes did NOT bring back (2026-10-03, `upstream-mechanical-bundle`)
+
+A derived app's change list was mined for small, mechanical items worth taking back into keel. Four of
+them were declined, each for the same reason: keel has no caller for them, and dead exports fail the
+gate (`knip`) as surely as dead vendor code fails the doctrine.
+
+- **`BadRequestError` / `ConflictError` in `packages/keel/src/ports/errors.ts`.** The derived app throws
+  them from adapters keel does not ship (a workspace backend — now `docs/recipes/workspace-coder.md`,
+  which tells an adopter to export their own typed conflict from that port) and maps them in its own
+  respond helper. The nearest keel candidate is the fake storage adapter's path-escape refusal, but
+  making that a 400 would give the fake a failure mode the real S3 adapter does not have, which is the
+  opposite of what a fake is for. Revisit when a real keel adapter has a caller-input failure to report.
+- **Optional `themePrimaryColor` / `themeRadius` on `SeedTenant`.** `getTenantTheme`
+  (`packages/keel/src/theme.ts`) already falls back when they are missing, but every keel seed world —
+  both apps and the fixture — sets both, so optional fields would be a contract widened for nobody.
+- **A `label` prop on the user menu.** Generic presentation (text and a chevron beside the avatar),
+  not a framework invariant made visible; it fails the component test in
+  `docs/development-approach.md`, and no keel shell draws a name in its top bar.
+- **Out of scope by choice, not by test:** stopping the invite flow from emailing admins (a product
+  decision), a caller-named org for `sendInvite` and the live-org list it needs, a fake-person helper,
+  and a package licence file.
+
+## Demo presets are declarative, registered beside the flags, and replayed per host (2026-10-03, `prebaked-demo-presets`)
+
+- **No prebaked `.data/` worlds.** The task proposed a `pnpm snapshots:seed` that drove the fake
+  adapters and saved through `saveSnapshot()`. Those copies carry pglite's binary state, so they could
+  only ever restore on a server, and the task's own second half asks for the `file://` demo too. Presets
+  are a seed-relative script instead (`keel/core/presets.ts`), replayed fresh on each load. Nothing
+  binary is generated or committed, and nothing goes stale when a migration changes the database.
+  Directory snapshots stay as the server's "save what I clicked together".
+- **Registered on `@app-config/simulator`, not a new seam module.** Presets are Simulator content,
+  like the flags beside them, and `simulator` is already on ADR-0012's list of value imports. A new
+  module would cost every app and the fixture one more file to say nothing in. The starter registers
+  `presets = []`; the fixture registers one preset in its own vocabulary, because the server replay's
+  test must replay keel's world, not an app's.
+- **Three operations: `invite` and `inbound` name their actor and team; `flag` is world-wide.** That set
+  covers the task's worlds (a pending invite, unread mail, tenant rows, both tenants busy). App rows
+  come in through inbound email, which the app already registers handlers for on both hosts, so
+  presets need no app-registered operation kinds yet. That stays a possible extension point; nothing
+  needs it today. Operations never mean "whoever is signed in", so a replay is deterministic.
+- **Authorization moves to build time.** A replay has no session. Instead of authorizing at replay
+  time, `presetProblems` holds every registered preset to the product's own rules: the inviter must
+  manage the team, the role must be grantable, no duplicate addresses, and handlers and flags must
+  exist. It runs as a seam-conformance test under every app and the fixture. The server replay throws
+  on anything it cannot perform, rather than skipping it, because getting that far means the gate was
+  bypassed.
+- **The invite flow was extracted, not copied.** Everything after the org route's decision to invite
+  (mint, audit, email, analytics, admins' notification) is now `keel/server-lib/invite.ts`
+  `sendOrgInvite`, shared by the route and the replay. The route keeps authorization, validation and
+  the duplicate check, which genuinely differ by caller.
+- **The viewpoint is who the restorer sits down as, not captured state.** It is a per-browser cookie
+  and the world is shared. A preset may name a seed person, and loading it signs in only the browser
+  that loaded it (cookies on that one response). Other browsers keep their viewpoint. If theirs
+  pointed at a person the reset removed, they land on sign-in, as after any reset. Viewpoint capture
+  for directory snapshots was not added: it would raise the same question with no good answer.
+- **One resolution order for a world-start name: `'reset'` → preset → saved snapshot**
+  (`resolveWorldStart`), shared by both hosts' tour starts (and the showcase test that checks every tour's
+  start). Saving a snapshot under
+  `reset` or a preset id is refused, in the UI and with a 403 from `saveSnapshot`, so a tour's
+  `snapshot` can never name two worlds. Restore and delete stay permitted, so a snapshot saved before a
+  preset took its name is not orphaned.
+- **A tour start a host cannot honour is a miss.** `useTours`' `onSnapshot` may now answer `false`.
+  The static shell does that for a saved-snapshot name, so a tour that only works on a server fails the
+  `file://` walkthrough gate, and a unit test in the showcase says so without building a bundle. The
+  server glue's reset/restore/preset handlers answer a promise that settles `false` on refusal and
+  never settles on success, because the page is reloading. This also closed a race that predates
+  presets: step 1 used to render on the doomed document, and a Next pressed there was lost.
+- **A second tour, rather than re-pointing the flagship one.** `invite-from-preset` starts from
+  `mid-demo` and walks the pending invite to a member, so a preset start runs end to end in CI. The
+  ticket tour keeps `'reset'` and its "press Next to become Dana" opening, which is its first lesson.
+
+## Presets move to their own seam module and gain `extends` (2026-10-03, `presets-own-module`)
+
+- **A seam module of their own.** Replaced: the same day's "registered on `@app-config/simulator`, not a
+  new seam module". A list expected to grow to dozens of entries, now with composition, is its own
+  registry, and `simulator.ts` goes back to being the panel's tabs and flags. Each preset is one file
+  under `presets/`, listed in `presets.ts`. The cost is one more file for the starter (`presets = []`)
+  and the fixture, which is now an 18-module seam.
+- **Single inheritance only.** A preset has at most one `extends`. A list of bases raises ordering and
+  conflict questions (whose viewpoint wins, whose duplicate invite) that nobody needs answered yet. The
+  rule today is the plain one: base operations first, the nearest viewpoint wins.
+- **`operations` is optional.** A preset can differ from its base by viewpoint alone ("mid-demo, signed
+  in as someone else"), without restating the script.
+- **Validation runs on the expanded list.** `presetProblems` checks what actually replays, so a duplicate
+  invite split across a base and its child is caught, and a child that overrides a bad viewpoint is not
+  blamed for it. The price is that a base's own problem repeats under each child, and operation numbers
+  count in the expanded list.
+- **A consequence in the showcase.** `multi-tenant` now builds on `mid-demo`, so it also contains
+  Jordan's pending invite, which it did not before. The static-shell spec that proved "loading another
+  preset is a reset underneath" by Jordan's absence now proves it with a hand-made flag flip instead.
+
+## Preset operations become a registry keel and the app both extend (2026-10-03, `preset-operations`)
+
+- **The operation kinds are a registry, not a closed union.** `invite`, `inbound` and `flag` were a
+  union in `keel/core/presets.ts` that each host replayed with its own hard-coded `switch`, so an adopter
+  could neither add a kind ("assign a ticket") nor make a preset follow a customized invite flow. Now keel
+  contributes its kinds, the app registers its own on the seam (`appPresetOperations`, typed by an
+  `AppPresetOperation` union composed like job kinds), and each host dispatches every step through ONE
+  function that looks the kind up: `performPresetOperation` on the server, its twin in the static world.
+- **Three parts per kind, never in one module.** A pure DEFINITION (argument schema, the product rules
+  as `check`, the named results it `consumes`) on `@app-config/presets`; a SERVER half on the new
+  server-only `@app-config/preset-operations`; a STATIC half supplied by the static composition root
+  through `DemoWorldOptions.presetOperations`. The split is physical, not stylistic: a server half
+  reaches `server-only` modules and pglite, and the `file://` demo is one browser bundle that fails to
+  load with either inside it. It is the same split inbound email already had (server registry vs the
+  static twins in `inboundHandlers`). The bundle carries no `pglite` string after the change.
+- **Replacement by kind name.** Definitions and both halves compose `{ ...framework, ...app }` keyed by
+  kind, so an app entry named `invite` replaces keel's. keel's server halves are published
+  (`keel/server-lib/preset-operations`) and its static halves reach an app half through the context's
+  `framework` map, so a replacement can WRAP keel's behaviour instead of copying it — the fixture's `flag`
+  does exactly that, and keel's replay test proves the app entry is the one that ran.
+- **Standard Schema, with Valibot for keel's own kinds.** `PresetOperationDefinition.args` is typed
+  against the Standard Schema v1 interface, vendored as types only (`keel/core/standard-schema.ts`), so
+  an app may write its kinds in Zod or ArkType. keel's three kinds, the fixture's and the showcase's use
+  Valibot, which makes it a new runtime dependency of `keel/core` (allowed: the core fence bans
+  frameworks and vendor SDKs, not small pure libraries). Valibot over Zod for the static demo's byte
+  budget: Valibot is standalone functions a bundler can keep one at a time, where Zod's default API
+  hangs its methods on schema classes (Zod was not measured here). Measured: the showcase's `dist-demo/index.html` went from 938,049 to 942,766 bytes (+4,717;
+  budget 950,000, unchanged), the starter's from 849,632 to 853,371 (+3,739). About 3 KB of each is
+  Valibot's four schema constructors and issue plumbing, which the bundler keeps although the static
+  world never calls them (no host validates at replay time; the conformance gate does): annotating the
+  schema calls `/* @__PURE__ */` brought the showcase to +1,690 in a trial, and was not adopted because
+  every app author would have to repeat it on every nested call.
+- **Shape in the schema, rules in `check`.** keel's `invite` schema accepts any role (`v.picklist(ROLES)`)
+  and any string as the email; "cannot be granted by invite" and the email shape stay in `check`, with
+  their old sentences. A preset asking for `admin` is a product rule being broken, and the gate should
+  answer with the org screen's own words. `check` runs only once the shape passes, and it receives the
+  script's earlier valid operations (`earlier`), which is what the duplicate-invite rule always needed.
+- **Named results.** An operation may say `as: 'refund'`; the id of what it created is bound to that
+  name for the rest of the replay, and a later operation names it in an argument its kind `consumes`.
+  Each host keeps its own name → id map (a uuid on the server, the twin's id in the static world), so a
+  script never holds a host's ids. `presetProblems` holds names to be unique and bound EARLIER; an
+  unbound name throws on the server and settles the static replay false. For `inbound` to produce a
+  name, a handler's 'handled' result (and the static twin's) gains an optional `subjectId` — the row it
+  created — which intake passes through on `IntakeOutcome`. Additive: no existing handler had to change,
+  and the compose route's response simply gains the field.
+- **Operations, not a bus, for product code a preset drives.** The showcase's `ticket.assign` does not
+  re-implement assignment or post an event a listener reacts to. The PATCH ticket route's post-authorize
+  body — write, `ticket.assigned`/`ticket.updated` audit, the assignee's notification — moved, with the
+  session's user replaced by an explicit actor, into a named domain operation, `applyTicketChanges` (`apps/showcase/src/domain/ticket-changes.ts`),
+  which the route and the preset's server half both call; the route keeps parsing, validation,
+  `requireUser`, org resolution, the org-scoped lookup and `authorize(...)`. The core takes the ticket
+  as the caller resolved it, rather than its id, so the org-scoped lookup cannot be skipped and the
+  route makes no extra read. The static twin got the same treatment (`applyDemoTicketChanges`, shared
+  by the ticket card and the static half). The route's unit suite passed unchanged across the move.
+- **Coverage where each half lives.** The seam-conformance suite holds definitions and server halves to
+  each other both ways under every app. Static halves are built at runtime by the composition root, out
+  of a unit test's sight, so the static-shell e2e loads every registered preset and waits for its
+  "Preset loaded" notice: a kind with no static half settles the replay false and the notice never comes.
+
+## Holding one actor is a preset operation kind, answered per actor (2026-10-03, `preset-actor-holds`)
+
+The Simulator's actors have had ONE hold, the app's world-wide `actors-held` flag. A demo preset can now
+hold a single counterparty (`{ op: 'actor.hold', actor: 'partner-desk', held: true }`), which `multi-tenant`
+uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
+
+- **An operation kind, not a field on `DemoPreset`.** A `holds: [...]` field would have been a second
+  mechanism beside the script, with its own replay path on each host and no place in the ordered, named,
+  recordable list a preset already is. As a kind it reuses all of it: the same conformance gate, the same
+  `extends` composition (a child can release what its base held), and the same two halves. It also
+  prepares the next step. Per-actor scenario settings (an actor that fails a given share of its calls,
+  say) become more fields on the SAME per-actor world state this slice adds, and more operation kinds
+  or arguments over it, rather than another channel.
+- **World state is a per-actor map.** Server: `readActorHolds`/`setActorHold` in the fake Simulator state
+  (`keel/adapters/fake/simulator`), persisted at `.data/simulator/actor-holds.json`. That directory is
+  already a LIVE_DIR, so reset, save and restore cover it with no new code, and a test proves each. Static:
+  `actorHolds` in the in-memory world, cleared by `resetWorld` and exposed on `DemoWorld`.
+- **The server host asks one question per tick.** The actor frame used to fetch every flag from
+  `GET /api/simulator/flags` and pick `actors-held` out. It now calls `GET /api/simulator/actors/held?actor=<id>`,
+  which answers `{ held }` for exactly that actor: the world-wide flag OR its own hold. The flags route stays
+  (its POST is how the Snapshots tab and the specs flip a flag; its GET, the read-out of every flag, has no
+  caller left in this repo, and was kept rather than removed in a slice about something else). The static host computes the same OR in memory
+  (`actorsHeld || actorHolds[id]`).
+- **The framework still does not value-import the actor registry at runtime.** keel's `actor.hold` `check`
+  needs the registered ids, so `PresetWorld` gains `actors`, derived in the seam-conformance suite from the
+  seam's `actors` list. That is a value read by a TEST only, but it means `@app-config/actors` is no longer
+  type-only: the starter registers `actors = []` and the fixture one actor, `fixture-tug` (ADR-0012
+  addendum). Neither host's half validates the id at replay, since neither could without that import; an
+  unknown id would write a hold nothing reads, and the gate rejects the preset first.
+- **Deferred: an Actors-tab toggle.** A per-actor hold switch in the Snapshots or Actors tab is a natural
+  follow-up (it would call a route that writes the same file, and the static twin would set `actorHolds`).
+  Not built here: the slice's job was the preset path, and a toggle needs its own copy in both catalogs and
+  its own specs.
+- **Measured:** the showcase's `dist-demo/index.html` went from 942,766 to 942,996 bytes (+230; budget
+  950,000), the starter's from 853,371 to 853,483 (+112).
+
+## Demo presets: final-review fixes before `main` (2026-10-03, `presets-main-sync`)
+
+- **A replay that cannot finish says so, on both hosts.**
+    - **Static demo:** an abandoned queue now pushes `noticePresetFailed`, rather than leaving the "World reset" notice over a half-replayed world.
+    - **Server:** a refused or failed load shows the same notice and does NOT reload. Reloading would show the reset world, but it would also hand a waiting tour to its resume marker, so the tour could never record the miss. The notice tells the viewer the world is only partly set up and to reset it.
+- **The server replay holds the world lock across the reset AND the script** (`resetWorldThen` in `keel/adapters/fake/simulator-admin.ts`). Before, the lock covered only the reset, so a second load arriving mid-script wiped the first one's world under it. A test running two loads at once was seen failing without the lock.
+- **A throwing inbound handler twin is filed `failed`**, as the server intake files it, instead of escaping the static replay.
+- **The static shell tracks the in-flight load.** The Snapshots tab's "one world rewrite at a time" is now true on the `file://` host too, not only on the server.
+- **A tour start that rejects outright is a recorded miss,** never an unhandled rejection that leaves a resume marker for a tour that never began.
+- **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
+- **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
+
+## Demo size budgets re-based, and the starter's is the adopter's (2026-11-16, `demo-size-headroom`)
+
+Requested by an adopter whose ejected app sat at 873,581 of its 880,000-byte budget with one small screen.
+
+- **Prune the demo's CSS instead of raising a budget.** The budget file's rule is that its tightness is
+  deliberate, and the growth since 2026-08-01 (+18,787 showcase, +10,061 starter) was mostly the presets, a
+  feature. But the most avoidable thing in the artifact was never growth: the dead 15% of it, rules of Mantine's whole stylesheet that no shipped component can match.
+  Removing what no shipped component can match is a smaller change in what the artifact IS than raising the
+  number 25 KB and calling the next 25 KB a decision. Rejected: per-component CSS imports (a hand-kept list
+  whose misses are silent), and trimming only what grew.
+- **Budgets went down.** Showcase 950,000 → 840,000, starter 880,000 → 820,000, each below its unpruned
+  size, so the savings are not slack and a regression in the pruning is a red gate. The showcase keeps ~3%
+  headroom on purpose, as the Tours raise did.
+- **The starter's budget is the adopter's, and is sized for them.** An adopter inherits it. A budget kept
+  3% over the framework's own size is 3% for their first screens. So the two apps' numbers now have two jobs: the showcase's paces the
+  framework (every framework screen and twin is in it, so a framework change costs bytes there first); the
+  starter's lets the starter grow to the showcase's size before it asks anything, and still fails on gross
+  bloat and on the pruning stopping. Rejected: a gate that
+  separates framework baseline from app growth (the bundle has no such attribution, and the adopter wants
+  a ceiling, not a ledger); a tight starter budget plus a note (red on their second screen); raising 880,000.
+  **JP's call to overrule:** if the starter's number should pace as tightly as the showcase's, set it to ~745,000 (721,386 plus 3%).
+- **Prior art, and what changes.** The 2026-10-03 entry "Standard Schema, with Valibot for keel's own kinds"
+  measured ~3 KB of valibot in each demo and accepted it (`/* @__PURE__ */` on the schema calls was tried and
+  rejected: every app author would repeat it). Building keel's own definitions by function takes keel's share
+  out without asking an author anything. An app's own definition still pays ~2.8 KB.
+- **The gate warns under 2% headroom** and says what to do, on CI as a workflow annotation. It passes: the
+  cue to look while it is cheap. It would have fired through the whole of the presets work.
+- **`init-app` should say whose number it is.** `scripts/init-app.ts` is PR B's, so this is the proposed
+  wording for its "WHAT THIS DID NOT TOUCH" list, where it names deployment parameters and the cutover
+  checklist:
+
+    > • The demo size budget — apps/<slug>/package.json's `check:demo-size` passes the static demo's byte
+    > budget. It is yours now: the starter ships it with room to grow to the showcase's size, which is
+    > sized for an app's own screens, not for the framework's pace. Re-set it when you want a tighter
+    > gate (what your app measures plus the headroom you want, in its own commit). When it goes red,
+    > scripts/check-demo-size.mjs says what to look at first.
+
+- **Not done.** An app's own preset operation definition still ships in its demo (~2.8 KB on the showcase);
+  fixing it is a seam change for 0.3% of the file, recorded in
+  `.claude/future-tasks/resolved/demo-size-budget-headroom-thin.md`. The Next apps still serve the whole
+  Mantine stylesheet; nothing gates their page weight.
+
+## Adopter papercuts: the repo name, the identity gate, one-tenant seeds (2026-11-16, `fix/adopter-papercuts`)
+
+Four gaps a first adopter reported, decided together. Each is a small change; the reasons are the part
+worth keeping.
+
+- **The repo name is a flag, `--repo`, and a placeholder without it. It is not read from `git remote`.**
+  `init-app` wrote the app's slug into the repository position of the advisory and discussions links, which
+  is right only when a repo is named after its one app (an app `console` kept in a repo `pages` got
+  `…/console/security/advisories/new`, a link that 404s and looks plausible). Rejected: deriving it from
+  `origin`. At adoption time that remote is often still the template, or a fork under its default name, so
+  the derived value would be plausible and wrong with nothing to flag it, and `--dry-run` would print a
+  different plan on each machine. The flag takes the NAME only (not `owner/name`, because the owner also
+  fills CODEOWNERS, where it may be a team). Without it the links carry `PLACEHOLDER_GITHUB_REPO` beside
+  `PLACEHOLDER_GITHUB_OWNER`, which the closing output names and `git grep` finds. "I forgot the flag" is a
+  re-run: `pnpm init-app --repo <name>` alone replaces the placeholder segment in the three files (whatever
+  the owner says by then, since filling the owner first is the natural order) and does nothing else; it
+  refuses on a tree init-app has not adopted, where it would scrub the identity and nothing else. On links that already
+  name a repository a `--repo` is reported as ignored, and the summary and closing text are driven by the
+  state the run found in the files, not by the flag, so they never claim a change that did not happen.
+- **`tests/docs/adopter-identity.test.ts` classifies its tree before asserting, rather than skipping.** It
+  ran `init-app acme --eject-showcase` on a copy of whatever tree it was in and asserted what the rewrite
+  produced. In an adopted tree the rewrite has nothing to replace (it replaces the template's literals),
+  so the assertions read the adopter's own files and went red on their slug and, once filled in, their
+  owner. It was green in the `adoption-probe` job only because that job also adopts as `acme`. The test
+  now runs the `init-app` suite only in the pristine template, which it recognises by STRUCTURE
+  (`apps/showcase` exists and the root package is still `keel-workspace`; every adopting `init-app` run
+  renames the root or deletes the showcase). Everywhere else it checks the real files directly: none may
+  name the template's maintainer, which is also the check that catches an upstream merge adding a
+  `@jpslav`-owned line to an adopter's CODEOWNERS. In the template all four must name him. The first
+  version recognised the template by the identity strings themselves, and review found the hole in that:
+  move the maintainer's identity in the four files and nothing else, and every file reads as "adopted", the
+  suite switches itself off and `init-app` silently stops scrubbing anything. A sentinel comparing the
+  test's constants with `init-app`'s literals was added to patch it, then dropped once the structural
+  test made it redundant (and it was red in adopters who scrubbed the script). Exact-spelling matching is
+  deliberate: the template's files use one spelling and the rewrite is a literal replace.
+  Rejected: skipping on "`apps/showcase` is absent" (the probe's ejected tree has none, so it would switch
+  the gate off where it is meant to run), and having `init-app` delete the test (ADR-0013 makes updates a
+  merge, so a file deleted in the fork and edited upstream is a modify/delete conflict on every merge).
+- **ADR-0004's two-seeded-tenants rule is scoped, by an addendum, with no new gate.** keel's own apps and
+  multi-tenant adopters keep two; a one-tenant-per-deployment app may seed one if its RLS proof half still
+  uses two tenants. Nothing in the framework reads the seed's tenant count, and the proof runner makes its
+  own two tenants per run, so the seed cannot starve a proof. No cheap check says whether an app's proof half
+  crosses a tenant boundary (a comment satisfies a presence check, and an app with no tables legitimately has
+  an empty half), so it stays a convention, and `/new-entity` and `/new-slice` now say to write the
+  table's proof section with both tenants. That convention was not written down anywhere before.
+- **`CLAUDE.md` said the authorization scan walks `apps/*/src/app/api`; it walks the whole
+  `apps/*/src/app`.** The behaviour was right and stricter than the sentence: a mutating `route.ts` outside
+  `api/` is scanned and, since exemption keys are measured from `src/app/api`, can match no exemption.
+  Watched failing with a bare `POST` at `src/app/[locale]/danger/route.ts`.

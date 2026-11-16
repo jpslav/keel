@@ -1,11 +1,11 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { APP_SLUG } from '@app-config/identity'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the module (fake-adapters.test.ts pattern).
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-simulator-'))
+const tmp = makeTestTmpDir('app-simulator-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })
@@ -56,5 +56,32 @@ describe('simulator continuity state', () => {
 
         cookieStore.set(`${APP_SLUG}_simulator_viewpoint`, { value: 'nonsense' })
         expect(await readViewpointCookie()).toBeNull()
+    })
+})
+
+describe('per-actor holds', () => {
+    test('start empty, and setActorHold writes one actor without disturbing another', async () => {
+        const { readActorHolds, setActorHold } = await import('./simulator')
+
+        expect(readActorHolds()).toEqual({})
+
+        setActorHold('fixture-tug', true)
+        setActorHold('fixture-barge', true)
+        expect(readActorHolds()).toEqual({ 'fixture-tug': true, 'fixture-barge': true })
+
+        // last write wins, and a release is stored (false), not forgotten
+        setActorHold('fixture-tug', false)
+        expect(readActorHolds()).toEqual({ 'fixture-tug': false, 'fixture-barge': true })
+    })
+
+    test('persist in .data/simulator/, the directory a world reset, save and restore already cover', async () => {
+        const { setActorHold } = await import('./simulator')
+        const { dataDir } = await import('./data-dir')
+
+        setActorHold('fixture-tug', true)
+
+        expect(JSON.parse(readFileSync(path.join(dataDir('simulator'), 'actor-holds.json'), 'utf8'))).toMatchObject({
+            'fixture-tug': true,
+        })
     })
 })

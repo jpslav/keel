@@ -1,12 +1,10 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import type { ScheduleSpec } from '../core/schedules'
 import type { JobsPort, SubmittedJob } from '../ports/jobs'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing anything that touches pglite.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-schedules-db-'))
+const tmp = makeTestTmpDir('app-schedules-db-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })

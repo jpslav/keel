@@ -8,6 +8,10 @@
     "fixture": {
         "title": "Fixture de pruebas de keel",
         "docketsHeading": "Expedientes",
-        "docketOpenedBy": "Abierto por {name}"
+        "docketOpenedBy": "Abierto por {name}",
+        "presetBusyTitle": "Puerto ajetreado",
+        "presetBusySummary": "Una invitación pendiente, un expediente nuevo y trabajos retenidos.",
+        "presetBusyLeadTitle": "Puerto ajetreado, como el jefe",
+        "presetBusyLeadSummary": "El puerto ajetreado, con la sesión del jefe del depósito."
     }
 }

@@ -1,6 +1,3 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import EmbeddedPostgres from 'embedded-postgres'
 import { Kysely, PostgresDialect } from 'kysely'
 import { Pool } from 'pg'
@@ -9,6 +6,7 @@ import { migrateToLatest } from 'keel/db/migrate'
 import { runRlsProofs } from 'keel/db/rls-proof-runner'
 import type { DB } from 'keel/db/schema'
 import { portFor } from '../../../../scripts/ports.mjs'
+import { makeTestTmpDirAsync } from '../../../../tests/support/tmp-dir'
 
 /**
  * The "fakes can't drift" job: the SAME migrations + RLS proof suite that runs on pglite in unit
@@ -30,7 +28,7 @@ beforeAll(async () => {
         // at once instead of the second one failing to bind.
         const port = portFor('contractPg')
         embedded = new EmbeddedPostgres({
-            databaseDir: mkdtempSync(path.join(tmpdir(), 'app-contract-pg-')),
+            databaseDir: await makeTestTmpDirAsync('app-contract-pg-'),
             user: 'postgres',
             password: 'postgres',
             port,

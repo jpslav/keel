@@ -4,7 +4,7 @@ Adoption is one command:
 
 ```sh
 pnpm install                                # boots hermetically: no docker, no credentials, no network
-pnpm init-app acme --name "Acme Research"   # rename the app you keep; --dry-run previews it
+pnpm init-app acme --name "Acme Research" --repo acme-research   # rename the app you keep; --dry-run previews it
 pnpm install && pnpm verify                 # the workspace changed; prove it still holds
 ```
 
@@ -13,7 +13,8 @@ changes too — and CI installs with `--frozen-lockfile` by default, so a commit
 fails your first push with an error that never mentions `init-app`.
 
 That middle line renames the app you keep and repoints every file that named it. What it deliberately
-leaves for you — deployment params, seed data, cutover rows — it prints when it finishes.
+leaves for you — deployment params, seed data, cutover rows, your GitHub owner and repo name — it prints when
+it finishes.
 
 Adding `--eject-showcase` also deletes the demo app, and the gate stays green when you do — keel's own
 tests run against keel's own fixture seam (`packages/keel/test-fixture`), not against the demo's world.
@@ -40,6 +41,10 @@ Three kinds of thing live in this repo (see
   consumer, which is what makes the framework/app line falsifiable rather than merely asserted:
   anything keel reaches for that only exists because the showcase supplies it fails to compile there.
 - **The repo scaffold**: the verify gate, lint fences, CI, docs doctrine, infra draft. You keep it.
+  One rule in it reaches your own tests: a test that needs a scratch directory calls
+  `makeTestTmpDir()` / `makeTestTmpDirAsync()` from `tests/support/tmp-dir.ts`, never `mkdtemp` (lint
+  bans it), and `test:unit`, `test:coverage` and `test:contract` run through
+  `scripts/check-tmpdir-leak.mjs`, which fails the run if a directory made that way survives it.
 
 Apps live under `apps/` — one per product, each with its own `package.json`, configs and tests
 (ADR-0007). Root commands that operate on ALL apps (`pnpm verify`, `pnpm typecheck`, `pnpm lint`,
@@ -70,12 +75,17 @@ must pick ONE app (`pnpm dev`, `pnpm start`, and the showcase-only `pnpm ladle`,
 ```
 pnpm init-app <slug> [options]        rename the app you keep
 pnpm init-app --eject-showcase        delete the demo app (slug optional; both can run at once)
+pnpm init-app --repo <name>           fill in the repository name on a tree adopted without it
 
   <slug>              the new APP_SLUG: lowercase letters, digits and dashes. Also becomes the app's
                       directory name and package name (the workspace root becomes <slug>-workspace,
                       so `pnpm --filter <slug>` can only ever mean the app).
   --name "<Name>"     display name for UI copy and titles (default: title-cased <slug>)
   --app <dir>         which directory under apps/ to rename (default: starter, else the only app)
+  --repo <name>       the GitHub repository NAME this will live in: not the owner, and not the app slug
+                      (an app can live in a repo of another name). Used in the advisory and discussions links of
+                      SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md. Without it those
+                      links say PLACEHOLDER_GITHUB_REPO, next to PLACEHOLDER_GITHUB_OWNER, for you to replace
   --eject-showcase    remove apps/showcase and every reference to it
   --dry-run           print the plan and change nothing
   --yes               skip the confirmation prompt (required when stdin is not a terminal)
@@ -95,31 +105,52 @@ renaming (`APP_DATA_DIR`, the `app-simulator-*` browser keys, the `@app/*` works
 dev-server port key — see below). What is left is display copy, package naming, and the handful of
 files that name the app's directory:
 
-| Where                                                                                  | What                                                                             |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `apps/<app>/config/app.ts`                                                             | `APP_SLUG`                                                                       |
-| `apps/<app>/package.json`                                                              | package `name` + `description`                                                   |
-| `apps/<app>/messages/en.json` + `es.json`                                              | `welcome.appName` (the header prop) and the `welcome.title`                      |
-| `apps/<app>/src/app/[locale]/layout.tsx`                                               | the document `metadata.title`                                                    |
-| `apps/<app>/src/demo-static/index.html`                                                | the static demo's `<title>`                                                      |
-| `package.json` (root)                                                                  | `name` (`<slug>-workspace`), `description`, `--filter` scripts                   |
-| `knip.json`, `vitest.config.ts`                                                        | the workspace key; the app list (`APPS`)                                         |
-| `vitest.contract.config.ts`, `tsconfig.json`, `infra/*.ts`                             | the single app each one names                                                    |
-| `apps/<app>/` itself                                                                   | the directory, renamed last                                                      |
-| `docs/`, `.claude/`, README, CLAUDE, CONTRIBUTING                                      | every backticked `apps/<app>/…` citation the path gate checks                    |
-| `CODEOWNERS`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/config.yml`, `CODE_OF_CONDUCT.md` | the maintainer's GitHub handle and the advisory URL → `PLACEHOLDER_GITHUB_OWNER` |
+| Where                                                                                  | What                                                                                             |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `apps/<app>/config/app.ts`                                                             | `APP_SLUG`                                                                                       |
+| `apps/<app>/package.json`                                                              | package `name` + `description`                                                                   |
+| `apps/<app>/messages/en.json` + `es.json`                                              | `welcome.appName` (the header prop) and the `welcome.title`                                      |
+| `apps/<app>/src/app/[locale]/layout.tsx`                                               | the document `metadata.title`                                                                    |
+| `apps/<app>/src/demo-static/index.html`                                                | the static demo's `<title>`                                                                      |
+| `package.json` (root)                                                                  | `name` (`<slug>-workspace`), `description`, `--filter` scripts                                   |
+| `knip.json`, `vitest.config.ts`                                                        | the workspace key; the app list (`APPS`)                                                         |
+| `vitest.contract.config.ts`, `tsconfig.json`, `infra/*.ts`                             | the single app each one names                                                                    |
+| `apps/<app>/` itself                                                                   | the directory, renamed last                                                                      |
+| `docs/`, `.claude/`, README, CLAUDE, CONTRIBUTING                                      | every backticked `apps/<app>/…` citation the path gate checks                                    |
+| `CODEOWNERS`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/config.yml`, `CODE_OF_CONDUCT.md` | the maintainer's handle and links → `PLACEHOLDER_GITHUB_OWNER` and `--repo` (or its placeholder) |
 
 **The last row runs even on a rename-only adoption, with no `--eject-showcase`.** Those four files
 route YOUR users to the TEMPLATE maintainer — a security report, a code-owner review, a conduct
 complaint — and that is wrong the moment you fork, not only once you delete the showcase. `init-app`
-rewrites `@jpslav` and every `github.com/jpslav/keel` advisory link to `PLACEHOLDER_GITHUB_OWNER`, and
-prints a "WHAT NOW NEEDS YOUR DETAILS" section naming exactly what to fill in. Left as
-`PLACEHOLDER_GITHUB_OWNER`, `CODEOWNERS` names an account GitHub cannot resolve, and turning on
-"require review from Code Owners" branch protection makes every PR unmergeable. `LICENSE` and the
-`docs/adr/` approver lines are the two places the maintainer's name correctly survives — the first
-because MIT requires the notice, the second because it is honest provenance for keel's own decisions.
+rewrites `@jpslav` to `PLACEHOLDER_GITHUB_OWNER`, and the `github.com/jpslav/keel` advisory and
+discussions links to `github.com/PLACEHOLDER_GITHUB_OWNER/<repo>`, and prints a "WHAT NOW NEEDS YOUR DETAILS" section naming
+exactly what to fill in. Left as `PLACEHOLDER_GITHUB_OWNER`, `CODEOWNERS` names an account GitHub cannot
+resolve, and turning on "require review from Code Owners" branch protection makes every PR unmergeable.
+`LICENSE` and the `docs/adr/` approver lines are the two places the maintainer's name correctly
+survives — the first because MIT requires the notice, the second because it is honest provenance for
+keel's own decisions.
 
-Filling in the owner is necessary and not sufficient: **two of those links depend on repository
+`tests/docs/adopter-identity.test.ts` ships with you and keeps guarding this, in a form that fits your
+repo. In the template it runs `init-app` on a scratch copy and checks the result. In yours, where the
+rewrite has already happened, it skips that half (you will see the skips) and runs one direct check: none
+of those four files may name the template's maintainer. That is what turns red if a later
+`git merge upstream/main` adds a line owned by `@jpslav` to your `CODEOWNERS`.
+
+**`<repo>` is the repository's name, which is not the app's slug.** An app called `console` can live in
+a repo called `pages`, and a link that says `…/console/security/advisories/new` 404s while looking
+right. So pass the name you will push to: `pnpm init-app console --repo pages`. It takes the NAME only
+— not `owner/name`, because the owner also fills `CODEOWNERS`, where it may be a team. Without `--repo`
+the links say `PLACEHOLDER_GITHUB_REPO` beside the owner placeholder, and the closing output says so;
+replace both (`git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github` finds
+them). Forgot it? Run `pnpm init-app --repo pages` afterwards: it replaces `PLACEHOLDER_GITHUB_REPO` in those
+three files, whatever you have put for the owner by then, and does nothing else (no citation rewrite, no
+`pnpm install` to run). On a tree `init-app` has not adopted yet it refuses, because it would scrub the
+maintainer's identity and leave the rest. Once the links name a repository, a further `--repo` is reported
+as ignored (the run says so rather than claiming a change), so edit the files directly then. `init-app` does not
+read the name from `git remote`: at adoption time `origin` is often still the template, or a fork under
+its default name, and a derived value would be plausible and wrong.
+
+Filling in the owner and repository is necessary and not sufficient: **two of those links depend on repository
 settings that are off by default.** `/security/advisories/new` resolves for a non-maintainer only once
 **private vulnerability reporting** is on (Settings → Code security), and `/discussions` 404s until
 **Discussions** is enabled (Settings → General → Features). Leave the first off and your security
@@ -155,19 +186,72 @@ It prints this list when it finishes, because these are the parts that take judg
 
 - **Deployment parameters** — `apps/<app>/config/params.ts` (you get one when you eject the showcase).
   Every `PLACEHOLDER_` value, and `sentry.org`. Each maps to a cutover row.
-- **Your seed world** — `apps/<app>/src/seed/`: tenant names, org slugs, people. Keep the shape (the
-  fake auth person picker, theming and e2e helpers all read it); WHERE it lives is yours. Note that
-  `staffOrgSlug` in `apps/<app>/src/app-config/abilities.ts` is load-bearing app config and must name a
-  real seed org.
+- **The starter's content** — its seed world, its welcome copy, its one entity and its static-demo
+  wiring are all still there and all still on screen. `init-app` renamed the app around them. The next
+  section lists each one and what to do about it.
 - **The cutover checklist** — [cutover-checklist.md](cutover-checklist.md) is yours: owners, dates, and
   the proof each row owes.
-- **Your domain** — the entity, its copy, its abilities and its tests are still the starter's.
 - **The licence** — this template is MIT, which means the product you build on it is yours with no
   copyleft obligation. Your own product's licence is still a decision you make; nothing here makes it
   for you.
 - **Prose.** `init-app` repoints path citations so the doc gate stays green, but the sentences around
   them still describe a template with two example apps. It prints the list of files to reread; README
   and `CLAUDE.md` are the two that matter, and `CLAUDE.md` is what teaches agent sessions your rules.
+
+### The starter's content is still wired into your UI
+
+A rename changes what the app is called, not what it shows. After `init-app`, four pieces of the
+starter are still reachable by anyone who opens your app or your static demo:
+
+| What survives                                    | Where it lives                                                                                                                                                                                                                                                                                                                                            | Where it shows                                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| The seed world: two tenants, two teams, 3 people | `apps/<app>/src/seed/index.ts`                                                                                                                                                                                                                                                                                                                            | every sign-in picker (the app's, the static demo's, the Simulator's People tab); tenant themes |
+| The welcome subtitle                             | `welcome.subtitle` in `apps/<app>/messages/en.json` + `es.json`                                                                                                                                                                                                                                                                                           | the app's root page AND the static demo's first screen — they share one component              |
+| The Items slice                                  | `apps/<app>/src/components/items-card.tsx`, `apps/<app>/src/app/api/items/route.ts`, the dashboard route's `page.tsx` and `dashboard-glue.tsx` under `apps/<app>/src/app/`, the `Item` case in `apps/<app>/src/app-config/abilities.ts`, the table, migration and RLS proof under `apps/<app>/src/app-config/db/`, the `items` namespace in both catalogs | every signed-in person's dashboard                                                             |
+| The static demo's composition root               | `apps/<app>/src/demo-static/app.tsx`                                                                                                                                                                                                                                                                                                                      | the whole `file://` demo: it passes `nav={null}`, the starter's welcome screen and Items card  |
+
+None of it fails a gate, which is why it is listed here: a real adopter shipped a product demo that
+opened on the starter's tenants and its Items card, four days after adopting. The team had been
+looking at the product signed in as its own people, and nothing they used showed them the rest.
+
+**Replace it; do not build beside it.** The seed world is one world, and the framework's pickers list
+all of it — `keel/seed/contracts` has no notion of a person who exists but is not offered. A product
+world added NEXT TO `northwind` and `westgate` therefore puts both on every sign-in screen. Nothing in
+`packages/keel` needs the starter's names: keel's own tests run against `packages/keel/test-fixture`.
+What does read them by literal id is yours to change in the same commit:
+
+- `apps/<app>/tests/e2e/items.spec.ts` signs in as `person-owner` and `person-other-tenant` and asserts
+  the tenant names; `apps/<app>/tests/demo-static/static-shell.spec.ts` signs in as `person-owner` and
+  `person-teammate` and asserts their names.
+- `staffOrgSlug` in `apps/<app>/src/app-config/abilities.ts` must name a real seed org.
+
+What the seed must keep is its SHAPE, not its content: the exports the framework reads through
+`@app-config/seed` (`tenants`, `organizations`, `people`, `agreements`, `jobSchedules`, `findTenant`,
+`findOrg` — `keel/seed/contracts` types the data), at least one tenant and one person to sign in as,
+and — if your deployment serves more than one tenant — two tenants, so that tenant isolation is something
+you can see by using the app and not only in tests. WHERE it lives is yours.
+
+**An app deployed one tenant per deployment may seed one tenant**
+([ADR-0004](adr/0004-tenancy-rls.md), addendum of 2026-11-16), as long as the isolation proofs for your own
+tables still use two. They always can: `apps/<app>/src/app-config/db/rls-proofs.ts` is handed two tenants and an
+organization in each by the framework's proof runner, which creates them on every run and never reads your
+seed. Drop the second tenant's sign-in and its cross-tenant assertions from the specs above in the same commit,
+and keep the cross-tenant proofs. Nothing gates that last part — the RLS coverage check proves every table
+is protected, not that your proofs exercise two tenants — so it is yours to keep honest.
+
+**The Items slice is a worked example, so take what it teaches before you delete it.**
+`apps/<app>/src/app-config/db/migrations/1001_items.ts` is a worked RLS migration — after an eject, the only one left — and its
+section of `apps/<app>/src/app-config/db/rls-proofs.ts` is the proof that goes with it. Build your first real slice
+from them (`/new-slice`), then remove Items the way "To remove a demo slice" below describes. There is
+no flag that does this for you yet; `.claude/future-tasks/init-app-blank-option.md` carries the design.
+
+**Wire the static demo last, and look at it.** A shell or a home screen you build in
+`apps/<app>/src/components` reaches the real app through its route files and reaches the static demo
+ONLY through `apps/<app>/src/demo-static/app.tsx` — the `nav`, `welcome` and `dashboard` props it hands
+`DemoShell`. Being router-agnostic makes a component ABLE to run in the twin; it does not put it there.
+When the sweep is done, run `pnpm build:demo-static`, open `apps/<app>/dist-demo/index.html`, and sign in as each seeded person.
+That one look is the check: the picker, the first screen and the dashboard are exactly the three places
+the starter survives.
 
 ### What ejecting the showcase costs, and what it rescues
 
@@ -185,8 +269,8 @@ want it.
 
 One gate is relaxed on the way out. keel's knip workspace carries `includeEntryExports: true`, which
 means "every symbol keel PUBLISHES must have a consumer" — an invariant the showcase made true by using
-nearly all of it. A one-entity app does not: `apps/starter` imports 30 of keel's 126 published subpaths,
-so the same setting would start demanding you delete the other 96 — capabilities you merely have not
+nearly all of it. A one-entity app does not: `apps/starter` imports 32 of keel's 130 published subpaths,
+so the same setting would start demanding you delete the other 98 — capabilities you merely have not
 reached yet, not dead code. `--eject-showcase` therefore turns it off. knip keeps reporting unused
 files, and the declared `exports` surface goes back to being what it is without a rich consumer: a
 declaration.
@@ -195,16 +279,16 @@ declaration.
 vocabulary — its seed slugs, its `tickets` table, its `export-tickets` job kind, its route tree — so
 deleting the demo took `pnpm test:unit` and `pnpm typecheck` down with it. The framework now carries a
 seam of its own, `packages/keel/test-fixture`: a conforming `@app-config/*` registration with its own
-two-tenant seed world, one table and migration, one job/webhook/notification kind, an inbound handler,
+two-tenant seed world, one table and its migrations, one job/webhook/notification kind, an inbound handler,
 and a route tree that exists only to be read by the authorization scan. The root TypeScript program
 resolves `@app-config/*` there, and `vitest.config.ts` runs keel's suite in a `keel` project pointed at
 it. Nothing in that fixture is deletable by adoption, and its vocabulary is deliberately none of the
 apps' — so a framework test that reacquires a dependency on YOUR world fails loudly instead of passing
 by coincidence. `pnpm verify` is green on a freshly ejected repo, end to end.
 
-The one thing that DOES stay app-shaped is the seam-conformance pair — the i18n partition/parity tests
-and the pglite RLS suite — which keep running under every app's own vitest project, against your
-catalog and your tables. That is what stops the fixture becoming the only world the framework is ever
+The one thing that DOES stay app-shaped is the seam-conformance set — the i18n partition/parity tests,
+the pglite RLS suite and the demo-presets check — which keep running under every app's own vitest
+project, against your catalog, your tables and your presets. That is what stops the fixture becoming the only world the framework is ever
 proved against.
 
 ## Layout
@@ -225,9 +309,9 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 ### What you may import from keel
 
-`packages/keel/package.json`'s `exports` map is the contract: it lists the 126 subpaths your app may
+`packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 34 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 37 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
@@ -245,22 +329,24 @@ The framework never imports your code directly; it imports the registration seam
 a lint fence enforces the direction. Each module there is the app-side half of one capability. The
 "empty" column is what `apps/starter` registers — read it as the off switch for that capability:
 
-| Seam module                                   | You register                                           | Empty looks like              |
-| --------------------------------------------- | ------------------------------------------------------ | ----------------------------- |
-| `abilities.ts`                                | your subject types + authorization rules + staff org   | (starter registers one)       |
-| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001 | (starter registers one)       |
-| `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables               | an empty async body           |
-| `jobs.ts`                                     | your background job kinds + handlers                   | `[] as const`, `{}`           |
-| `digest.ts`                                   | the rows the framework's scheduled digest summarizes   | `async () => []`              |
-| `actors.ts`                                   | your simulated counterparties for dev/demo             | `type ActorId = never`        |
-| `simulator.ts`                                | your extra Simulator tabs + feature flags              | `flags = []`                  |
-| `tours.ts`                                    | scripted Simulator walkthroughs of your product        | `tours = []` (no Tours tab)   |
-| `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                | `[] as const` / `never`       |
-| `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers              | `{}`                          |
-| `assistant.ts`                                | your LLM tools + system prompt                         | omit the module and its route |
-| `messages.ts`                                 | your i18n namespaces + catalog loader (partitioned)    | (every app registers some)    |
-| `identity.ts`                                 | `APP_SLUG`, re-exported from the app's app config      | (every app registers it)      |
-| `seed.ts`                                     | your seed data re-export                               | (every app registers it)      |
+| Seam module                                   | You register                                                                                       | Empty looks like                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `abilities.ts`                                | your subject types + authorization rules + staff org                                               | (starter registers one)                    |
+| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001                                             | (starter registers one)                    |
+| `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
+| `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
+| `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
+| `actors.ts`                                   | your simulated counterparties for dev/demo                                                         | `actors = []`, `type ActorId = never`      |
+| `simulator.ts`                                | your extra Simulator tabs + feature flags                                                          | `flags = []`                               |
+| `presets.ts`                                  | demo presets (`/new-preset`): starting worlds every host can load, and your own kinds' definitions | `presets = []`, `appPresetOperations = []` |
+| `preset-operations.ts`                        | server halves of your own preset operation kinds (`/new-preset-operation`)                         | `{}`                                       |
+| `tours.ts`                                    | scripted Simulator walkthroughs of your product                                                    | `tours = []` (no Tours tab)                |
+| `notifications.ts`, `webhooks.ts`, `audit.ts` | your event vocabularies                                                                            | `[] as const` / `never`                    |
+| `inbound-email.ts`                            | your `<org>+<slug>@domain` email handlers                                                          | `{}`                                       |
+| `assistant.ts`                                | your LLM tools + system prompt                                                                     | omit the module and its route              |
+| `messages.ts`                                 | your i18n namespaces + catalog loader (partitioned)                                                | (every app registers some)                 |
+| `identity.ts`                                 | `APP_SLUG`, re-exported from the app's app config                                                  | (every app registers it)                   |
+| `seed.ts`                                     | your seed data re-export                                                                           | (every app registers it)                   |
 
 The one place an empty registration is not free: `AppSubjectFields` in `abilities.ts` must be an
 `interface` (the framework's `AbilitySubject` extends it), and an app with no extra subject fields
@@ -268,7 +354,7 @@ therefore declares an empty one and suppresses `@typescript-eslint/no-empty-obje
 `apps/starter` shows the suppression and why.
 
 **To add a feature slice**: run `/new-slice` (and the per-capability scaffolds `/new-entity`,
-`/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`). Each walks the house way:
+`/new-job`, `/new-actor`, `/new-notification-kind`, `/new-webhook-event`, `/new-tour`, `/new-preset`, `/new-preset-operation`). Each walks the house way:
 screen in your app's `apps/<app>/src/components` (yours) or `packages/keel/src/components` (framework-generic),
 thin route, seam registrations, an RLS migration copied from the reference
 (`apps/starter/src/app-config/db/migrations/1001_items.ts`), colocated tests, e2e, then `pnpm verify` +
@@ -286,14 +372,21 @@ walking end-to-end. You only write your DOMAIN half — `apps/<app>/src/demo-sta
 composition root that adds your rows and cards to the framework world `keel/demo-static` already
 simulates (people, mail, jobs, schedules, webhooks, notifications, agreements, audit, snapshots). For one
 table that is 74 lines; the showcase's, with three entities plus actors and the assistant, is 669.
-Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget).
+Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget). The starter's is
+the number you inherit, sized for YOUR growth (room to grow to the showcase's size), and it is yours to
+re-set in `apps/<app>/package.json`; the header of `scripts/check-demo-size.mjs` says what it guards and
+what to do when it goes red. The demo's build also drops every Mantine style rule no shipped component can
+match (`scripts/vite-prune-mantine-css.ts`), so a Mantine component you add needs no CSS import. The same file is
+the ONLY door for your shell, too: the `nav`, `welcome` and `dashboard` it passes `DemoShell` are what
+the demo shows, so a navigation you build for the real app is absent from the twin until you pass it
+there.
 
 **How a second app keeps the seam honest**: `apps/starter/tsconfig.json` includes the whole of
 `packages/keel/src` (minus tests and stories), so `pnpm typecheck` compiles the ENTIRE framework
 against the starter's registrations — a framework module that assumed the showcase's tables or
 vocabulary fails there and nowhere else. `vitest.config.ts` then runs keel's seam-conformance tests
-(the i18n partition/parity pair and the composed pglite RLS suite) a second time under the starter's
-aliases. Both were watched failing before being trusted.
+(the i18n partition/parity pair, the composed pglite RLS suite and the demo-presets check) a second
+time under the starter's aliases. Each was watched failing before being trusted.
 
 ## Cutover — from hermetic to real
 

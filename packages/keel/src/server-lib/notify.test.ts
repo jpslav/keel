@@ -1,7 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
 import type { Membership } from '../ports/auth'
 
 // Mock the defer seam: it imports '@/adapters' (server-only), and the deferred channels (email/sms)
@@ -10,7 +8,7 @@ import type { Membership } from '../ports/auth'
 vi.mock('./defer', () => ({ deferAfterResponse: async () => undefined }))
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing anything that touches pglite.
-const tmp = mkdtempSync(path.join(tmpdir(), 'app-notify-'))
+const tmp = makeTestTmpDir('app-notify-')
 beforeAll(() => {
     process.env.APP_DATA_DIR = tmp
 })
