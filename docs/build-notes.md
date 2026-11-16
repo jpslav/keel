@@ -1317,12 +1317,13 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
 
 - **`no-restricted-imports` never sees `import()`.** It checks import and export declarations (and
   `import x = require()`) only. So a vendor ban written with it is a ban on static imports, and
-  `await import('@aws-sdk/client-s3')` passed `pnpm lint` anywhere in the repo while CLAUDE.md, README.md and CONTRIBUTING.md called
-  the vendor boundary lint-enforced. `require()` was caught, but only incidentally, by
+  `await import('@aws-sdk/client-s3')` passed `pnpm lint` in an app's domain module, a route and keel's
+  own `server-lib` while CLAUDE.md, README.md and CONTRIBUTING.md called the vendor boundary
+  lint-enforced. `require()` was caught, but only incidentally, by
   `@typescript-eslint/no-require-imports`. The fix is a rule with its own id (`keel/no-dynamic-vendor-import`)
   reading the same list. If you add an import ban with `no-restricted-imports`, ask what `import()` does.
-- **A carve-out can be invisible to its own gate.** Two of fourteen mutations of the new fence left
-  `tests/lint/app-owned-adapters.test.ts` green: removing the app's adapters directory from the broad
+- **A carve-out can be invisible to its own gate.** Two of 28 single-fence mutations at the PR's final
+  head left `tests/lint/app-owned-adapters.test.ts` green: removing the app's adapters directory from the broad
   ports-boundary block's `ignores`, and the same for the `process.env` block. The dedicated blocks come
   later and win anyway, so the outcome did not change. The ignores make the outcome independent of block
   order. A test that pins outcomes cannot see that, so the reason is written beside the lines instead.

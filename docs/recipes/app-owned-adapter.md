@@ -37,19 +37,22 @@ apps/<app>/src/adapters/real/<name>.ts   the real adapter: the only place the ve
 | Where                                                                                    | Vendor SDK import         | `process.env`                                    | Import a real adapter   |
 | ---------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------ | ----------------------- |
 | `apps/<app>/src/adapters/real/`                                                          | yes, static or `import()` | yes, except `APP_MODE`, `DEMO_MODE`, `E2E_BUILD` | yes                     |
-| `apps/<app>/src/adapters/index.ts` and `fake/`                                           | no                        | no                                               | only by `import()` (§6) |
+| `apps/<app>/src/adapters/index.ts` (the registry)                                        | no                        | no                                               | only by `import()` (§6) |
+| `apps/<app>/src/adapters/fake/`, and anything else beside the registry                   | no                        | no                                               | no                      |
 | everything else in `apps/<app>/src/`                                                     | no                        | no                                               | not statically (see §6) |
 | `packages/keel` outside `packages/keel/src/adapters/`, and `packages/keel/test-fixture/` | no                        | no, bar keel's two per-file secret readers       | —                       |
 
 Unit tests (`*.test.ts`) may read `process.env`, as they already may everywhere in the app. The
-`process.env` ban also covers `apps/<app>/config/`, so `params.ts` records names and never reads them.
-The vendor ban also covers the rest of `apps/<app>/` (`apps/<app>/config/`, `apps/<app>/tests/`, `apps/<app>/scripts/`),
-minus the two carve-outs `eslint.config.mjs` names: `apps/<app>/next.config.ts` and
-`apps/<app>/tests/contract/`.
+`process.env` ban also covers `apps/<app>/config/`, so `params.ts` records values and names and never
+reads the environment. The vendor ban also covers the rest of `apps/<app>/` (`apps/<app>/config/`,
+`apps/<app>/tests/`, `apps/<app>/scripts/`), minus the two carve-outs `eslint.config.mjs` names:
+`apps/<app>/next.config.ts` and `apps/<app>/tests/contract/`. The registry and fakes also may not import
+keel's own published real adapters (`keel/adapters/real/*`) statically.
 
 The split inside `adapters/` is the point. The registry and the fake are what keep `pnpm dev` hermetic,
-so they get the same bans as the rest of your app, and a stricter one: neither may import `real/`
-statically. With no `process.env` of its own, the registry takes the run mode from keel's `isSimulated`,
+so they get the same bans as the rest of your app, and a stricter one: the registry reaches `real/` only
+by `import()`, and a fake may not reach it at all. With no `process.env` of its own, the registry takes
+the run mode from keel's `isSimulated`,
 and the fake has nothing to configure. Lint cannot follow a value to where it came from, so "the registry
 uses `isSimulated`" is the recipe's rule, not the lint's; the lint only removes the obvious alternatives.
 
@@ -73,8 +76,9 @@ The rest of the app codes against this interface, as keel's code codes against `
 ## 4. The fake
 
 Offline and honest: it behaves like the real thing at the port surface, including the errors the app has
-to handle. It may not import the vendor SDK, read `process.env` or import `real/`, and the lint holds it to all three. Choose
-where its state lives, and say which in the file header:
+to handle. It may not import the vendor SDK, read `process.env` or import `real/` (statically or with
+`import()`), and the lint holds it to all three. Choose where its state lives, and say which in the file
+header:
 
 - **In memory, pinned on `globalThis`**, so a dev-server reload keeps it. A Simulator reset does not
   clear it and a snapshot does not capture it. That is fine for state the app can rebuild, such as a
@@ -92,15 +96,17 @@ project.
 
 - **The SDK goes in your app's `package.json`** (`pnpm --filter <app> add <sdk>`), never in keel's.
 - **The fence has to know it is a vendor SDK.** If the package is not already matched by
-  `vendorSdkPattern` in `eslint.config.mjs`, add it there. (`@aws-sdk/*` already covers
-  `@aws-sdk/client-cloudfront-keyvaluestore` and its SigV4A signer, `@aws-sdk/signature-v4a`.) Otherwise the rest of your app could import it with a green lint. An
-  adapter that is plain `fetch` needs no entry; `docs/recipes/workspace-coder.md` §4 is that case.
+  `vendorSdkPattern` in `eslint.config.mjs`, add it there; otherwise the rest of your app could import
+  it with a green lint. (`@aws-sdk/*` already covers `@aws-sdk/client-cloudfront-keyvaluestore` and its
+  SigV4A signer, `@aws-sdk/signature-v4a`.) An adapter that is plain `fetch` needs no entry;
+  `docs/recipes/workspace-coder.md` §4 is that case.
 - **Configuration comes from `process.env`, read in `real/` only**, which is the channel keel's own real
   adapters use. Record each non-secret value (a store ARN, a region) in `apps/<app>/config/params.ts`
   with a `// cutover: <row>` comment. A secret gets a `*Name` field holding its name only, never its value.
   The deployment sets the environment, and the adapter reads it at runtime.
-- **Fail fast, the way keel's registry does.** `real/index.ts` keeps an env-var-to-cutover-row map and
-  throws keel's `CutoverPendingError` with every missing name at once:
+- **Fail fast, the way keel's real adapters do** (`REQUIRED_ENV` and `assertRealEnv` in
+  `packages/keel/src/adapters/real/index.ts`). Your `real/index.ts` keeps an env-var-to-cutover-row map
+  and throws keel's `CutoverPendingError` with every missing name at once:
 
 ```ts
 // apps/<app>/src/adapters/real/index.ts (SKETCH)
@@ -150,8 +156,9 @@ Three properties come from importing keel's run mode instead of reading your own
 - **The registry is server-only.** `keel/adapters/index` imports `server-only`, so your registry
   inherits it and needs no `server-only` dependency of its own.
 
-The dynamic `import()` means the vendor SDK is never loaded in simulated mode, and it is the only way
-in: a static import of `real/` from the registry or a fake fails lint. Everything else imports the
+The dynamic `import()` means the vendor SDK is never loaded in simulated mode, and the registry is the
+only module in the directory allowed to use it: a static import of `real/` from the registry fails lint,
+and so does any import of `real/`, static or dynamic, from a fake. Everything else imports the
 registry (`@/adapters`). A static import of `@/adapters/real/…` from anywhere else fails lint too, because
 it would load the vendor in every mode and let the caller skip the fake. Two exceptions are deliberate:
 
@@ -170,8 +177,8 @@ If a screen the demo bundles imports the registry, `pnpm build:demo-static` stil
 keel's adapter registry, pglite and your real adapter (single-file builds inline every dynamic import),
 along with `server-only`'s throw. What fails is `pnpm check:demo-size`, which `pnpm verify` runs right
 after the build, and then the static-demo e2e. Measured once by wiring a registry into the starter's
-twin: the bundle grew to 54 MB against an 880,000-byte budget, and the starter's static e2e failed because
-the shell never rendered. No lint rule catches this earlier, because the import usually arrives
+twin: the bundle grew to 54 MB against an 880,000-byte budget, and the starter's static e2e failed with
+`element(s) not found`. No lint rule catches this earlier, because the import usually arrives
 transitively, through a domain module. So keep the rule screens already follow: they take data as props
 and never import `@/adapters`.
 
@@ -192,7 +199,14 @@ fence, and `tests/lint/app-owned-adapters.test.ts` proves the fence.
 
 ## Limits
 
-- The lint sees static imports and `import()`/`require()` with a literal specifier. A computed specifier,
-  or `process.env` reached through an alias, is out of its reach, as for every rule in the file.
+- The lint sees static imports, and `import()`, `require()` and vitest/jest's `importActual`-style
+  loaders with a literal specifier. A computed specifier is out of its reach, as for every rule in the
+  file.
+- It reads a specifier as written, not as resolved: an unnormalized path such as
+  `@/adapters/fake/../real/kv` gets past the static real-adapter fences (the dynamic one, inside the
+  adapters directory, still catches it).
+- `process.env` reached through an alias is out of reach too: `const env = process.env`,
+  `const { env } = process`, or `env` re-exported from `node:process`. A direct `import { env }` from
+  `node:process` is caught.
 - To the fence, a vendor SDK is whatever `vendorSdkPattern` lists. A package missing from the list is
   ordinary code to it.

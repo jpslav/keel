@@ -1617,11 +1617,12 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **A static import of an app's `adapters/real` is banned outside the adapters directory, and `import()` is
   not.** The dynamic form inside an `!isSimulated` branch is how keel's own real-mode sign-in form is
   loaded, so banning it would forbid the one legitimate case. Inside the directory it is stricter: the
-  registry and fakes may not import `real/` statically at all, so a fake cannot load the vendor (found by
-  the pre-PR review, which also found the first version's registry test passing vacuously).
+  registry reaches `real/` only by `import()`, and a fake not at all, statically or dynamically. The
+  pre-PR review found the static gap (and the first version's registry test passing vacuously); review
+  round 1 found the dynamic one, in that fix.
 - **`process.env` is now banned in `apps/*/config/` too.** Nothing there read it, and without the ban it was
   the obvious place for a helper handing the registry its own reading of `APP_MODE` (pre-PR review).
-- **The app's registry does not import `server-only` itself.** It must import `isSimulated` from
+- **The app's registry does not import `server-only` itself.** It takes `isSimulated` from
   `keel/adapters/index`, which imports `server-only`, so the guard arrives transitively. Neither app lists
   `server-only` as a dependency, and knip flagged it as unlisted when a scratch registry imported it
   directly.
@@ -1630,8 +1631,9 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
   starter) and then the static e2e.
 - **No worked example in the starter or the showcase.** A recipe (`docs/recipes/app-owned-adapter.md`), an
   updated `/new-port` and a lint gate test (`tests/lint/app-owned-adapters.test.ts`) instead. The recipe was
-  checked once by building a scratch port, fake, real adapter and registry in the starter: typecheck, lint
-  and knip passed, then the scratch files were deleted.
+  checked by building a scratch port, fake, real adapter and registry in the starter: typecheck, lint and
+  knip passed, and the same files still lint clean under the final config. The scratch files were never
+  committed.
 - **Recipes that predate this** (`e-sign.md`, `workspace-coder.md`) still put their ports in keel's tree.
   Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
   (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).

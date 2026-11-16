@@ -56,8 +56,10 @@ const VENDOR_CARVE_OUTS = ['apps/*/next.config.ts', 'apps/*/tests/contract/**']
 
 // An app's real adapter is reached through the app's adapter registry (apps/<app>/src/adapters/index.ts),
 // the module that picks the fake in simulated mode — the role keel's exports map plays for keel's own
-// real adapters, which are internals. Matches `@/…/adapters/real` and every relative spelling of it,
-// and nothing that starts with `keel/`, so keel's three published real-mode components stay importable.
+// real adapters, which are internals. Matches `@/…/adapters/real` and its ordinary relative spellings
+// (`../adapters/real`, `../../adapters/real`), and nothing that starts with `keel/`, so keel's three
+// published real-mode components stay importable. It reads the specifier as written: an unnormalized one
+// (`../adapters/fake/../real/kv`) gets past it, as a computed specifier gets past every import rule.
 //
 // STATIC imports only, and deliberately so: `no-restricted-imports` does not see `import()`, and a
 // dynamic import inside an `!isSimulated` branch is exactly how a real-mode-only component is reached —
@@ -133,8 +135,10 @@ const getDbDestructureSelector = {
     message:
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
-// Also the import form, `import { env } from 'node:process'`, which reads the same object under another
-// name. Nothing in the tree uses it; without this it was a one-line way past the ban.
+// Also the import form — `import { env }`, or a default or namespace import, from `process`/`node:process`
+// — which reads the same object under another name (a type-only import, or `import { cwd }`, does not).
+// Nothing in the tree uses it. It closes that one form: re-exporting `env` from `node:process`, or
+// `const { env } = process`, still gets past, as any alias does.
 const processEnvSelector = {
     selector:
         ':matches(MemberExpression[object.name="process"][property.name="env"], ' +
@@ -149,9 +153,10 @@ const processEnvSelector = {
 // An app's real adapter may read its OWN configuration from process.env, but never the run mode. That is
 // keel's: `appMode`/`isSimulated`/`isDemoMode` from keel/adapters/index, whose import also runs the
 // fail-closed production guard. A second reader of APP_MODE can disagree with it (keel treats a legacy
-// `APP_MODE=fake` as simulated) and never runs the guard. Three spellings are matched — `process.env.X`,
-// `process.env['X']` and destructuring — and, as with the getDb selectors above, no lint rule chases an
-// alias (`const env = process.env; env.APP_MODE`).
+// `APP_MODE=fake` as simulated) and never runs the guard. Matched: `process.env.X`, `process.env['X']`,
+// ``process.env[`X`]``, and destructuring in a declaration, an assignment or a parameter default (quoted
+// keys included). As with the getDb selectors above, no lint rule chases an alias
+// (`const env = process.env; env.APP_MODE`, or `env` imported from `node:process`).
 const RUN_MODE_ENV = '/^(APP_MODE|DEMO_MODE|E2E_BUILD)$/'
 const runModeEnvMessage =
     "Run mode is keel's — import isSimulated/isDemoMode/appMode from keel/adapters/index. An app adapter " +
@@ -338,8 +343,9 @@ const keelNoDirectMkdtempRule = {
 // keel's own server-lib, while CLAUDE.md called the vendor boundary lint-enforced. It went unnoticed
 // because nothing in the tree did it; it mattered once app-owned adapters made `await import('./real/…')`
 // the house idiom one directory away. Static imports stay with `no-restricted-imports`
-// (vendorSdkPattern); this rule covers `import()` and `require()` with the SAME list, read from
-// vendorSdkPattern.group, so there is no second list to drift.
+// (vendorSdkPattern); this rule covers `import()`, `require()` and vitest/jest's `importActual`,
+// `requireActual`, `importMock` and `requireMock` with the SAME list, read from vendorSdkPattern.group,
+// so there is no second list to drift. `createRequire(...)(…)` and `module.require(…)` are out of reach.
 //
 // The specifier must be a literal (or a template with no expressions). A computed one —
 // `import(name)` — is out of reach, as it is for every import rule.
@@ -534,11 +540,12 @@ const eslintConfig = [
     },
     // An app's REAL adapters read their own configuration from process.env, like keel's — but not the run
     // mode (runModeEnvSelector above). Only real/: the app's registry and fakes keep the full ban from the
-    // block above (see APP_REAL_ADAPTERS_GLOB). That block ignores real/, so this is the only
-    // no-restricted-syntax block matching these files and there is nothing to re-list; the ignore is what
-    // keeps that true if the blocks are reordered (as in the ports boundary below). Tests exempt, as above.
-    // The a11y-attribute literal ban rides along because a real-mode-only component (a vendor widget) lives
-    // here and renders copy; keel's own adapters get it from the next block.
+    // block above (see APP_REAL_ADAPTERS_GLOB). That block ignores real/, so besides the stories block right
+    // below, this is the only no-restricted-syntax block matching these files and there is nothing to
+    // re-list; the ignore is what keeps that true if the blocks are reordered (as in the ports boundary
+    // below). Tests exempt, as above. The a11y-attribute literal ban rides along because a real-mode-only
+    // component (a vendor widget) lives here and renders copy; keel's own adapters get it from the
+    // `packages/keel/src/adapters` block further down.
     {
         files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
         ignores: ['**/*.test.{ts,tsx}'],
@@ -557,7 +564,8 @@ const eslintConfig = [
     // The rest of an app's adapters directory except the registry — its fakes, and any module beside them.
     // Re-lists processEnvSelector (merge trap: this block replaces the process.env block above for these
     // files), adds the dynamic half of "only the registry loads real/", and the a11y-attribute literal ban
-    // for a fake that renders copy. Tests and stories are left to the process.env block, as everywhere.
+    // for a fake that renders copy. Tests and stories fall back to the process.env block above, which
+    // exempts tests and bans process.env in stories, as it does everywhere.
     {
         files: ['apps/*/src/adapters/**/*.{ts,tsx}'],
         ignores: [APP_REAL_ADAPTERS_GLOB, 'apps/*/src/adapters/index.ts', '**/*.test.{ts,tsx}', '**/*.stories.tsx'],

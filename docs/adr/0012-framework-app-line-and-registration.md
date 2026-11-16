@@ -428,7 +428,8 @@ and internal counts above keep their numbers, because each has a stated rule and
 ## Addendum (2026-11-16): an app may own ports and adapters
 
 The Decision puts ports and adapters on the framework side of the line, and the fence allowed a vendor SDK
-in exactly one directory, `packages/keel/src/adapters/`. Meanwhile `docs/development-approach.md` sends
+in one directory of product code, `packages/keel/src/adapters/` (plus two carve-outs outside the request
+path, each app's `next.config.ts` and its contract tests). Meanwhile `docs/development-approach.md` sends
 vendor code that fails the universality and new-class tests to the app, as a recipe. Together they left an
 adopter's app nowhere legal to put the adapter. The case that surfaced it was a CDN key-value store signed
 with SigV4A, needed by one adopter's app and by no other instance. Putting it in `packages/keel` instead
@@ -448,9 +449,10 @@ around the new directory with the same invariants:
   can the app's `config/`, so the registry takes the run mode from keel's `isSimulated`. Importing that also
   runs keel's fail-closed production guard and makes the registry server-only. That last step is
   convention: lint cannot follow an imported value to its source.
-- **A real adapter is reached through the registry.** Inside the app's adapters directory, only `import()`
-  reaches `real/`: a static import from the registry or a fake would load the vendor in simulated mode.
-  Outside it, a static import of `adapters/real` fails lint and a dynamic `import()` does not. That is the
+- **A real adapter is reached through the registry.** Inside the app's adapters directory, only the
+  registry reaches `real/`, and only by `import()`: a static import from the registry, or any import from
+  a fake, would load the vendor in simulated mode. The registry and fakes also may not import keel's own
+  published real adapters statically. Outside the directory, a static import of `adapters/real` fails lint and a dynamic `import()` does not. That is the
   sanctioned way to load a real-mode-only component inside an `!isSimulated` branch, as the sign-in page
   already loads keel's. Such a component renders copy, so `react/jsx-no-literals` and the a11y-attribute
   literal ban now cover both adapter trees' `.tsx` files; keel's already complied.
@@ -458,14 +460,15 @@ around the new directory with the same invariants:
 **The vendor fence had a hole, now closed.** `no-restricted-imports` sees import and export declarations
 and never `import()`. Before this change, `await import('@aws-sdk/client-s3')` passed lint in an app's
 domain module, in a route, and in keel's own `server-lib`. The new rule `keel/no-dynamic-vendor-import`
-reads the same `vendorSdkPattern` list and covers the same files minus the same two zones, the fixture
-included. Nothing in the tree used the hole, but app-owned registries make `await import('./real/…')` the
+reads the same `vendorSdkPattern` list and covers the same files minus the same two zones and the same two
+carve-outs, the fixture included. It also sees vitest/jest's `importActual`-style loaders. Nothing in the tree used the hole, but app-owned registries make `await import('./real/…')` the
 idiom one directory away.
 
 **The static demo is not linted for this, and it is guarded.** If a screen the demo bundles imports an app
-registry, `build:demo-static` succeeds. It inlines keel's registry, pglite and the real adapter, and
-`check:demo-size` then fails it. Measured on the starter: 54 MB against an 880,000-byte budget, with the
-static e2e failing after it. A lint ban would see only direct imports, and in practice the import arrives
+registry, `build:demo-static` succeeds. Measured with a scratch registry wired into the starter's twin: the
+bundle contained keel's registry and its production guard, pglite, the scratch real adapter (dynamic imports
+are inlined) and `server-only`'s throw, and came to 54 MB against an 880,000-byte budget. `check:demo-size`
+failed it, and the static e2e failed after it. A lint ban would see only direct imports, and in practice the import arrives
 through a domain module. keel's own screens have the same rule and the same backstop.
 
 Rejected alternatives:
@@ -484,7 +487,8 @@ Rejected alternatives:
   is dead code they would have to delete. A real adapter would also need a vendor dependency added purely
   for demonstration. keel's seven ports already demonstrate the shape, and the new directory is proved by
   `tests/lint/app-owned-adapters.test.ts`, which lints virtual files against the repo's real config.
-  Removing any one of twelve fences turned it red. Removing either of two carve-outs did not, because those
-  only make the outcome independent of block order, as `eslint.config.mjs` says beside them.
+  At the PR's final head, 28 single-fence mutations of `eslint.config.mjs` were run against it: 26 turned it
+  red, and the other two removed carve-outs that only make the outcome independent of block order, as
+  `eslint.config.mjs` says beside them.
 
 `docs/recipes/app-owned-adapter.md` is the how-to, and `/new-port` now asks whose port it is first.

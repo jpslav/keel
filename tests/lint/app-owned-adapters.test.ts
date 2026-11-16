@@ -37,8 +37,9 @@ async function lint(relativePath: string, code: string): Promise<Finding[]> {
     return result.messages.map((m) => ({ rule: m.ruleId as string, message: m.message }))
 }
 
-// Each fence is told apart by its rule id AND its message, because three different patterns all
-// report as `no-restricted-imports` and two different selectors as `no-restricted-syntax`.
+// Each fence is told apart by its rule id AND its message, because five different patterns all report
+// as `no-restricted-imports` (vendor, two real-adapter forms, keel's real adapters, next/font/google) and
+// four different selectors as `no-restricted-syntax` (process.env, run mode, dynamic real/, a11y).
 const VENDOR_STATIC = { rule: 'no-restricted-imports', fragment: 'Vendor SDKs may only be imported' }
 const VENDOR_DYNAMIC = { rule: 'keel/no-dynamic-vendor-import', fragment: 'is a vendor SDK' }
 const PROCESS_ENV = { rule: 'no-restricted-syntax', fragment: 'process.env is read ONLY' }

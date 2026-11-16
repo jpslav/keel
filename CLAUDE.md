@@ -55,9 +55,9 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   only with `import()`. Lint-enforced (`tests/lint/app-owned-adapters.test.ts`): vendor imports, static
   or `import()`, outside those two directories; `process.env` anywhere else in `apps/*/src`,
   `apps/*/config` and `packages/keel/src` (bar the per-file exemptions `eslint.config.mjs` names, and
-  tests), so the app's registry and fakes cannot read it; the run mode read in an app's real adapters; and
-  a static import of an app's `adapters/real` anywhere in the app outside `real/` itself. That the
-  registry uses `isSimulated` is convention: lint cannot follow a value.
+  tests), so the app's registry and fakes cannot read it; reading the run mode in an app's real adapters;
+  a static import of an app's `adapters/real` anywhere in the app outside `real/` itself; and any import of
+  `real/` from a fake. That the registry uses `isSimulated` is convention: lint cannot follow a value.
 - **`keel/core` is pure TypeScript** — no framework imports. Lint-enforced.
 - **Screens are router-agnostic** — framework screens in `packages/keel/src/components`, app
   screens in `apps/*/src/components`; files under `apps/*/src/app` are thin wrappers. This keeps the `file://` static
