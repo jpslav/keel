@@ -322,6 +322,8 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
         // Same pure ability the real server runs — restricted people get a read-only TicketsCard here
         // too (ADR-0006 parity).
         const ability = defineAbilitiesFor({
+            // The static shell's signed-in person IS a session, and only a stated session wields manage-all.
+            credential: { kind: 'session', id: null },
             userId: person.id,
             role: world.roleInOrg(person, activeOrgSlug),
             restricted: person.restricted,

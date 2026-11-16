@@ -45,7 +45,12 @@ beforeEach(() => {
     h.jobForOrg.mockReset()
     h.record.mockReset()
     h.authorize.mockReset()
-    h.authorize.mockImplementation((...args: unknown[]) => h.realAuthorize.fn?.(...args))
+    h.authorize.mockImplementation((...args: unknown[]) => {
+        // Never a silent no-op: if the mock factory had not captured the real authorize, every 200 case
+        // below would pass without authorizing anything.
+        if (!h.realAuthorize.fn) throw new Error('the real authorize was not captured')
+        h.realAuthorize.fn(...args)
+    })
     h.verify.mockResolvedValue(identity)
 })
 

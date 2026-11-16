@@ -24,8 +24,10 @@ function machine(kind: MachineCredentialKind = 'service-key', overrides: Partial
 
 const ACTIONS = ['create', 'read', 'update', 'delete', 'manage'] as const
 
+/** A person actor; a SESSION unless the test says otherwise, since that is what the person rules assume. */
 function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
     return {
+        credential: { kind: 'session', id: null },
         userId: 'user-1',
         restricted: false,
         activeOrgId: ORG_A,
@@ -197,17 +199,20 @@ describe('defineAbilitiesFor', () => {
             expect(ability.can('update', { type: 'User', ownerId: 'user-1' })).toBe(true)
         })
 
-        test('never wields manageAll, whatever the actor says: it is a session power, enforced here', () => {
+        test("never wields manageAll, whatever the actor says: it is a STATED session's power, enforced here", () => {
             for (const credential of [badge, { kind: 'inbound-email', id: 'email-1' }] as const) {
                 const ability = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential }))
                 expect(ability.can('manage', { type: 'Membership', orgId: ORG_B }), credential.kind).toBe(false)
                 expect(ability.can('update', { type: 'User', ownerId: 'user-2' }), credential.kind).toBe(false)
             }
-            // The control: the same actor with a session credential, or none (a literal), does wield it.
-            for (const credential of [{ kind: 'session', id: null } as const, undefined]) {
-                const ability = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential }))
-                expect(ability.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(true)
-            }
+            // A literal that states NO credential is not read as a session either.
+            const unstated = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential: undefined }))
+            expect(unstated.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(false)
+            // The control: the same actor stating a session credential does wield it.
+            const session = defineAbilitiesFor(
+                actor({ role: 'admin', manageAll: true, credential: { kind: 'session', id: null } }),
+            )
+            expect(session.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(true)
         })
 
         test("the app's rules see the credential kind, which is where narrowing by kind lives", () => {
@@ -310,7 +315,7 @@ describe('defineAbilitiesFor', () => {
         })
     })
 
-    test('principalIdOf records a person by user id and a machine by its issuer-qualified id', () => {
+    test('principalIdOf records a person by user id and a machine by its kind-qualified id', () => {
         expect(principalIdOf(actor({ role: 'member', userId: 'user-1' }))).toBe('user-1')
         expect(principalIdOf(machine('fixture-intake', { principalId: 'fixture-intake:crane' }))).toBe(
             'fixture-intake:crane',

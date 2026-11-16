@@ -67,8 +67,9 @@ export function appAbilityRules(
         case 'Docket':
             if (action === 'read') return sameOrg(subject)
             // Narrowing by credential KIND: deleting a docket takes a browser session, so a badge (the
-            // fixture's personal-token shape) can file and edit dockets but not remove them.
-            if (action === 'delete' && (actor.credential?.kind ?? 'session') !== 'session') return false
+            // fixture's personal-token shape) can file and edit dockets but not remove them. An actor that
+            // states no credential is not a session either.
+            if (action === 'delete' && actor.credential?.kind !== 'session') return false
             if (action === 'create' || action === 'update' || action === 'delete') {
                 return !actor.restricted && sameOrg(subject)
             }

@@ -46,6 +46,7 @@ const aliasesFor = (app: string) => ({
 const SEAM_CONFORMANCE_TESTS = [
     'packages/keel/src/i18n/*.test.ts',
     'packages/keel/src/db/rls-pglite.test.ts',
+    'packages/keel/src/db/migrate.test.ts',
     'packages/keel/src/server-lib/demo-presets-seam.test.ts',
 ]
 

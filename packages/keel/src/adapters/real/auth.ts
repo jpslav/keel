@@ -117,11 +117,17 @@ export const realAuth: AuthPort = {
     },
 
     async getMember(orgSlug: string, userId: string): Promise<MemberStanding | null> {
-        // The same two reads getCurrentUser makes, for a user who is not the caller: the role from the
-        // org membership, `restricted` from the user's own metadata. No membership, no standing.
+        // The two facts getCurrentUser reads, for a user who is not the caller: the role from the org
+        // membership, `restricted` from the user's own metadata. The membership is looked up on the ORG,
+        // filtered to this user, so a person in many orgs is never cut off by a page size. No
+        // membership, no standing.
         const client = await clerkClient()
-        const memberships = await client.users.getOrganizationMembershipList({ userId, limit: 100 })
-        const membership = memberships.data.find((m) => (m.organization.slug ?? m.organization.id) === orgSlug)
+        const organizationId = await organizationIdForSlug(orgSlug)
+        const memberships = await client.organizations.getOrganizationMembershipList({
+            organizationId,
+            userId: [userId],
+        })
+        const membership = memberships.data[0]
         if (!membership) return null
         const user = await client.users.getUser(userId)
         const metadata = (user.publicMetadata ?? {}) as AppPublicMetadata

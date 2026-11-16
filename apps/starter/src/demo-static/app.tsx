@@ -36,6 +36,8 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
         const { tenant, activeOrgSlug } = world
         // Same pure ability the real server runs — a restricted person gets a read-only card here too.
         const ability = defineAbilitiesFor({
+            // The static shell's signed-in person IS a session, and only a stated session wields manage-all.
+            credential: { kind: 'session', id: null },
             userId: person.id,
             role: world.roleInOrg(person, activeOrgSlug),
             restricted: person.restricted,

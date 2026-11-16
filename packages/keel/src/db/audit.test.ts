@@ -115,7 +115,7 @@ describe('recordAuditEvent', () => {
 })
 
 describe('auditActorOf', () => {
-    test('names a person by user id and their credential; a credential-less literal is a session', async () => {
+    test('names a person by user id and their credential; one that states none records none, never a guess', async () => {
         const { auditActorOf } = await import('./audit')
         const person = {
             userId: 'fixture-lead',
@@ -124,7 +124,7 @@ describe('auditActorOf', () => {
             activeOrgId: 'o',
             manageAll: false,
         } as const
-        expect(auditActorOf(person)).toEqual({ actorUserId: 'fixture-lead', credential: { kind: 'session', id: null } })
+        expect(auditActorOf(person)).toEqual({ actorUserId: 'fixture-lead', credential: null })
         expect(auditActorOf({ ...person, credential: { kind: 'fixture-badge', id: 'badge-7' } })).toEqual({
             actorUserId: 'fixture-lead',
             credential: { kind: 'fixture-badge', id: 'badge-7' },

@@ -446,11 +446,16 @@ for a session. The kinds are composed unions, like every other framework vocabul
 
 The two `App…CredentialKind` types are new type-only exports of the abilities seam (`never` when
 unused), so the console's `api-token` and `cli-login`, and later `github-oidc`, need no framework edit.
+The two unions must not overlap: a type-level check in `keel/core/abilities` fails the build if an app
+registers the same kind on both sides.
 
 **Two kinds of actor.** `keel/core/abilities` exports `Actor = AbilityActor | MachineActor`.
 
-- **A person.** `AbilityActor` gains an optional `kind: 'person'` and an optional `credential`. With no
-  credential it is a session, so every existing literal keeps its meaning.
+- **A person.** `AbilityActor` gains an optional `kind: 'person'` and an optional `credential`, so every
+  existing literal still compiles and is still judged by the person rules. A missing credential means
+  "not stated", never "a session": such an actor doesn't wield `manageAll`, and the audit trail records
+  no credential for it. The three literals in this repo that stand for a session (the two static shells
+  and a preset check) now say so.
 - **A machine.** `MachineActor` is `{ kind: 'machine', credential, principalId, activeOrgId }`, where
   `principalId` is `<credential kind>:<id>`. It has no `role`, no `restricted` flag and no `manageAll`.
 
@@ -462,8 +467,11 @@ port method, `getMember(orgSlug, userId)` (see ADR-0003's addendum of this date)
 - It takes no role, so a role can be neither cached in the credential nor derived from it.
 - It returns `null` when the person is no longer an active member, so a removed person's credential
   fails on the next call. Tests prove both by changing the world between two calls.
-- Such a person never wields `manageAll`. `defineAbilitiesFor` ignores it for any credential except a
-  session, whatever the actor says, so the rule holds without trusting whoever built the actor.
+- Such a person never wields `manageAll`. `defineAbilitiesFor` honours `manageAll` only for an actor
+  that states a `session` credential, whatever else the actor says, and hands the app's rules the same
+  effective value. The rule holds without trusting whoever built the actor.
+- It refuses, at run time, to build from a `session` credential, which the type alone cannot stop if an
+  app registers that name.
 
 keel exercises this kind itself through inbound email. The sender is matched by address, as before,
 and then becomes a person actor whose credential is the email. Their standing now comes from the same
@@ -525,7 +533,21 @@ expected … 1001_items … but 0014_audit_credential was found"). So no framewo
 existing database, an adopter's deployed one included. CI never saw this, because every CI database
 starts empty. A reused local world did. `migrateToLatest` now sets `allowUnorderedMigrations`: pending
 migrations still run in name order, and a migration the database ran that has since disappeared still
-fails. `packages/keel/src/db/migrate.test.ts` reproduces the upgrade and fails under strict ordering.
+fails.
+
+The cost is a rule. A new framework migration runs after the app's migrations on an upgraded database
+and before them on a fresh one, so it must have the same effect in either position. It names the
+objects it touches, and never sweeps the catalog with `GRANT … ON ALL TABLES` or
+`ALTER DEFAULT PRIVILEGES`. Strict ordering was also the only thing that refused an app migration
+numbered into the framework range. Both are now a seam-conformance test,
+`packages/keel/src/db/migrate.test.ts`, run against the fixture and every app:
+
+- it holds every app migration to ≥1001, with no name shared with a framework one;
+- it migrates an "old" database forward and compares its columns, policies, `app_user` grants and
+  indexes with a fresh one.
+
+Under strict ordering the upgrade fails with the production error. A catalog-sweeping `GRANT` fails the
+comparison.
 
 **The `service/` exemption is retired.** The showcase's one mutating service route,
 `service/jobs/[id]/status/route.ts`, calls `authorize(actor, 'update', Job)` with the actor that

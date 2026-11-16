@@ -10,8 +10,10 @@ import type { Role } from 'keel/core/roles'
 const ORG_A = 'org-a'
 const ORG_B = 'org-b'
 
+/** A person actor; a SESSION unless the test says otherwise (only a stated session wields manage-all). */
 function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
     return {
+        credential: { kind: 'session', id: null },
         userId: 'user-1',
         restricted: false,
         activeOrgId: ORG_A,

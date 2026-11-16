@@ -90,11 +90,11 @@ export async function recordAuditEvent(db: DbPort, input: AuditEventInput): Prom
 
 /**
  * The audit fields for an actor: who it is (`principalIdOf`) and the credential it came with. A person
- * actor written as a literal, with no credential, is a session, as keel/core/abilities reads it.
+ * actor that states no credential records none (NULL), never a guessed `session`.
  */
 export function auditActorOf(actor: Actor): Pick<AuditEventInput, 'actorUserId' | 'credential'> {
     return {
         actorUserId: principalIdOf(actor),
-        credential: actor.credential ?? { kind: 'session', id: null },
+        credential: actor.credential ?? null,
     }
 }

@@ -53,15 +53,25 @@ export function abilityActorFromUser(user: AuthUser, activeOrgId: string): Abili
 
 /**
  * Build the PERSON actor for someone who reached the app with a credential other than a session: an
- * inbound email from their address, a personal API token they minted. The credential's verifier has
- * already proved WHO (`userId`) and WHERE (`org`, the org the credential is bound to); this reads the
+ * inbound email from their address, a personal API token they minted. The caller's verifier has
+ * already established WHO (`userId`) and WHERE (`org`, the org the credential is bound to), and only
+ * as firmly as that credential can: a token row is cryptographic, while an email sender rests on the
+ * mail provider's SPF/DKIM checks (the residual the inbound-email handlers record). This reads the
  * person's standing there through the auth port. It takes no role, so a role can be neither cached in
  * the credential nor derived from it, and it reads on every call, so a person who has been removed or
  * demoted is judged by what they are now.
  *
+ * `org.id` and `org.slug` must come from the SAME organizations row: the standing is read by slug, the
+ * way the auth port names orgs, and applied to the id every sameOrg check compares. Resolve one from the
+ * other (`orgIdForSlug`) rather than taking either from the request.
+ *
  * Returns null when the person is no longer an active member of that org: their credential is dead,
  * and a route answers 401. The actor never wields `manageAll`, even acting in the staff org; that power
  * belongs to a session, and keel/core/abilities enforces it whatever this field says.
+ *
+ * @throws Error (a programming error, never a 403) when handed a `session` credential: a session's
+ *   person comes from {@link abilityActorFromUser}, and letting one through here would let any caller
+ *   claim the session-only rules.
  */
 export async function abilityActorFromCredential(
     auth: Pick<AuthPort, 'getMember'>,
@@ -71,6 +81,10 @@ export async function abilityActorFromCredential(
         credential: { kind: Exclude<PersonCredentialKind, 'session'>; id: string }
     },
 ): Promise<AbilityActor | null> {
+    // The type excludes `session`, but an app that registered it as one of its own kinds, or a cast,
+    // would not be stopped by the type.
+    const kind: string = input.credential.kind
+    if (kind === 'session') throw new Error('abilityActorFromCredential: a session is not a credential this builds')
     const standing = await auth.getMember(input.org.slug, input.userId)
     if (!standing) return null
     return {
@@ -104,6 +118,11 @@ const KIND = /^[a-z][a-z0-9-]*$/
  * repository, a client id). `credentialId` names the credential it presented this time (a workflow run,
  * a key id), never a secret. `activeOrgId` is the org that credential is bound to. A machine gets
  * exactly what the app's `appMachineAbilityRules` grants it, and no framework power at all.
+ *
+ * Neither keel app registers a machine kind of its own, so only keel's fixture calls this today. Its
+ * intended first consumer is an adopter's CI identity (a GitHub OIDC token from a listed repository),
+ * which the first adopter has as a planned seam; the runtime checks below are what a hand-written
+ * `MachineActor` literal would not give it.
  *
  * @throws Error (a programming error, so a 500 — never a 403) on a malformed or reserved kind, or an
  *   empty id or org.

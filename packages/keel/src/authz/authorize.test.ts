@@ -139,7 +139,7 @@ describe('canInActiveOrg', () => {
 })
 
 // The NON-SESSION forms. Fixture vocabulary: `wharf` is the counterparty org whose service key calls,
-// `fixture-intake` the one machine issuer the fixture seam grants an app power to (a Docket create).
+// `fixture-intake` the one machine credential kind the fixture seam grants an app power to (a Docket create).
 const wharfKey: ServiceIdentity = {
     kind: 'org-service',
     keyId: 'key-wharf-1',
@@ -229,6 +229,15 @@ describe('abilityActorFromCredential (a person who arrived without a session)', 
         ).toBeNull()
     })
 
+    test('refuses to build from a session credential (a cast, or an app kind named `session`)', async () => {
+        const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
+        const session = { kind: 'session', id: 'x' } as unknown as typeof badge
+        await expect(
+            abilityActorFromCredential(w.auth, { userId: 'fixture-lead', org: depot, credential: session }),
+        ).rejects.toThrow(/session/)
+        expect(w.reads()).toBe(0)
+    })
+
     test('never wields the staff superpower, even acting in the staff org', async () => {
         const w = world({})
         const steward = { id: 'org-steward', slug: staffOrgSlug }
@@ -289,6 +298,17 @@ describe('machineActor', () => {
     })
 })
 
+/** Whether an authorize call allows (no throw) or denies (ForbiddenError); anything else propagates. */
+function allowed(call: () => void): boolean {
+    try {
+        call()
+        return true
+    } catch (error) {
+        if (error instanceof ForbiddenError) return false
+        throw error
+    }
+}
+
 describe('authorize(actor, action, subject)', () => {
     test("a service caller may report status on its own org's job", () => {
         const actor = abilityActorFromService(wharfKey)
@@ -313,25 +333,18 @@ describe('authorize(actor, action, subject)', () => {
         expect(() => authorize(intake, 'update', { type: 'Job', orgId: 'org-depot' })).toThrow(ForbiddenError)
     })
 
-    test('a person who arrived without a session (a personal API token) is judged exactly as the session form', () => {
-        // The token's owner, built by hand as the inbound-email handlers build a sender: same rules, and
-        // no manageAll unless the credential means to wield the operator org.
+    test('a person holding a non-session credential is judged as their session would be, outside the staff org', () => {
+        // The token's owner as abilityActorFromCredential builds them: the badge is the fixture's
+        // personal-token shape. Ordinary rules answer exactly as for the same person's session.
         const owner = {
+            kind: 'person',
+            credential: { kind: 'fixture-badge', id: 'badge-7' },
             userId: 'user-1',
             role: 'member',
             restricted: false,
             activeOrgId: 'org-a',
             manageAll: false,
         } as const
-        const allowed = (call: () => void): boolean => {
-            try {
-                call()
-                return true
-            } catch (error) {
-                if (error instanceof ForbiddenError) return false
-                throw error
-            }
-        }
         for (const subject of [
             { type: 'Job', orgId: 'org-a' },
             { type: 'Membership', orgId: 'org-a' },
@@ -344,5 +357,19 @@ describe('authorize(actor, action, subject)', () => {
         }
         expect(allowed(() => authorize(owner, 'create', { type: 'Job', orgId: 'org-a' }))).toBe(true)
         expect(allowed(() => authorize(owner, 'create', { type: 'Membership', orgId: 'org-a' }))).toBe(false)
+    })
+
+    test('...and differs from the session in exactly one place: acting in the staff org, only the session wields manage-all', () => {
+        const foreign = { type: 'Membership', orgId: 'org-c' } as const
+        const session = user({ orgSlug: staffOrgSlug, role: 'admin' })
+        expect(allowed(() => authorize(session, 'org-staff', 'manage', foreign))).toBe(true)
+
+        // Even an actor that CLAIMS manageAll is denied when its credential is not a session, or unstated.
+        const asSession = abilityActorFromUser(session, 'org-staff')
+        const viaBadge = { ...asSession, credential: { kind: 'fixture-badge', id: 'badge-7' } } as const
+        const unstated = { ...asSession, credential: undefined }
+        expect(asSession.manageAll).toBe(true)
+        expect(allowed(() => authorize(viaBadge, 'manage', foreign))).toBe(false)
+        expect(allowed(() => authorize(unstated, 'manage', foreign))).toBe(false)
     })
 })

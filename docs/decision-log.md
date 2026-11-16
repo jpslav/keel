@@ -1627,8 +1627,11 @@ the calls the work made that no plan anticipated.
   of the function's signature rather than a convention. `listMembers` could not supply it, because
   `restricted` is not on `Membership`, so the port gained `getMember` (ADR-0003 addendum). Inbound email
   had guessed `restricted` from the role; it now reads the same flag a session does.
-- **`manageAll` is a session's alone, enforced in `defineAbilitiesFor`.** It is not left to whoever
-  builds the actor. A token's owner acting in the operator org is an ordinary member there.
+- **`manageAll` is a STATED session's alone, enforced in `defineAbilitiesFor`.** It is not left to
+  whoever builds the actor. A token's owner acting in the operator org is an ordinary member there. The
+  first version read a missing credential as a session, so a hand-built actor that left the field out
+  and set `manageAll` from the org would still have wielded it. The pre-PR review caught that, and a
+  missing credential now means "not stated".
 - **Credential kinds are composed, not closed.** `PersonCredentialKind` and `MachineCredentialKind`
   each add the app's kinds from the abilities seam, as subjects and audit verbs already do. The
   console's one-time `cli-login` kind is app vocabulary; keel never edits a base union for it.
@@ -1656,7 +1659,9 @@ the calls the work made that no plan anticipated.
   for a session.
 - **`kind` and `credential` are optional on the person actor.** Requiring them would have broken every
   `AbilityActor` literal: the preset checks, both static demos and every adopter's tests. A literal with
-  no credential is a session, which is what all of them are.
+  no credential keeps the person rules but neither wields `manageAll` nor records a credential. The
+  three literals in this repo that set `manageAll` (both static shells and the ticket-assign preset
+  check) stand for sessions, and now say so.
 - **The seam's machine rules are bound at call time.** `defineAbilitiesFor` assigns
   `appMachineAbilityRules` to `MachineAbilityRules` inside the function, not at module load. That lets
   the empty registration take no parameters, and a seam module that later value-imports
@@ -1674,3 +1679,15 @@ the calls the work made that no plan anticipated.
   Wiping `.data` fixes a laptop, not a deployment. Numbering framework migrations above the app's range
   breaks the "framework first" order for a fresh database. `allowUnorderedMigrations: true` keeps
   name order for pending migrations and keeps the missing-migration check.
+- **Unordered migration needed a rule and a gate.** Strict ordering had also been what refused an app
+  migration numbered into 0001–0999, and an unordered framework migration that sweeps the catalog
+  (`GRANT … ON ALL TABLES`) would leave an upgraded database different from a fresh one. Both are now
+  `packages/keel/src/db/migrate.test.ts`, a seam-conformance test run against the fixture and each app.
+  It checks the numbering, and it compares an upgraded schema with a fresh one. Both checks were seen
+  failing.
+- **Kept as built, after review:**
+    - `abilityActorFromCredential` takes `org: { id, slug }` rather than resolving one from the other.
+      The auth port names orgs by slug, as Clerk does, and resolving inside would couple `authz` to the
+      database. The docstring now requires both from one organizations row.
+    - `machineActor` is kept although only the fixture calls it. Its consumer is the first adopter's
+      planned CI identity, and its run-time checks are what a hand-written `MachineActor` would lack.

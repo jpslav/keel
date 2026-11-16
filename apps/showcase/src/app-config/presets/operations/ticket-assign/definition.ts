@@ -41,6 +41,9 @@ export const ticketAssign: PresetOperationDefinition<'ticket.assign', TicketAssi
             role === undefined ||
             !isRole(role) ||
             !defineAbilitiesFor({
+                // A preset acts as the person would in a session, so it states one: only a stated
+                // session wields manage-all.
+                credential: { kind: 'session', id: null },
                 userId: actor.id,
                 role,
                 restricted: actor.restricted,
