@@ -27,7 +27,8 @@ depends only on the `SmsChannel` type, so it needs no change at all.
 ## 2. Where the vendor SDK goes
 
 A new `packages/keel/src/adapters/real/sms.ts` is the only file allowed to `import 'twilio'` —
-CLAUDE.md's hard rule (vendor SDKs only inside `packages/keel/src/adapters/`) and the ports-boundary lint
+CLAUDE.md's hard rule (vendor SDKs only inside an adapters directory, here `packages/keel/src/adapters/`,
+because the channel is keel's seam) and the ports-boundary lint
 rule both apply here exactly as they do to `packages/keel/src/adapters/real/email.ts`. It exports
 something Twilio-shaped (`send(message)` or similar) that `packages/keel/src/server-lib/sms.ts`'s real
 branch calls. The fake, `packages/keel/src/adapters/fake/sms.ts`, does not move or change — it stays the
