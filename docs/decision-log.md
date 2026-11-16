@@ -1651,3 +1651,19 @@ worth keeping.
   `apps/*/src/app`.** The behaviour was right and stricter than the sentence: a mutating `route.ts` outside
   `api/` is scanned and, since exemption keys are measured from `src/app/api`, can match no exemption.
   Watched failing with a bare `POST` at `src/app/[locale]/danger/route.ts`.
+
+## Catching up October's minor-and-patch group (2026-11-16, `deps/catch-up-2026-11`)
+
+- **keel's peer floors move with the apps' floors.** Dependabot's group PR (#30) raised `next`,
+  `next-intl`, `react` and `@mantine/core` in the root and both apps but left `packages/keel`'s
+  `peerDependencies` at the old floors. Before it, each of the four peer floors was the floor the apps
+  named. Leaving keel's lower is what kept the old `next-intl` and `@mantine/core` in keel's part of the
+  lockfile (build-notes, same date, has the mechanism). keel's peer floors now match the apps' again
+  (`^19.3.1`, `^16.4.6`, `^4.14.9`, `^9.7.3`). A lower floor would mean something only to a consumer
+  installing keel from a registry with an older host, and nobody does: `packages/keel` is `private` and
+  ships by fork and merge (ADR-0013).
+- **next 16.4.6, not the group's 16.4.2.** GHSA-mfr8-8qww-v76h (medium, published 2026-11-16) covers next
+  16.3.0 through 16.4.4 and is fixed in 16.4.5. keel calls neither `'use cache'` nor `unstable_cache`, so
+  its code was not exposed, but 16.4.2 is the version `next dev` stopped on (build-notes). 16.4.6 is the
+  newest 16.4 patch and was published on 2026-11-09, past the two-day `minimumReleaseAge`.
+  `@next/eslint-plugin-next` moves with it.
