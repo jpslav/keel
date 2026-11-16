@@ -125,8 +125,12 @@ const getDbDestructureSelector = {
     message:
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
+// Also the import form, `import { env } from 'node:process'`, which reads the same object under another
+// name. Nothing in the tree uses it; without this it was a one-line way past the ban.
 const processEnvSelector = {
-    selector: 'MemberExpression[object.name="process"][property.name="env"]',
+    selector:
+        ':matches(MemberExpression[object.name="process"][property.name="env"], ' +
+        'ImportDeclaration[source.value=/^(node:)?process$/])',
     message:
         "process.env is read ONLY inside an adapters directory — packages/keel/src/adapters, or an app's own " +
         'apps/<app>/src/adapters/real (CLAUDE.md) — deployment/service params come from the app ' +
@@ -147,14 +151,30 @@ const runModeEnvMessage =
 const runModeEnvSelector = {
     selector:
         'MemberExpression[object.object.name="process"][object.property.name="env"]' +
-        `:matches([property.name=${RUN_MODE_ENV}], [property.value=${RUN_MODE_ENV}])`,
+        `:matches([property.name=${RUN_MODE_ENV}], [property.value=${RUN_MODE_ENV}], ` +
+        `[property.quasis.0.value.cooked=${RUN_MODE_ENV}])`,
     message: runModeEnvMessage,
 }
+// Destructuring in a declaration, an assignment, or a parameter default — each puts `process.env` on the
+// right of the pattern under a different parent node.
 const runModeEnvDestructureSelector = {
     selector:
-        'VariableDeclarator[init.object.name="process"][init.property.name="env"] > ObjectPattern > ' +
+        ':matches(VariableDeclarator[init.object.name="process"][init.property.name="env"], ' +
+        'AssignmentExpression[right.object.name="process"][right.property.name="env"], ' +
+        'AssignmentPattern[right.object.name="process"][right.property.name="env"]) > ObjectPattern > ' +
         `Property:matches([key.name=${RUN_MODE_ENV}], [key.value=${RUN_MODE_ENV}])`,
     message: runModeEnvMessage,
+}
+// Inside an app's adapters directory, only the registry loads real/. A fake, or a second module, doing
+// `await import('../real/kv')` would put the vendor SDK behind code that never asks the run mode. The
+// static form is appRealAdapterStaticPattern (no-restricted-imports); this is the dynamic one.
+const REAL_DIR = '/(^|[/])real([/]|$)/'
+const appRealAdapterDynamicSelector = {
+    selector: `ImportExpression:matches([source.value=${REAL_DIR}], [source.quasis.0.value.cooked=${REAL_DIR}])`,
+    message:
+        "Only the app's registry (apps/<app>/src/adapters/index.ts) loads real/, with import() when " +
+        '!isSimulated. Anywhere else in the adapters directory it would load the vendor SDK without asking the ' +
+        'run mode (docs/recipes/app-owned-adapter.md).',
 }
 // Hermetic dev (CLAUDE.md): next/font/google fetches from Google Fonts at build — banned so pnpm dev
 // never phones home. Self-host via next/font/local instead. Re-listed in every framework no-restricted-
@@ -349,6 +369,9 @@ const keelNoDynamicVendorImportRule = {
         return {
             ImportExpression: (node) => check(node.source),
             'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
+            // A test inside the fence loads the real module with these, exactly as with import().
+            'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
+                (node) => check(node.arguments[0]),
         }
     },
 }
@@ -509,9 +532,20 @@ const eslintConfig = [
     // here and renders copy; keel's own adapters get it from the next block.
     {
         files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
-        ignores: ['**/*.test.{ts,tsx}'],
+        ignores: ['**/*.test.{ts,tsx}', '**/*.stories.tsx'],
         rules: {
             'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector, a11yLiteralSelector],
+        },
+    },
+    // The rest of an app's adapters directory except the registry — its fakes, and any module beside them.
+    // Re-lists processEnvSelector (merge trap: this block replaces the process.env block above for these
+    // files), adds the dynamic half of "only the registry loads real/", and the a11y-attribute literal ban
+    // for a fake that renders copy. Tests and stories are left to the process.env block, as everywhere.
+    {
+        files: ['apps/*/src/adapters/**/*.{ts,tsx}'],
+        ignores: [APP_REAL_ADAPTERS_GLOB, 'apps/*/src/adapters/index.ts', '**/*.test.{ts,tsx}', '**/*.stories.tsx'],
+        rules: {
+            'no-restricted-syntax': ['error', processEnvSelector, appRealAdapterDynamicSelector, a11yLiteralSelector],
         },
     },
     // keel's adapters render copy too (the real sign-in and accept-invite forms), and no other

@@ -45,6 +45,7 @@ const PROCESS_ENV = { rule: 'no-restricted-syntax', fragment: 'process.env is re
 const RUN_MODE = { rule: 'no-restricted-syntax', fragment: "Run mode is keel's" }
 const REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "Reach the app's real adapters through its registry" }
 const REAL_ADAPTER_INSIDE = { rule: 'no-restricted-imports', fragment: 'real/ is loaded only with import()' }
+const REAL_ADAPTER_DYNAMIC = { rule: 'no-restricted-syntax', fragment: "Only the app's registry" }
 const NEXT_FONT = { rule: 'no-restricted-imports', fragment: 'next/font/google phones home' }
 const JSX_LITERAL = { rule: 'react/jsx-no-literals', fragment: '' }
 const A11Y_LITERAL = {
@@ -111,6 +112,16 @@ describe('vendor SDKs: only keel adapters and an app’s real adapters may impor
         expect(fired(await lint(file, LOADS_VENDOR_TEMPLATE), VENDOR_DYNAMIC)).toBe(1)
     })
 
+    it('a deep subpath of a scoped vendor package is still the vendor', async () => {
+        const code = "export const load = () => import('@clerk/nextjs/server')\n"
+        expect(fired(await lint(`${APP}/src/domain/kv.ts`, code), VENDOR_DYNAMIC)).toBe(1)
+    })
+
+    it('a test loading the real vendor module with vi.importActual is importing it', async () => {
+        const code = "import { vi } from 'vitest'\nexport const load = () => vi.importActual('pg')\n"
+        expect(fired(await lint(`${APP}/src/domain/kv.test.ts`, code), VENDOR_DYNAMIC)).toBe(1)
+    })
+
     it('require() is the same import as import()', async () => {
         const code = "export const load = () => require('pg')\n"
         expect(fired(await lint(`${APP}/src/domain/kv.ts`, code), VENDOR_DYNAMIC)).toBe(1)
@@ -137,6 +148,10 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         ['dot access', 'export const mode = process.env.APP_MODE\n'],
         ['computed access', "export const demo = process.env['DEMO_MODE']\n"],
         ['destructuring', 'const { E2E_BUILD } = process.env\nexport const e2e = E2E_BUILD\n'],
+        ['template-literal access', 'export const mode = process.env[`APP_MODE`]\n'],
+        ['a quoted destructuring key', "const { 'APP_MODE': mode } = process.env\nexport { mode }\n"],
+        ['destructuring assignment', 'let mode\n;({ APP_MODE: mode } = process.env)\nexport { mode }\n'],
+        ['a parameter default', 'export function mode({ DEMO_MODE } = process.env) {\n    return DEMO_MODE\n}\n'],
     ])('a real adapter may not read the run mode itself (%s)', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, code), RUN_MODE)).toBe(1)
     })
@@ -156,6 +171,9 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         `${APP}/config/params.ts`,
     ])('%s may not read process.env at all', async (file) => {
         expect(fired(await lint(file, 'export const storeArn = process.env.KVS_ARN\n'), PROCESS_ENV)).toBe(1)
+        // the same object under another name
+        const imported = "import { env } from 'node:process'\nexport const storeArn = env.KVS_ARN\n"
+        expect(fired(await lint(file, imported), PROCESS_ENV)).toBe(1)
     })
 })
 
@@ -190,10 +208,24 @@ describe('an app’s real adapters are reached through its registry', () => {
         [`${APP}/src/adapters/index.ts`, './real'],
         [`${APP}/src/adapters/fake/kv.ts`, '../real/kv'],
         [`${APP}/src/adapters/fake/kv.ts`, '@/adapters/real/kv'],
+        [`${APP}/src/adapters/fake/edge/kv.ts`, '../../real/kv'],
         [`${APP}/src/adapters/server.ts`, './real/index'],
     ])('%s may not statically import %s', async (file, specifier) => {
         const findings = await lint(file, `import { kv } from '${specifier}'\nexport const store = kv\n`)
         expect(fired(findings, REAL_ADAPTER_INSIDE)).toBe(1)
+    })
+
+    // ...and only the registry may load it dynamically: a fake, or a second module beside the registry,
+    // doing the registry's own import() would load the vendor without asking the run mode.
+    it.each([
+        [
+            `${APP}/src/adapters/fake/kv.ts`,
+            "export const kv = async () => (await import('../real/kv')).createRealKv()\n",
+        ],
+        [`${APP}/src/adapters/fake/kv.ts`, 'export const kv = () => import(`../real/kv`)\n'],
+        [`${APP}/src/adapters/server.ts`, "export const ports = () => import('./real/index')\n"],
+    ])('%s may not load real/ dynamically either', async (file, code) => {
+        expect(fired(await lint(file, code), REAL_ADAPTER_DYNAMIC)).toBe(1)
     })
 
     it('inside real/, adapters import each other freely', async () => {
@@ -232,13 +264,19 @@ describe('the hermetic-dev font ban survives in every app-owned adapter block', 
 // A real-mode-only component (a vendor's widget) lives in real/ and renders copy, so the i18n rules that
 // govern every other screen follow it there — and into keel's adapters, where the real sign-in form lives.
 describe('copy in an adapter’s component goes through next-intl', () => {
-    it.each([`${APP}/src/adapters/real/kv-widget.tsx`, 'packages/keel/src/adapters/real/kv-widget.tsx'])(
-        '%s may not hard-code copy',
-        async (file) => {
-            const text = 'export const Widget = () => <p>Saved to the edge</p>\n'
-            expect(fired(await lint(file, text), JSX_LITERAL)).toBe(1)
-            const label = 'export const Widget = () => <button aria-label="Save">x</button>\n'
-            expect(fired(await lint(file, label), A11Y_LITERAL)).toBe(1)
-        },
-    )
+    it.each([
+        `${APP}/src/adapters/real/kv-widget.tsx`,
+        `${APP}/src/adapters/fake/kv-widget.tsx`,
+        'packages/keel/src/adapters/real/kv-widget.tsx',
+    ])('%s may not hard-code copy', async (file) => {
+        const text = 'export const Widget = () => <p>Saved to the edge</p>\n'
+        expect(fired(await lint(file, text), JSX_LITERAL)).toBe(1)
+        const label = 'export const Widget = () => <button aria-label="Save">x</button>\n'
+        expect(fired(await lint(file, label), A11Y_LITERAL)).toBe(1)
+    })
+
+    it('a story beside an adapter component renders fixtures, not shipped copy, as stories do elsewhere', async () => {
+        const label = 'export const Story = () => <button aria-label="Save">x</button>\n'
+        expect(fired(await lint(`${APP}/src/adapters/real/kv-widget.stories.tsx`, label), A11Y_LITERAL)).toBe(0)
+    })
 })
