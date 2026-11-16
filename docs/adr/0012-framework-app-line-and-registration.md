@@ -424,3 +424,63 @@ The body's "17" was already one off by the rule it seemed to use. So the count i
 corrected. CLAUDE.md now says what the fixture registers ("every `@app-config/*` module the framework
 reads"), and the seam-conformance suites, not a number, are what hold the fixture to it. The published
 and internal counts above keep their numbers, because each has a stated rule and a test.
+
+## Addendum (2026-11-16): an app may own ports and adapters
+
+The Decision puts ports and adapters on the framework side of the line, and the fence allowed a vendor SDK
+in exactly one directory, `packages/keel/src/adapters/`. Meanwhile `docs/development-approach.md` sends
+vendor code that fails the universality and new-class tests to the app, as a recipe. Together they left an
+adopter's app nowhere legal to put the adapter. The case that surfaced it was a CDN key-value store signed
+with SigV4A, needed by one adopter's app and by no other instance. Putting it in `packages/keel` instead
+would contradict ADR-0013, because a port keel would never accept upstream would stay in the fork as a
+merge conflict.
+
+**An app may now own a port, its fake and its real adapter**, under `apps/<app>/src/`. This does not move
+the line, because they are app code: keel still cannot import them (`@/*` is banned inside the package),
+and an app's port is invisible to keel's registry. What changed is the fence, which is drawn once more
+around the new directory with the same invariants:
+
+- **Vendor SDKs** may be imported in `apps/<app>/src/adapters/real/` and nowhere else in the app. The
+  app's registry (`adapters/index.ts`) and fakes are banned like the rest of the app. keel's fixture gets
+  no such zone: `packages/keel/test-fixture/adapters/real/` is banned like the rest of the fixture.
+- **`process.env`** may be read in that same `real/` directory, for the adapter's own configuration, but
+  never `APP_MODE`, `DEMO_MODE` or `E2E_BUILD`. The registry cannot read `process.env` at all, so its only
+  way to learn the run mode is keel's `isSimulated`. Importing that also runs keel's fail-closed
+  production guard and makes the registry server-only.
+- **A real adapter is reached through the registry.** Outside the app's adapters directory, a static
+  import of `adapters/real` fails lint. A dynamic `import()` does not. That is the sanctioned way to load a
+  real-mode-only component inside an `!isSimulated` branch, as the sign-in page already loads keel's.
+
+**The vendor fence had a hole, now closed.** `no-restricted-imports` sees import and export declarations
+and never `import()`. Before this change, `await import('@aws-sdk/client-s3')` passed lint in an app's
+domain module, in a route, and in keel's own `server-lib`. The new rule `keel/no-dynamic-vendor-import`
+reads the same `vendorSdkPattern` list and covers the same files minus the same two zones, the fixture
+included. Nothing in the tree used the hole, but app-owned registries make `await import('./real/…')` the
+idiom one directory away.
+
+**The static demo is not linted for this, and it is guarded.** If a screen the demo bundles imports an app
+registry, `build:demo-static` succeeds. It inlines keel's registry, pglite and the real adapter, and
+`check:demo-size` then fails it. Measured on the starter: 54 MB against an 880,000-byte budget, with the
+static e2e failing after it. A lint ban would see only direct imports, and in practice the import arrives
+through a domain module. keel's own screens have the same rule and the same backstop.
+
+Rejected alternatives:
+
+- **A key-value port in keel.** It fails universality, since few instances keep state at a CDN edge, and
+  it fails new-class, since an authenticated outbound SDK call is what the storage, LLM and email adapters
+  already teach. It would be the "one adapter per vendor an instance might someday want" drift that
+  `docs/development-approach.md` warns against.
+- **The whole of `apps/<app>/src/adapters/` as the vendor zone**, as requested. The registry and the fakes
+  are what keep `pnpm dev` hermetic, and allowing them a vendor SDK or `process.env` would let an adopter
+  write a fake that reaches the network, or a registry that picks its own mode.
+- **App configuration through `config/params.ts` imports instead of `process.env`.** Secret values cannot
+  live in the repo, and keel's own real adapters already read the environment. `params.ts` stays the record
+  of non-secret values and secret names, with their cutover rows.
+- **A worked example in the starter.** The starter is the minimum an adopter keeps, and a port nobody calls
+  is dead code they would have to delete. A real adapter would also need a vendor dependency added purely
+  for demonstration. keel's seven ports already demonstrate the shape, and the new directory is proved by
+  `tests/lint/app-owned-adapters.test.ts`, which lints virtual files against the repo's real config.
+  Removing any one of six fences turned it red. Removing either of two carve-outs did not, because those
+  only make the outcome independent of block order, as `eslint.config.mjs` says beside them.
+
+`docs/recipes/app-owned-adapter.md` is the how-to, and `/new-port` now asks whose port it is first.

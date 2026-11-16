@@ -265,6 +265,8 @@ apps/<app>/src/app/           Next route files (thin wrappers; framework routes 
 apps/<app>/src/app-config/    THE SEAM — your registrations
 apps/<app>/src/components/    your screens/cards
 apps/<app>/src/domain/        your domain modules
+apps/<app>/src/ports/         your own ports, for a vendor keel has no port for (docs/recipes/app-owned-adapter.md)
+apps/<app>/src/adapters/      their registry and fakes; adapters/real/ is the app's only vendor-SDK directory
 apps/<app>/src/demo-static/   your half of the file:// demo twin (the framework half is keel's)
 apps/<app>/src/seed/          your seed world (fills in keel/seed/contracts)
 apps/<app>/messages/          your i18n namespaces (the framework ships its own catalog)

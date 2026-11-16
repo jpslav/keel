@@ -1601,3 +1601,33 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **A tour start that rejects outright is a recorded miss,** never an unhandled rejection that leaves a resume marker for a tour that never began.
 - **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
 - **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
+
+## App-owned vendor adapters (2026-11-16, `feat/app-owned-adapters`)
+
+- **An app may own a port, fake and real adapter, and the vendor zone is `apps/<app>/src/adapters/real/`,
+  not the whole adapters directory.** An adopter asked for a lint-allowed `apps/*/src/adapters/`. The
+  narrower zone keeps the app's registry and fakes under the same vendor and `process.env` bans as the
+  rest of the app, which is what makes them hermetic by construction. ADR-0012's 2026-11-16 addendum has
+  the full fence and the rejected alternatives.
+- **Declined: a key-value port in keel.** It was offered as the alternative and fails both the
+  universality and the new-class tests.
+- **The app's real adapters read `process.env`, not imported `params.ts` values.** keel's own real adapters
+  already work this way, and secret values cannot live in the repo. `params.ts` keeps recording names,
+  placeholders and cutover rows.
+- **A static import of an app's `adapters/real` is banned outside the adapters directory, and `import()` is
+  not.** The dynamic form inside an `!isSimulated` branch is how keel's own real-mode sign-in form is
+  loaded, so banning it would forbid the one legitimate case.
+- **The app's registry does not import `server-only` itself.** It must import `isSimulated` from
+  `keel/adapters/index`, which imports `server-only`, so the guard arrives transitively. Neither app lists
+  `server-only` as a dependency, and knip flagged it as unlisted when a scratch registry imported it
+  directly.
+- **No lint rule keeps a registry out of the static demo.** The import arrives transitively in practice,
+  which lint cannot follow. The measured backstop is `check:demo-size` (54 MB against 880,000 bytes on the
+  starter) and then the static e2e.
+- **No worked example in the starter or the showcase.** A recipe (`docs/recipes/app-owned-adapter.md`), an
+  updated `/new-port` and a lint gate test (`tests/lint/app-owned-adapters.test.ts`) instead. The recipe was
+  checked once by building a scratch port, fake, real adapter and registry in the starter: typecheck, lint
+  and knip passed, then the scratch files were deleted.
+- **Recipes that predate this** (`e-sign.md`, `workspace-coder.md`) still put their ports in keel's tree.
+  Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
+  (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).

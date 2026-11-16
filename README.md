@@ -101,9 +101,11 @@ which may itself begin from a preset. [docs/runbooks/demo.md](docs/runbooks/demo
 
 ## Architecture in one paragraph
 
-Vendor SDKs live only in [packages/keel/src/adapters/](packages/keel/src/adapters/) (lint-enforced);
-everything else codes against the narrow interfaces in [packages/keel/src/ports/](packages/keel/src/ports/)
-(`auth`, `db`, `storage`, `llm`, `email`, `analytics`, `jobs`). Domain logic is pure TypeScript in
+Vendor SDKs live only in [packages/keel/src/adapters/](packages/keel/src/adapters/), or, for a vendor
+keel has no port for, in an app's own `apps/<app>/src/adapters/real/`
+([recipe](docs/recipes/app-owned-adapter.md)), and both are lint-enforced. Everything else codes against
+the narrow interfaces in [packages/keel/src/ports/](packages/keel/src/ports/)
+(`auth`, `db`, `storage`, `llm`, `email`, `analytics`, `jobs`) or an app's own port. Domain logic is pure TypeScript in
 [packages/keel/src/core/](packages/keel/src/core/). Screens are router-agnostic — which is what makes the
 `file://` demo possible — and route files are thin wrappers. Tenancy is enforced _in the database_ by
 row-level security: every tenant-scoped query runs inside `withTenant()`. Inside a tenant, `authorize()` is

@@ -36,10 +36,13 @@ adapter" below are how you implement one that has passed — not a green light o
 ## The ports rule (the one rule that matters most)
 
 Vendor SDKs (`@clerk/*`, `@aws-sdk/*`, `@anthropic-ai/*`, `@sentry/*`, `posthog-*`, `mailgun.js`, `pg`)
-may only be imported inside `packages/keel/src/adapters/`. Everything else codes against the
-interfaces in `keel/ports/`. The lint rule that enforces this is load-bearing; if you hit it,
-you're about to couple the app to a vendor — add to the port instead. (Ports and adapters are framework
-code: they live in the `keel` workspace package — ADR-0012.)
+may only be imported inside `packages/keel/src/adapters/`, or inside an app's own
+`apps/<app>/src/adapters/real/` for a vendor keel has no port for. Everything else codes against the
+interfaces in `keel/ports/`, or the app's own port. The lint rules that enforce this are load-bearing, and
+they see `import()` as well as `import`; if you hit one, you're about to couple the app to a vendor — add
+to the port instead. (keel's ports and adapters are framework code: they live in the `keel` workspace
+package — ADR-0012. A port only your app calls, for a vendor that fails the first two tests above, lives
+in your app instead: `docs/recipes/app-owned-adapter.md`.)
 
 **Adding an adapter** for an existing port — once it has passed one of the two tests above:
 

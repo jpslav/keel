@@ -34,9 +34,12 @@ export const appMode: AppMode = process.env.APP_MODE === 'real' ? 'real' : 'simu
 export const isSimulated = appMode === 'simulated'
 
 /**
- * Demo build flag. packages/keel/src/adapters is the ONE place process.env is read (lint-enforced), so run-mode
+ * Demo build flag. packages/keel/src/adapters is where process.env is read (lint-enforced), so run-mode
  * signals like this live here and everything else imports the boolean — the demo badge, the fail-closed
  * guard below, etc. A demo build is a simulated-mode build that opts in explicitly via DEMO_MODE=1.
+ * An app's own adapters (apps/<app>/src/adapters/real) may read their own configuration from process.env,
+ * but never these run-mode variables, and the app's registry imports `isSimulated` from here (lint-enforced),
+ * which also runs the guard below for it.
  */
 export const isDemoMode = process.env.DEMO_MODE === '1'
 

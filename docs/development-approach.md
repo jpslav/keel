@@ -103,8 +103,19 @@ loop fast enough for this to pay off — for agents most of all.
 **Principle.** Every external dependency (auth, database, object storage, LLM, email, analytics) is reached
 through a thin interface _the app owns_ — a port — with two implementations, real and fake. **Wrap, don't
 stub:** the port is sized to what the app actually needs (a handful of functions), not to the vendor's
-hundreds of calls. Exactly one module imports each vendor SDK, and a lint rule (`no-restricted-imports`)
-plus a CI check make the boundary permanent.
+hundreds of calls. Exactly one module imports each vendor SDK, and lint rules (`no-restricted-imports`
+for `import`, `keel/no-dynamic-vendor-import` for `import()`) plus a CI check make the boundary
+permanent.
+
+**Whose port it is decides where it lives ✅.** keel's ports and adapters are framework code in
+`packages/keel/src/`. A port for a vendor keel has no port for, which only one app calls and which fails
+the tests in the next section, belongs to that app: `apps/<app>/src/ports/` for the interface, and
+`apps/<app>/src/adapters/` for its registry, fake and real adapter, with the vendor SDK confined to
+`adapters/real/`. The fence is the same one, drawn twice: the app's registry and fake are as vendor-free
+and `process.env`-free as the rest of the app, the registry takes the run mode from keel's `isSimulated`,
+and nothing else in the app imports a real adapter statically. `docs/recipes/app-owned-adapter.md` is the
+how-to. The reason it is not "add it to keel" is ADR-0013: an adopter does not edit `packages/keel`, and
+a port keel would never accept upstream would otherwise be a merge conflict in their fork forever.
 
 **Why.** A small owned interface makes the fake trivial to write, keeps dev/demo/test hermetic and
 deterministic, and turns a vendor swap into a local change. Stubbing the vendor's surface instead couples
@@ -128,7 +139,10 @@ written down precisely, in `docs/recipes/` for a vendor-specific plan (e.g. `sms
 (realtime-collab, below) — so known
 patterns don't get built early. Instances ship domain features plus
 additional members of already-demonstrated classes — more job kinds, more webhook events, more vendor
-adapters written by following the worked example.
+adapters written by following the worked example. When only the instance's app calls a vendor that
+fails both tests below, its adapter is written in that app, behind a port the app owns
+(`docs/recipes/app-owned-adapter.md`), not in `packages/keel`. A vendor that plugs into a seam keel
+already owns, such as the SMS channel, follows that seam's own recipe.
 
 **The two tests for shipping vendor code.** _Universality_ — will every instance use it? — and
 _new-class_ — does it demonstrate integration mechanics the template doesn't already teach? A vendor

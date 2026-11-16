@@ -1312,3 +1312,24 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   `sendInvite` turns into its form error and the replay into a failure. A preset is held to "no
   duplicates" at build time as well. Pushing the check into `sendOrgInvite` would have forced one
   error contract onto callers that each want a different one.
+
+## App-owned adapters (2026-11-16, `feat/app-owned-adapters`)
+
+- **`no-restricted-imports` never sees `import()`.** It checks import and export declarations (and
+  `import x = require()`) only. So a vendor ban written with it is a ban on static imports, and
+  `await import('@aws-sdk/client-s3')` passed `pnpm lint` anywhere in the repo while CLAUDE.md, README.md and CONTRIBUTING.md called
+  the vendor boundary lint-enforced. `require()` was caught, but only incidentally, by
+  `@typescript-eslint/no-require-imports`. The fix is a rule with its own id (`keel/no-dynamic-vendor-import`)
+  reading the same list. If you add an import ban with `no-restricted-imports`, ask what `import()` does.
+- **A carve-out can be invisible to its own gate.** Two of eight mutations of the new fence left
+  `tests/lint/app-owned-adapters.test.ts` green: removing the app's adapters directory from the broad
+  ports-boundary block's `ignores`, and the same for the `process.env` block. The dedicated blocks come
+  later and win anyway, so the outcome did not change. The ignores make the outcome independent of block
+  order. A test that pins outcomes cannot see that, so the reason is written beside the lines instead.
+- **`ESLint#lintText` with a `filePath` lints a file that does not exist** against the config that path
+  would get. That makes a lint fence testable without fixture files on disk, so there is nothing for knip,
+  tsc or jscpd to object to, and no vendor package has to be installed to be banned.
+- **An app registry wired into the static demo does not fail the build.** The single-file build inlines
+  the registry's dynamic imports, keel's registry and pglite: 54 MB for the starter. `check:demo-size` is
+  what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
+  registries).

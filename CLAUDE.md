@@ -47,8 +47,14 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   (`keel/public-surface`, which reads that map, so the map is the only list). Adding a module does NOT
   publish it; add the `exports` line deliberately, and never widen the map to silence the rule.
 - **Vendor SDKs (`@clerk/*`, `@aws-sdk/*`, `@anthropic-ai/*`, `@sentry/*`, `posthog-*`, `mailgun.js`,
-  `pg`) may only be imported inside `packages/keel/src/adapters/`** — everything else codes against
-  the interfaces in `keel/ports/`. Lint-enforced.
+  `pg`) may only be imported inside an adapters directory**: `packages/keel/src/adapters/` for keel's
+  ports, or `apps/*/src/adapters/real/` for a port the APP owns, meaning a vendor keel has no port for,
+  which fails the universality and new-class tests (`docs/recipes/app-owned-adapter.md`). Everything
+  else codes against the port: `keel/ports/*`, or the app's `apps/*/src/ports/*` through its registry
+  `apps/*/src/adapters/index.ts`, which takes the run mode from keel's `isSimulated` and never reads
+  `process.env`. `process.env` follows the same line, bar the per-file exemptions `eslint.config.mjs`
+  names and test files, and an app's real adapters never read the run mode. Lint-enforced for static
+  imports and `import()` alike (`tests/lint/app-owned-adapters.test.ts`).
 - **`keel/core` is pure TypeScript** — no framework imports. Lint-enforced.
 - **Screens are router-agnostic** — framework screens in `packages/keel/src/components`, app
   screens in `apps/*/src/components`; files under `apps/*/src/app` are thin wrappers. This keeps the `file://` static
