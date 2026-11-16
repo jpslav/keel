@@ -81,30 +81,51 @@ const ANY_EMAIL_ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
 /** The four files the bug was about — none of them may name the maintainer after an eject. */
 const IDENTITY_FILES = ['CODEOWNERS', 'SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
 
-let probeDir: string
-let initAppOutput: string
+interface Probe {
+    /** The throwaway copy `init-app` ran in. */
+    dir: string
+    /** What `init-app` printed. */
+    output: string
+}
 
-beforeAll(() => {
-    probeDir = makeTestTmpDir('keel-adopter-identity-')
-    copyTree(ROOT, probeDir)
-
-    // The harshest path init-app supports, same as the adoption-probe CI job: rename AND eject in one call.
+/** Copies the tree, runs `init-app <args>` in the copy, and hands back the result for inspection. */
+function runInitApp(prefix: string, args: string[]): Probe {
+    const dir = makeTestTmpDir(prefix)
+    copyTree(ROOT, dir)
     const tsx = path.join(ROOT, 'node_modules/.bin/tsx')
-    const initApp = spawnSync(tsx, [path.join(probeDir, 'scripts/init-app.ts'), 'acme', '--eject-showcase', '--yes'], {
-        cwd: probeDir,
-        encoding: 'utf8',
-    })
+    const initApp = spawnSync(tsx, [path.join(dir, 'scripts/init-app.ts'), ...args], { cwd: dir, encoding: 'utf8' })
     if (initApp.status !== 0) {
         throw new Error(
-            `pnpm init-app acme --eject-showcase --yes exited ${initApp.status}\n` +
+            `pnpm init-app ${args.join(' ')} exited ${initApp.status}\n` +
                 `--- stdout ---\n${initApp.stdout}\n--- stderr ---\n${initApp.stderr}`,
         )
     }
-    initAppOutput = initApp.stdout
+    return { dir, output: initApp.stdout }
+}
+
+/**
+ * The app slug and the repository name are DIFFERENT strings, on purpose, and neither is the other's
+ * default. The rewrite used to write the slug into the repo position of every link, which is right only
+ * when a repo happens to be named after its one app — and the test used to pin exactly that, so it
+ * could not see the bug. A slug that differs from the repo name is what makes this check able to fail.
+ */
+const SLUG = 'acme'
+const REPO = 'pages'
+const OWNER = 'PLACEHOLDER_GITHUB_OWNER'
+const REPO_PLACEHOLDER = 'PLACEHOLDER_GITHUB_REPO'
+
+/** The harshest path init-app supports, same as the adoption-probe CI job: rename AND eject in one call. */
+let ejected: Probe
+/** Rename-only, with the repository named: the other path through the identity rewrite. */
+let named: Probe
+
+beforeAll(() => {
+    ejected = runInitApp('keel-adopter-identity-', [SLUG, '--eject-showcase', '--yes'])
+    named = runInitApp('keel-adopter-identity-named-', [SLUG, '--repo', REPO, '--yes'])
 }, 120_000)
 
-function readProbe(relative: string): string {
-    return readFileSync(path.join(probeDir, relative), 'utf8')
+function readProbe(relative: string, probe: Probe = ejected): string {
+    return readFileSync(path.join(probe.dir, relative), 'utf8')
 }
 
 describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inherit the maintainer identity', () => {
@@ -129,23 +150,24 @@ describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inhe
         ]) {
             expect(text).toContain(owned)
         }
-        expect(text).toContain('@PLACEHOLDER_GITHUB_OWNER')
+        expect(text).toContain(`@${OWNER}`)
     })
 
-    it("SECURITY.md points the advisory link at the adopter's own repo", () => {
-        expect(readProbe('SECURITY.md')).toContain('github.com/PLACEHOLDER_GITHUB_OWNER/acme/security/advisories/new')
+    // With no --repo, the repository is a placeholder of its own — never the slug, which is a guess.
+    const UNNAMED = `github.com/${OWNER}/${REPO_PLACEHOLDER}`
+
+    it("SECURITY.md points the advisory link at the adopter's own repo, still to be named", () => {
+        expect(readProbe('SECURITY.md')).toContain(`${UNNAMED}/security/advisories/new`)
     })
 
     it('the issue-template config repoints both the security and discussions links', () => {
         const text = readProbe('.github/ISSUE_TEMPLATE/config.yml')
-        expect(text).toContain('github.com/PLACEHOLDER_GITHUB_OWNER/acme/security/advisories/new')
-        expect(text).toContain('github.com/PLACEHOLDER_GITHUB_OWNER/acme/discussions')
+        expect(text).toContain(`${UNNAMED}/security/advisories/new`)
+        expect(text).toContain(`${UNNAMED}/discussions`)
     })
 
     it("the code of conduct enforcement contact is the adopter's own private channel", () => {
-        expect(readProbe('CODE_OF_CONDUCT.md')).toContain(
-            'github.com/PLACEHOLDER_GITHUB_OWNER/acme/security/advisories/new',
-        )
+        expect(readProbe('CODE_OF_CONDUCT.md')).toContain(`${UNNAMED}/security/advisories/new`)
     })
 
     // Two places correctly KEEP the maintainer's name, and must stay exempt:
@@ -159,6 +181,64 @@ describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inhe
 })
 
 /**
+ * `--repo` names the repository, and the links must say THAT — not the app slug. The slug and the repo
+ * are different here (`acme` in `pages`), so a link that still carries the slug fails by name.
+ */
+describe('`pnpm init-app --repo <name>` writes the repository name into the contact links', () => {
+    const FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
+
+    it.each(FILES)('%s links github.com/<owner>/<repo>, never the app slug', (relative) => {
+        const text = readProbe(relative, named)
+        expect(text).toContain(`github.com/${OWNER}/${REPO}/security/advisories/new`)
+        expect(text).not.toContain(REPO_PLACEHOLDER)
+        expect(text, 'the slug is not the repository').not.toContain(`github.com/${OWNER}/${SLUG}`)
+    })
+
+    it('the issue-template discussions link names it too', () => {
+        expect(readProbe('.github/ISSUE_TEMPLATE/config.yml', named)).toContain(
+            `github.com/${OWNER}/${REPO}/discussions`,
+        )
+    })
+
+    it('the owner stays a placeholder, since it also fills CODEOWNERS where it may be a team', () => {
+        expect(readProbe('CODEOWNERS', named)).toContain(`@${OWNER}`)
+    })
+
+    it('the closing output asks for the repository name only when none was given', () => {
+        expect(ejected.output).toContain(REPO_PLACEHOLDER)
+        expect(ejected.output).toContain('The repository name')
+        expect(named.output).not.toContain(REPO_PLACEHOLDER)
+        expect(named.output).not.toContain('The repository name')
+    })
+
+    it.each([
+        ['owner/name', 'a/b', 'NAME only'],
+        ['a clone URL suffix', 'pages.git', '.git'],
+        ['a dot-dot', '..', 'not a valid'],
+        ['a space', 'my repo', 'not a valid'],
+    ])('rejects %s as a repository name', (_label, value, message) => {
+        // --dry-run: validation runs before anything is planned, and nothing may be written either way.
+        const result = spawnSync(
+            path.join(ROOT, 'node_modules/.bin/tsx'),
+            [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', value, '--dry-run'],
+            { cwd: named.dir, encoding: 'utf8' },
+        )
+        expect(result.status).toBe(1)
+        expect(result.stderr).toContain(message)
+    })
+
+    it("a re-run's --repo is reported as ignored instead of silently dropped", () => {
+        const result = spawnSync(
+            path.join(ROOT, 'node_modules/.bin/tsx'),
+            [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', 'elsewhere', '--dry-run'],
+            { cwd: named.dir, encoding: 'utf8' },
+        )
+        expect(result.status).toBe(0)
+        expect(result.stdout).toContain('--repo elsewhere ignored')
+    })
+})
+
+/**
  * The other thing a rename leaves behind is CONTENT: the starter's seed world, welcome copy, Items
  * slice and static-demo wiring are all still on screen afterwards, and no gate can call leftover
  * content an error. The closing output is the only place an adopter is told, so it is pinned — the
@@ -168,7 +248,7 @@ describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inhe
  */
 describe('`pnpm init-app` tells the adopter which starter content is still on screen', () => {
     it('prints the section', () => {
-        expect(initAppOutput).toContain('STARTER CONTENT STILL WIRED INTO YOUR UI')
+        expect(ejected.output).toContain('STARTER CONTENT STILL WIRED INTO YOUR UI')
     })
 
     it.each([
@@ -177,7 +257,7 @@ describe('`pnpm init-app` tells the adopter which starter content is still on sc
         'apps/acme/messages/{en,es}.json',
         'apps/acme/src/demo-static/app.tsx',
     ])('names %s, and it exists', (cited) => {
-        expect(initAppOutput).toContain(cited)
+        expect(ejected.output).toContain(cited)
         for (const relative of cited.includes('{en,es}')
             ? ['en', 'es'].map((locale) => cited.replace('{en,es}', locale))
             : [cited]) {

@@ -24,6 +24,15 @@ import { doctrineDocs, EXEMPT, generalizeAppCitations, resolves } from '../tests
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+/**
+ * GitHub's own syntax for "nobody" — values that are loudly wrong rather than silently absent. Two
+ * tokens, because the owner and the repository NAME are two things init-app cannot know: neither is
+ * the app slug (a company's `console` app lives in a repo called `pages`, under an org that is neither).
+ * Declared this early because `USAGE` interpolates them.
+ */
+const PLACEHOLDER_OWNER = 'PLACEHOLDER_GITHUB_OWNER'
+const PLACEHOLDER_REPO = 'PLACEHOLDER_GITHUB_REPO'
+
 const USAGE = `
 pnpm init-app <slug> [options]        rename the app you keep
 pnpm init-app --eject-showcase        delete the demo app (slug optional; both can run at once)
@@ -33,6 +42,10 @@ pnpm init-app --eject-showcase        delete the demo app (slug optional; both c
                       so "pnpm --filter <slug>" can only ever mean the app).
   --name "<Name>"     display name for UI copy and titles (default: title-cased <slug>)
   --app <dir>         which directory under apps/ to rename (default: starter, else the only app)
+  --repo <name>       the GitHub repository NAME this will live in: not the owner, and not the app slug
+                      (they differ more often than not). Used in the advisory and discussions links of
+                      SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md. Without it those
+                      links say ${PLACEHOLDER_REPO}, next to ${PLACEHOLDER_OWNER}, for you to replace
   --eject-showcase    remove apps/showcase and every reference to it
   --dry-run           print the plan and change nothing
   --yes               skip the confirmation prompt (required when stdin is not a terminal)
@@ -56,6 +69,7 @@ interface Options {
     slug: string | null
     displayName: string | null
     app: string | null
+    repo: string | null
     ejectShowcase: boolean
     dryRun: boolean
     assumeYes: boolean
@@ -66,6 +80,7 @@ function parseArgs(argv: string[]): Options {
         slug: null,
         displayName: null,
         app: null,
+        repo: null,
         ejectShowcase: false,
         dryRun: false,
         assumeYes: false,
@@ -73,6 +88,7 @@ function parseArgs(argv: string[]): Options {
     const takesValue = new Map<string, (value: string) => void>([
         ['--name', (value) => (options.displayName = value)],
         ['--app', (value) => (options.app = value)],
+        ['--repo', (value) => (options.repo = value)],
     ])
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -517,8 +533,8 @@ function ejectShowcase(survivor: string, onDisk: string): void {
 // step 3 — scrub the maintainer's identity from adopter-facing contact/review files
 // ---------------------------------------------------------------------------------------------
 
-/** GitHub's own syntax for "nobody" — a value that is loudly wrong rather than silently absent. */
-const PLACEHOLDER_OWNER = 'PLACEHOLDER_GITHUB_OWNER'
+/** The files whose links name a repository. CODEOWNERS is not one: it names only an owner. */
+const CONTACT_LINK_FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
 
 /**
  * Four files route the ADOPTER's users to the TEMPLATE maintainer: a security report, two issue-
@@ -532,18 +548,40 @@ const PLACEHOLDER_OWNER = 'PLACEHOLDER_GITHUB_OWNER'
  * whether the showcase is ever ejected.
  *
  * Follows the `PLACEHOLDER_` convention from `apps/showcase/config/params.ts`: a value that reads as
- * "you must supply this" rather than a name that happens to be wrong. `survivor` doubles as "the
- * adopter's repo slug" — the same simplification `ejectShowcase` already makes when it names the
- * surviving app after the product.
+ * "you must supply this" rather than a name that happens to be wrong. The links name a repository, and
+ * the repository is NOT the app: this function used to write the app's slug there, which is right only
+ * when a repo is named after its one app, and silently wrong otherwise (an app `console` kept in a repo
+ * `pages` got `…/console/security/advisories/new`, a link that 404s and looks plausible). So the repo
+ * name is its own input, `--repo`, and without it the link carries `PLACEHOLDER_GITHUB_REPO`.
+ *
+ * It is deliberately NOT read from `git remote get-url origin`. At adoption time that remote is often
+ * still the template itself or a fork under its default name, so a derived value would be plausible
+ * and wrong with nothing to flag it, and `--dry-run` would print a different plan on every machine.
  *
  * NOT touched, and deliberately so:
  *   - `LICENSE` — MIT requires preserving the copyright notice verbatim.
  *   - `docs/adr/**` approver lines — honest provenance for keel's OWN decisions, which an adopter
  *     inherits as historical record, not as their own project's contact info.
  */
-function rewriteAdopterIdentity(survivor: string): void {
+function rewriteAdopterIdentity(repo: string | null): void {
     const oldAdvisory = 'github.com/jpslav/keel/security/advisories/new'
-    const newAdvisory = `github.com/${PLACEHOLDER_OWNER}/${survivor}/security/advisories/new`
+    const oldDiscussions = 'github.com/jpslav/keel/discussions'
+    const home = `github.com/${PLACEHOLDER_OWNER}/${repo ?? PLACEHOLDER_REPO}`
+    const newAdvisory = `${home}/security/advisories/new`
+
+    // A re-run on a tree whose links were already rewritten has nothing left to repoint, so an
+    // explicit --repo would be silently ignored. Say so rather than let it look like it worked.
+    const linksStillNameTemplate = CONTACT_LINK_FILES.some(
+        (file) =>
+            existsSync(abs(file)) && (readText(file).includes(oldAdvisory) || readText(file).includes(oldDiscussions)),
+    )
+    if (repo !== null && !linksStillNameTemplate) {
+        note(
+            skipped,
+            `--repo ${repo} ignored: the links in ${CONTACT_LINK_FILES.join(', ')} no longer name the template ` +
+                '(an earlier run rewrote them) — edit them directly',
+        )
+    }
 
     rewrite(
         'CODEOWNERS',
@@ -568,7 +606,7 @@ function rewriteAdopterIdentity(survivor: string): void {
         '.github/ISSUE_TEMPLATE/config.yml',
         [
             [oldAdvisory, newAdvisory],
-            ['github.com/jpslav/keel/discussions', `github.com/${PLACEHOLDER_OWNER}/${survivor}/discussions`],
+            [oldDiscussions, `${home}/discussions`],
         ],
         'contact links → your own repo',
     )
@@ -654,17 +692,26 @@ function proseToReview(words: string[]): string[] {
  * exactly the wrong answer. Now that init-app touches these files, they get their own section, named
  * for what is still missing (real values) rather than what already happened (a rewrite).
  */
-function reportNeedsYourDetails(): void {
+function reportNeedsYourDetails(repo: string | null): void {
+    const home = `github.com/${PLACEHOLDER_OWNER}/${repo ?? PLACEHOLDER_REPO}`
+    const repoBullet = repo
+        ? ''
+        : `
+  • The repository name — SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md say
+    ${PLACEHOLDER_REPO}, because no --repo was given and the app slug is not a reliable guess
+    (a "console" app can live in a repo called "pages"). Replace it with the repository's NAME,
+    not the slug. \`git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github\`
+    lists every placeholder, owner and repo both.`
     console.log(`
 WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone:
 
   • CODEOWNERS — every @${PLACEHOLDER_OWNER} is the GitHub user or team who should review changes
     here. Fill it in before you turn on "require review from Code Owners" branch protection, or
-    GitHub reports an unknown owner and every PR becomes unmergeable.
-  • SECURITY.md — the advisory link now points at github.com/${PLACEHOLDER_OWNER}/<your-repo>, which
-    only resolves once you have pushed to a repo under that owner AND switched on private
-    vulnerability reporting (Settings → Code security). It is OFF by default, and until it is on
-    a reporter following your own security policy gets a 404 and no private channel at all.
+    GitHub reports an unknown owner and every PR becomes unmergeable.${repoBullet}
+  • SECURITY.md — the advisory link now points at ${home},
+    which only resolves once you have pushed to that repo AND switched on private vulnerability
+    reporting (Settings → Code security). It is OFF by default, and until it is on a reporter
+    following your own security policy gets a 404 and no private channel at all.
   • .github/ISSUE_TEMPLATE/config.yml — same two links, same fix. Its Discussions link additionally
     needs Discussions enabled (Settings → General → Features); if you do not want Discussions,
     delete that contact link rather than shipping one that 404s.
@@ -726,6 +773,22 @@ behind fails your first push with an error that does not mention this command.`)
 // main
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * `--repo` is the repository NAME. Two mistakes are common enough to name: `owner/name` (the owner is a
+ * separate placeholder on purpose — it also fills CODEOWNERS, where it may be a team) and a clone URL's
+ * `.git` suffix. GitHub's own rule for the rest: letters, digits, `.`, `_`, `-`, and never `.` or `..`.
+ */
+function checkRepoName(repo: string): void {
+    if (repo.includes('/')) {
+        fail(`--repo takes the repository NAME only ("pages"), not "${repo}": the owner stays ${PLACEHOLDER_OWNER}`)
+    }
+    if (repo.endsWith('.git'))
+        fail(`--repo "${repo}": drop the .git suffix — it is the repository name, not a clone URL`)
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(repo) || repo === '.' || repo === '..') {
+        fail(`"${repo}" is not a valid GitHub repository name: letters, digits, ".", "_" and "-"`)
+    }
+}
+
 async function confirm(summary: string[], assumeYes: boolean): Promise<void> {
     console.log('init-app will:\n')
     for (const line of summary) console.log(`  • ${line}`)
@@ -772,6 +835,7 @@ async function main(): Promise<void> {
         // called that would collide in pnpm-workspace before this script's work could even be tested.
         if (slug === 'keel') fail('"keel" is reserved for the framework package')
     }
+    if (options.repo !== null) checkRepoName(options.repo)
     const displayName = options.displayName ?? (slug ? titleCase(slug) : current.displayName)
     const survivor = slug ?? targetDir
 
@@ -789,7 +853,8 @@ async function main(): Promise<void> {
     summary.push('repoint path citations in the gated docs (docs/, .claude/, README, CLAUDE, CONTRIBUTING)')
     summary.push(
         `replace the maintainer's identity in CODEOWNERS, SECURITY.md, the issue-template config and ` +
-            `CODE_OF_CONDUCT.md with ${PLACEHOLDER_OWNER}`,
+            `CODE_OF_CONDUCT.md: github.com/${PLACEHOLDER_OWNER}/${options.repo ?? PLACEHOLDER_REPO}` +
+            (options.repo ? '' : ' (no --repo given)'),
     )
     if (dryRun) summary.push('(--dry-run: nothing will actually be written)')
 
@@ -797,7 +862,7 @@ async function main(): Promise<void> {
 
     if (slug) renameApp(current, slug, displayName)
     if (options.ejectShowcase) ejectShowcase(survivor, dryRun ? targetDir : survivor)
-    rewriteAdopterIdentity(survivor)
+    rewriteAdopterIdentity(options.repo)
     repairAppCitations()
     formatTouchedFiles()
 
@@ -818,7 +883,7 @@ async function main(): Promise<void> {
         for (const doc of review) console.log(`  ${doc}`)
     }
 
-    reportNeedsYourDetails()
+    reportNeedsYourDetails(options.repo)
 
     // `survivor` is the name AFTER the rename; on disk that directory only exists if the rename
     // actually ran, so a dry run still has to look under the old name (the ejectShowcase convention).
