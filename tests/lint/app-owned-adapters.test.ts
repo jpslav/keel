@@ -46,6 +46,7 @@ const RUN_MODE = { rule: 'no-restricted-syntax', fragment: "Run mode is keel's" 
 const REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "Reach the app's real adapters through its registry" }
 const REAL_ADAPTER_INSIDE = { rule: 'no-restricted-imports', fragment: 'real/ is loaded only with import()' }
 const REAL_ADAPTER_DYNAMIC = { rule: 'no-restricted-syntax', fragment: "Only the app's registry" }
+const KEEL_REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "never import keel's real adapters" }
 const NEXT_FONT = { rule: 'no-restricted-imports', fragment: 'next/font/google phones home' }
 const JSX_LITERAL = { rule: 'react/jsx-no-literals', fragment: '' }
 const A11Y_LITERAL = {
@@ -156,6 +157,17 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, code), RUN_MODE)).toBe(1)
     })
 
+    it('a story beside a real adapter may not read the run mode either', async () => {
+        const code = 'export const mode = process.env.APP_MODE\n'
+        expect(fired(await lint(`${APP}/src/adapters/real/kv-widget.stories.tsx`, code), RUN_MODE)).toBe(1)
+    })
+
+    it('importing from node:process for anything but env is not reading process.env', async () => {
+        const code =
+            "import { cwd } from 'node:process'\nimport type { Foo } from 'process'\nexport const here = cwd\nexport type F = Foo\n"
+        expect(fired(await lint(`${APP}/src/domain/kv.ts`, code), PROCESS_ENV)).toBe(0)
+    })
+
     it('a real adapter’s own test may set the run mode', async () => {
         const code = "process.env.APP_MODE = 'real'\nexport const mode = process.env.APP_MODE\n"
         expect(fired(await lint(`${APP}/src/adapters/real/kv.test.ts`, code), RUN_MODE)).toBe(0)
@@ -227,6 +239,14 @@ describe('an app’s real adapters are reached through its registry', () => {
     ])('%s may not load real/ dynamically either', async (file, code) => {
         expect(fired(await lint(file, code), REAL_ADAPTER_DYNAMIC)).toBe(1)
     })
+
+    it.each([`${APP}/src/adapters/fake/kv.ts`, `${APP}/src/adapters/index.ts`])(
+        '%s may not statically import one of keel’s published real adapters',
+        async (file) => {
+            const code = "import { createRealLlm } from 'keel/adapters/real/llm'\nexport const make = createRealLlm\n"
+            expect(fired(await lint(file, code), KEEL_REAL_ADAPTER)).toBe(1)
+        },
+    )
 
     it('inside real/, adapters import each other freely', async () => {
         const code =

@@ -74,6 +74,14 @@ const appRealAdapterPattern = {
 // registry's `await import('./real/index')` when !isSimulated is the one place that should do it. A static
 // import from a fake would load the vendor SDK into a simulated `pnpm dev`, and from the registry it would
 // load it in every mode. Matches `./real`, `../real`, `../../adapters/real` and `@/…/adapters/real`.
+// keel publishes a few of its own real adapters (the LLM client, the real-mode forms). A fake or the registry
+// importing one statically would load its vendor SDK in simulated mode just the same.
+const keelRealAdapterPattern = {
+    regex: '^keel/adapters/real/',
+    message:
+        "An app's registry and fakes never import keel's real adapters: that loads the vendor SDK in simulated " +
+        'mode. Reach keel through its registry (keel/adapters/index) (docs/recipes/app-owned-adapter.md).',
+}
 const appRealAdapterStaticPattern = {
     regex: '^(?:@/(?:.*/)?adapters|\\.{1,2}(?:/.*)?)/real(?:/|$)',
     message:
@@ -130,7 +138,8 @@ const getDbDestructureSelector = {
 const processEnvSelector = {
     selector:
         ':matches(MemberExpression[object.name="process"][property.name="env"], ' +
-        'ImportDeclaration[source.value=/^(node:)?process$/])',
+        'ImportDeclaration[importKind!="type"][source.value=/^(node:)?process$/] > ' +
+        ':matches(ImportSpecifier[imported.name="env"], ImportDefaultSpecifier, ImportNamespaceSpecifier))',
     message:
         "process.env is read ONLY inside an adapters directory — packages/keel/src/adapters, or an app's own " +
         'apps/<app>/src/adapters/real (CLAUDE.md) — deployment/service params come from the app ' +
@@ -532,9 +541,17 @@ const eslintConfig = [
     // here and renders copy; keel's own adapters get it from the next block.
     {
         files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
-        ignores: ['**/*.test.{ts,tsx}', '**/*.stories.tsx'],
+        ignores: ['**/*.test.{ts,tsx}'],
         rules: {
             'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector, a11yLiteralSelector],
+        },
+    },
+    // A story beside a real-mode component renders fixtures, not shipped copy, so it drops the a11y ban as
+    // stories do everywhere else, and keeps the run-mode ban (this block replaces the one above for it).
+    {
+        files: ['apps/*/src/adapters/real/**/*.stories.tsx'],
+        rules: {
+            'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector],
         },
     },
     // The rest of an app's adapters directory except the registry — its fakes, and any module beside them.
@@ -656,7 +673,7 @@ const eslintConfig = [
         rules: {
             'no-restricted-imports': [
                 'error',
-                { patterns: [vendorSdkPattern, nextFontPattern, appRealAdapterStaticPattern] },
+                { patterns: [vendorSdkPattern, nextFontPattern, appRealAdapterStaticPattern, keelRealAdapterPattern] },
             ],
         },
     },
