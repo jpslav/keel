@@ -68,7 +68,7 @@ first commit, then every code commit of the one that jumped (a build is ~6 s).
   shape. A `/* @__PURE__ */` on the outer call does nothing: its arguments (`v.string()`) are calls too.
 - **Mantine's whole stylesheet (130,247 starter / 129,257 showcase, 15% and 14%).** Not growth, a baseline
   nobody had looked at: the apps import `@mantine/core/styles.css` whole, 273 KB for ~100 components, and the
-  framework's screens use 33. `scripts/vite-prune-mantine-css.ts`, in each app's `vite.demo.config.ts`,
+  starter's bundle reaches 33 (42 component directories in the module graph, 33 with a sheet of their own). `scripts/vite-prune-mantine-css.ts`, in each app's `vite.demo.config.ts`,
   drops every rule whose hashed class (`m_77c9d27d`) is in no shipped file. Nothing is reordered, a new
   component brings its own hashes, and there is no list to keep. Per-component imports would have been the
   documented route and were rejected: it is a list a person keeps, and a missing entry is an unstyled

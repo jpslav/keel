@@ -256,7 +256,7 @@ const EMAIL_SHAPE = /.+@.+\..+/
 // demo imports this module for `expandPreset` and `resolveWorldStart` and never validates a preset, but a
 // module-level `v.strictObject(...)` is a call the bundler must keep, so it carried valibot and every schema
 // into each app's `file://` bundle (3.2 KB on the starter, which registers no preset at all).
-// presets-bundle.test.ts holds this. An app's own definitions are not covered: they sit on the seam module the
+// tests/tooling/static-demo-bundle.test.ts holds this. An app's own definitions are not covered: they sit on the seam module the
 // demo imports for `presets`, so a module-level schema call in one stays in the demo (~2.8 KB for the
 // showcase's `ticket.assign`, once).
 

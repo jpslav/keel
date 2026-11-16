@@ -6,9 +6,9 @@ import type { Plugin } from 'vite'
  * the Mantine components it actually ships and not the whole library's.
  *
  * WHY: `@mantine/core/styles.css` is every component's stylesheet in one file, and the apps import it
- * whole. The framework's screens use 33 of its ~100 components, so on the starter 130 KB of the demo's
- * 231 KB of CSS styled nothing — a seventh of the artifact, and the largest single thing `check:demo-size`
- * measures. Mantine's own advice is to import per-component sheets, but that is a list a person keeps
+ * whole. The starter's bundle reaches 33 of its ~100 component stylesheets (42 component directories in the
+ * module graph, 33 with a sheet of their own), so 130 KB of the demo's 231 KB of CSS styled nothing — 15% of
+ * the artifact, and the largest single thing `check:demo-size` measures. Mantine's own advice is to import per-component sheets, but that is a list a person keeps
  * (and gets wrong silently: an unstyled component passes every test); this finds the same set by asking the
  * bundle itself.
  *

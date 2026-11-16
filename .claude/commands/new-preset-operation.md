@@ -74,8 +74,9 @@ half registers on its own server-only seam module and never on `presets.ts`. Aft
 To make a preset follow YOUR version of `invite` (a customized invite flow), register an app kind with
 keel's name. Start from keel's own three parts and keep the name:
 
-- **Definition**: copy keel's from `packages/keel/src/core/presets.ts` (`inviteOperation`,
-  `inboundOperation`, `flagOperation`, `actorHoldOperation`) into `.../operations/<kind>/definition.ts`, keeping `kind`
+- **Definition**: copy the object keel's returns from `packages/keel/src/core/presets.ts` (`inviteOperation`,
+  `inboundOperation`, `flagOperation`, `actorHoldOperation`: each is a function, `() => ({ ... })`, so keel's
+  own stay out of the static demo) into `.../operations/<kind>/definition.ts` as an exported constant, keeping `kind`
   identical, and register it in `appPresetOperations`. If your version keeps keel's argument shape,
   leave `AppPresetOperation` alone (keel's `FrameworkPresetOperation` already types that name); if it
   changes the shape, add yours to the union. Change the rules to match your route.

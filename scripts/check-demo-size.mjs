@@ -38,9 +38,9 @@
 //   tests/tooling/static-demo-bundle.test.ts holds it. (An app's OWN definition is not covered: the
 //   showcase's `ticket.assign` still carries ~2.8 KB of valibot.)
 // - 130247 bytes on the starter (129257 on the showcase) were Mantine's stylesheet. The apps import
-//   `@mantine/core/styles.css` whole, 273 KB for ~100 components, and the framework's screens use 33. The
+//   `@mantine/core/styles.css` whole, 273 KB for ~100 components, of which the demo's bundle reaches 33. The
 //   static demo's build now drops every rule whose hashed class is in no shipped file
-//   (scripts/vite-prune-mantine-css.ts, wired in each app's vite.demo.config.ts): a seventh of the file.
+//   (scripts/vite-prune-mantine-css.ts, wired in each app's vite.demo.config.ts): 14-15% of the file.
 // What stays is the presets themselves: net of the trim ~16.4 KB on the showcase and ~5.5 KB on the
 // starter, real code (the static twin's replay, the operation registry, the seam module with `extends`)
 // plus its copy and its tour.
@@ -83,7 +83,8 @@ const size = statSync(file).size
 if (size > budget) {
     console.error(`${file} is ${size} bytes — ${size - budget} over the ${budget} byte budget.`)
     console.error(
-        "That number is this app's own (package.json `check:demo-size`; the showcase's is in scripts/check-demo-size.mjs). " +
+        "That number is this app's own: the argument of `check:demo-size` in its package.json, or DEFAULT_BUDGET_BYTES in " +
+            'scripts/check-demo-size.mjs when it passes none. ' +
             'First find what grew (see WHEN IT GOES RED in that file). If the growth is intentional, raise the budget in ' +
             'its own commit and say what grew.',
     )

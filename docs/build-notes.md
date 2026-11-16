@@ -1330,7 +1330,7 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   `tests/tooling/static-demo-bundle.test.ts` bundles the entry the way the demo does (esbuild's metafile
   reports bytes per input) and fails on the old shape.
 - **The apps shipped the whole Mantine stylesheet: 15% of the demo.** `@mantine/core/styles.css` is every
-  component's CSS, 273 KB, and the framework's screens use 33 of ~100 components. Mantine's own advice is
+  component's CSS, 273 KB, and the starter's bundle reaches 33 of ~100 component stylesheets. Mantine's own advice is
   per-component imports, which is a list someone keeps; a missing entry unstyles one component and every test
   still passes. The pruning plugin asks the bundle instead: Mantine's CSS-module class names are hashed
   (`m_77c9d27d`), and those hashes are written in the component's JavaScript and nowhere else.
