@@ -1,5 +1,6 @@
+import { abilityActorFromCredential } from 'keel/authz/authorize'
 import { defineAbilitiesFor } from 'keel/core/abilities'
-import { recordAuditEvent } from 'keel/db/audit'
+import { auditActorOf, recordAuditEvent } from 'keel/db/audit'
 import type { InboundContext, InboundHandlerResult } from 'keel/inbound-email/handlers'
 import { createTicket } from '@/domain/db/tickets'
 import type { TicketStatus } from '@/domain/tickets'
@@ -12,10 +13,12 @@ import type { TicketStatus } from '@/domain/tickets'
  * (src/app-config/inbound-email.ts) for both.
  *
  * SENDER MATCHING + POSTURE. The sender's address is matched against the org's active members via the
- * auth port (listMembers), and the matched member must pass the SAME ability check the tickets route
- * enforces (`can('create', Ticket)`) — email authoring grants no more than the UI, so a `restricted`
- * member whom the ability model denies in the product is refused here too. An unmatched or unauthorized
- * sender does NOT open a ticket: the message is filed 'unmatched' (see the decision log).
+ * auth port (listMembers). The matched member then becomes a PERSON actor whose credential is this email
+ * (`abilityActorFromCredential`, which re-reads their standing through the auth port, so role and
+ * `restricted` are the same ones their session carries). They must pass the SAME ability check the
+ * tickets route enforces (`can('create', Ticket)`): email authoring grants no more than the UI, so a
+ * `restricted` member whom the ability model denies in the product is refused here too. An unmatched or
+ * unauthorized sender does NOT open a ticket: the message is filed 'unmatched' (see the decision log).
  *
  * WHY A DESK STILL REFUSES STRANGERS. It is tempting to read "support desk" as "anyone may write in",
  * and a production desk usually does — but it does so with a spam/abuse posture in front of it. The
@@ -42,14 +45,15 @@ function ticketFromEmail(status: TicketStatus, auditAction: 'ticket.created') {
         if (!sender) {
             return { status: 'unmatched', reason: `sender ${ctx.fromEmail} is not a member of ${ctx.orgSlug}` }
         }
-        const ability = defineAbilitiesFor({
+        const actor = await abilityActorFromCredential(ctx.auth, {
             userId: sender.id,
-            role: sender.role,
-            restricted: sender.role === 'restricted',
-            activeOrgId: ctx.orgId,
-            manageAll: false,
+            org: { id: ctx.orgId, slug: ctx.orgSlug },
+            credential: { kind: 'inbound-email', id: ctx.emailId },
         })
-        if (!ability.can('create', { type: 'Ticket', orgId: ctx.orgId })) {
+        if (!actor) {
+            return { status: 'unmatched', reason: `sender ${ctx.fromEmail} is not a member of ${ctx.orgSlug}` }
+        }
+        if (!defineAbilitiesFor(actor).can('create', { type: 'Ticket', orgId: ctx.orgId })) {
             return { status: 'unmatched', reason: `sender ${ctx.fromEmail} may not open tickets in ${ctx.orgSlug}` }
         }
 
@@ -70,7 +74,7 @@ function ticketFromEmail(status: TicketStatus, auditAction: 'ticket.created') {
         await recordAuditEvent(ctx.db, {
             tenantId: ctx.tenantId,
             orgId: ctx.orgId,
-            actorUserId: sender.id,
+            ...auditActorOf(actor),
             action: auditAction,
             subjectType: 'Ticket',
             subjectId: ticket.id,

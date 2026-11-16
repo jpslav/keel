@@ -61,6 +61,9 @@ async function auditReceived(db: DbPort, org: ResolvedInboundOrg, emailId: strin
         tenantId: org.tenantId,
         orgId: org.orgId,
         actorUserId,
+        // The email itself is the credential, whoever the row names: the matched sender, or the system
+        // actor when nobody matched.
+        credential: { kind: 'inbound-email', id: emailId },
         action: 'inbound-email.received',
         subjectType: 'InboundEmail',
         subjectId: emailId,

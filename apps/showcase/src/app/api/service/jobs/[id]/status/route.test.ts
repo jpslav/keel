@@ -24,6 +24,7 @@ vi.mock('keel/authz/authorize', async (importOriginal) => {
 
 const identity: ServiceIdentity = {
     kind: 'org-service',
+    keyId: 'key-frontline',
     tenantId: 't1',
     tenantSlug: 'northwind',
     orgId: 'o1',
@@ -110,7 +111,12 @@ describe('POST /api/service/jobs/[id]/status', () => {
 
         expect((await post({ status: 'completed' })).status).toBe(200)
         expect(h.authorize).toHaveBeenCalledWith(
-            { kind: 'machine', issuer: 'service-key', principalId: 'service-key:frontline', activeOrgId: 'o1' },
+            {
+                kind: 'machine',
+                credential: { kind: 'service-key', id: 'key-frontline' },
+                principalId: 'service-key:frontline',
+                activeOrgId: 'o1',
+            },
             'update',
             { type: 'Job', orgId: 'o1' },
         )

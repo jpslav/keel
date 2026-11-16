@@ -24,6 +24,15 @@ export type AppSubjectType = 'Item'
 export interface AppSubjectFields {}
 
 /**
+ * The credential kinds, beyond keel's own, by which a PERSON or a MACHINE can reach this app (composed
+ * into keel/core/abilities' `PersonCredentialKind` / `MachineCredentialKind`; keel's are `session`,
+ * `inbound-email` and `service-key`). This app adds none. An app with personal API tokens registers its
+ * token kind as a person credential; one with a CI identity, that as a machine credential.
+ */
+export type AppPersonCredentialKind = never
+export type AppMachineCredentialKind = never
+
+/**
  * The designated staff/operator org slug. ACTIVE membership in this org grants the `manageAll`
  * ability-layer superpower (derived in keel/authz/authorize.ts). It is one ordinary org WITHIN a
  * tenant: staff powers stop at the tenant boundary and NEVER cross tenants (ADR-0004). WHICH org is

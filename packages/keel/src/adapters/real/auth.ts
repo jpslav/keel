@@ -1,7 +1,15 @@
 import { auth, clerkClient, currentUser } from '@clerk/nextjs/server'
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../../core/locale'
 import { isRole, type Role } from '../../core/roles'
-import type { AuthPort, AuthUser, InviteInput, Membership, OrgRef, ProfileUpdate } from '../../ports/auth'
+import type {
+    AuthPort,
+    AuthUser,
+    InviteInput,
+    Membership,
+    MemberStanding,
+    OrgRef,
+    ProfileUpdate,
+} from '../../ports/auth'
 import { AuthRequiredError, ForbiddenError } from '../../ports/errors'
 
 /**
@@ -106,6 +114,18 @@ export const realAuth: AuthPort = {
         const user = await this.getCurrentUser()
         if (!user) throw new AuthRequiredError()
         return user
+    },
+
+    async getMember(orgSlug: string, userId: string): Promise<MemberStanding | null> {
+        // The same two reads getCurrentUser makes, for a user who is not the caller: the role from the
+        // org membership, `restricted` from the user's own metadata. No membership, no standing.
+        const client = await clerkClient()
+        const memberships = await client.users.getOrganizationMembershipList({ userId, limit: 100 })
+        const membership = memberships.data.find((m) => (m.organization.slug ?? m.organization.id) === orgSlug)
+        if (!membership) return null
+        const user = await client.users.getUser(userId)
+        const metadata = (user.publicMetadata ?? {}) as AppPublicMetadata
+        return { role: roleFrom(membership.publicMetadata, 'guest'), restricted: metadata.restricted ?? false }
     },
 
     async listMembers(orgSlug: string): Promise<Membership[]> {

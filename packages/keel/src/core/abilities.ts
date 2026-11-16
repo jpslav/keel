@@ -1,6 +1,8 @@
 import {
     appAbilityRules,
     appMachineAbilityRules,
+    type AppMachineCredentialKind,
+    type AppPersonCredentialKind,
     type AppSubjectFields,
     type AppSubjectType,
 } from '@app-config/abilities'
@@ -19,12 +21,15 @@ import { canManageOrg, type Role } from './roles'
  * and the composed SubjectType is BaseSubjectType | AppSubjectType. An adopter extends abilities by
  * editing src/app-config/abilities.ts, never this file's base union or switch.
  *
- * TWO KINDS OF ACTOR. A PERSON ({@link AbilityActor}) — signed in, or holding a credential a person was
- * issued — is judged by the rules below. A MACHINE ({@link MachineActor}) — a service key, a CI identity —
- * is judged by a SEPARATE, deny-by-default table: the framework's {@link frameworkMachineRules} for base
- * subjects and the app's `appMachineAbilityRules` for its own. A machine has no role, no `restricted`
- * flag and no `manageAll`, so it can never reach a rule written for people (ADR-0012 addendum,
- * 2026-11-16).
+ * TWO KINDS OF ACTOR, each carrying the {@link Credential} it proved itself with (ADR-0012 addendum,
+ * 2026-11-16):
+ * - A PERSON ({@link AbilityActor}) is judged by the rules below, whether it came through a session or
+ *   through another credential a person holds (an inbound email, a personal API token). Only a session
+ *   wields `manageAll`; for every other credential this file ignores it.
+ * - A MACHINE ({@link MachineActor}), such as a service key or a CI identity, is judged by a SEPARATE,
+ *   deny-by-default table: the framework's {@link frameworkMachineRules} for base subjects and the app's
+ *   `appMachineAbilityRules` for its own. A machine has no role, no `restricted` flag and no
+ *   `manageAll`, so it can never reach a rule written for people.
  */
 
 export type AbilityAction = 'create' | 'read' | 'update' | 'delete' | 'manage'
@@ -64,12 +69,39 @@ export interface AbilitySubject extends AppSubjectFields {
 }
 
 /**
- * A PERSON acting in one org: built from a session by `abilityActorFromUser` (../authz/authorize.ts),
- * or by hand for a person who reached the app another way — an inbound email from a member, a personal
- * API token. `kind` is optional so every existing literal stays a person; only a machine sets it.
+ * The credential kinds a PERSON can reach the app with: a browser `session`, an `inbound-email` from a
+ * member's address (keel's intake), and whatever the app registers on the seam (`AppPersonCredentialKind`,
+ * e.g. a personal API token). Composed, never edited, so an app's kinds need no framework change.
+ */
+export type PersonCredentialKind = 'session' | 'inbound-email' | AppPersonCredentialKind
+
+/**
+ * The credential kinds a MACHINE can reach the app with: keel's own per-org `service-key`, and whatever
+ * the app registers on the seam (`AppMachineCredentialKind`, e.g. a CI OIDC token).
+ */
+export type MachineCredentialKind = 'service-key' | AppMachineCredentialKind
+
+/**
+ * HOW an actor proved who it is. `id` names WHICH credential (a token's row id, a service key's id, the
+ * inbound email's id), so an audit row can say which one acted and a revocation can be traced. It is
+ * never a secret. `null` when there is nothing to name: a session.
+ */
+export interface Credential<Kind extends string = PersonCredentialKind | MachineCredentialKind> {
+    kind: Kind
+    id: string | null
+}
+
+/**
+ * A PERSON acting in one org: built from a session by `abilityActorFromUser`, or, for a person who
+ * reached the app with another credential, by `abilityActorFromCredential`, which re-reads the person's
+ * standing through the auth port on every call (both in ../authz/authorize.ts). `kind` and `credential`
+ * are optional so every literal written before credentials existed stays what it was: a person with a
+ * session.
  */
 export interface AbilityActor {
     kind?: 'person'
+    /** How this person reached the app. Absent means a session. */
+    credential?: Credential<PersonCredentialKind>
     userId: string
     /** Role in the ACTIVE org (mirrors AuthUser.role). */
     role: Role
@@ -82,17 +114,11 @@ export interface AbilityActor {
      * sets it when the actor is ACTING AS the app's designated operator org (`staffOrgSlug` on the
      * ADR-0012 seam). True short-circuits every per-subject rule below.
      * It never crosses tenants: the rules it skips are already tenant-bounded, and every product query
-     * still runs inside withTenant (ADR-0004).
+     * still runs inside withTenant (ADR-0004). It is a SESSION power: {@link defineAbilitiesFor} ignores it
+     * for a person who came through any other credential, whatever this field says.
      */
     manageAll: boolean
 }
-
-/**
- * The issuer keel's own per-org service keys vouch as (packages/keel/src/service-auth/verify.ts →
- * `abilityActorFromService`). The one machine the framework grants a base-subject power to; see
- * {@link frameworkMachineRules}.
- */
-export const SERVICE_KEY_ISSUER = 'service-key'
 
 /**
  * A MACHINE acting in one org: a caller that is not a person — keel's own service keys, or a verifier
@@ -105,11 +131,11 @@ export const SERVICE_KEY_ISSUER = 'service-key'
  */
 export interface MachineActor {
     kind: 'machine'
-    /** What vouched for it: {@link SERVICE_KEY_ISSUER}, or a verifier the app names (`github-oidc`). */
-    issuer: string
+    /** What vouched for it: keel's `service-key`, or a credential kind the app registers (a CI token). */
+    credential: Credential<MachineCredentialKind>
     /**
-     * `<issuer>:<id>` — the machine's identity everywhere one is recorded: the audit trail's
-     * `actor_user_id`, an owner column. Qualified by issuer so two verifiers' ids cannot collide.
+     * `<credential kind>:<machine id>` — the machine's identity everywhere one is recorded: the audit
+     * trail's `actor_user_id`, an owner column. Qualified by kind so two verifiers' ids cannot collide.
      */
     principalId: string
     /** The org the verified credential is bound to — the anchor for every sameOrg check. */
@@ -121,7 +147,7 @@ export type Actor = AbilityActor | MachineActor
 
 /**
  * The id to RECORD for an actor — `recordAuditEvent`'s `actorUserId`, or an owner column: a person's
- * user id, or a machine's issuer-qualified principal id. One function so every call site attributes
+ * user id, or a machine's kind-qualified principal id. One function so every call site attributes
  * a machine the same way.
  */
 export function principalIdOf(actor: Actor): string {
@@ -162,7 +188,7 @@ const denyMachine: FrameworkMachineRule = () => false
  */
 const frameworkMachineRules: Record<BaseSubjectType, FrameworkMachineRule> = {
     Job: (actor, action, subject, sameOrg) =>
-        actor.issuer === SERVICE_KEY_ISSUER && (action === 'read' || action === 'update') && sameOrg(subject),
+        actor.credential.kind === 'service-key' && (action === 'read' || action === 'update') && sameOrg(subject),
     Membership: denyMachine,
     Org: denyMachine,
     User: denyMachine,
@@ -195,6 +221,11 @@ export interface Ability {
  *
  * A MACHINE actor never reaches any of that: it is judged by {@link frameworkMachineRules} for base
  * subjects and the app's `appMachineAbilityRules` for its own, and both deny by default.
+ *
+ * NARROWING. The app's rules see `actor.credential.kind`, so "this needs a browser session" is a line in
+ * `appAbilityRules`. A per-CREDENTIAL ceiling (one token allowed less than its owner) is not built; if
+ * one is ever needed it intersects here, `can(...) && withinCeiling(actor.credential, action, subject)`,
+ * so every caller of `can` honours it.
  */
 export function defineAbilitiesFor(actor: Actor): Ability {
     // Same org iff the subject is org-scoped AND its org is the one the actor is acting in.
@@ -212,13 +243,17 @@ export function defineAbilitiesFor(actor: Actor): Ability {
         return { can: machineCan, cannot: (action, subject) => !machineCan(action, subject) }
     }
     const person: AbilityActor = actor
+    // The staff superpower belongs to a SESSION acting as the operator org. Enforced here rather than
+    // trusted to whoever built the actor: a person who came through any other credential (an email, a
+    // token) never wields it, even acting in the staff org.
+    const manageAll = person.manageAll && (person.credential?.kind ?? 'session') === 'session'
 
     function can(action: AbilityAction, subject: AbilitySubject): boolean {
         // The staff-org superpower. manageAll precedes
         // the restricted checks: a restricted staff-org member would gain full authoring. Staff-org
         // membership is assumed non-restricted (nothing enforces it); if a restricted operator ever
         // becomes a real configuration, gate authoring verbs here first.
-        if (person.manageAll) return true
+        if (manageAll) return true
 
         switch (subject.type) {
             case 'Job':

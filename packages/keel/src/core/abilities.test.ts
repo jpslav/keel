@@ -1,14 +1,25 @@
 import { describe, expect, test } from 'vitest'
-import { type AbilityActor, type MachineActor, defineAbilitiesFor, principalIdOf } from './abilities'
+import {
+    type AbilityActor,
+    type MachineActor,
+    type MachineCredentialKind,
+    defineAbilitiesFor,
+    principalIdOf,
+} from './abilities'
 import type { Role } from './roles'
 
 // Low-entropy, readable fixture ids only (gitleaks): no hex runs, no UUIDs.
 const ORG_A = 'org-a'
 const ORG_B = 'org-b'
 
-function machine(overrides: Partial<MachineActor> = {}): MachineActor {
-    const issuer = overrides.issuer ?? 'service-key'
-    return { kind: 'machine', issuer, principalId: `${issuer}:wharf`, activeOrgId: ORG_A, ...overrides }
+function machine(kind: MachineCredentialKind = 'service-key', overrides: Partial<MachineActor> = {}): MachineActor {
+    return {
+        kind: 'machine',
+        credential: { kind, id: 'key-1' },
+        principalId: `${kind}:wharf`,
+        activeOrgId: ORG_A,
+        ...overrides,
+    }
 }
 
 const ACTIONS = ['create', 'read', 'update', 'delete', 'manage'] as const
@@ -174,6 +185,41 @@ describe('defineAbilitiesFor', () => {
         expect(ability.cannot('read', { type: 'Job', orgId: ORG_A })).toBe(false)
     })
 
+    // A PERSON who came through a credential other than a session (an inbound email, a personal token):
+    // the same rules as a session, except that the staff superpower is a session's alone.
+    describe('a person with a non-session credential', () => {
+        const badge = { kind: 'fixture-badge', id: 'badge-1' } as const
+
+        test('is judged by the same person rules as a session', () => {
+            const ability = defineAbilitiesFor(actor({ role: 'member', credential: badge }))
+            expect(ability.can('create', { type: 'Job', orgId: ORG_A })).toBe(true)
+            expect(ability.can('create', { type: 'Membership', orgId: ORG_A })).toBe(false)
+            expect(ability.can('update', { type: 'User', ownerId: 'user-1' })).toBe(true)
+        })
+
+        test('never wields manageAll, whatever the actor says: it is a session power, enforced here', () => {
+            for (const credential of [badge, { kind: 'inbound-email', id: 'email-1' }] as const) {
+                const ability = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential }))
+                expect(ability.can('manage', { type: 'Membership', orgId: ORG_B }), credential.kind).toBe(false)
+                expect(ability.can('update', { type: 'User', ownerId: 'user-2' }), credential.kind).toBe(false)
+            }
+            // The control: the same actor with a session credential, or none (a literal), does wield it.
+            for (const credential of [{ kind: 'session', id: null } as const, undefined]) {
+                const ability = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential }))
+                expect(ability.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(true)
+            }
+        })
+
+        test("the app's rules see the credential kind, which is where narrowing by kind lives", () => {
+            // The fixture's Docket rule: delete takes a session; a badge may file and edit, not remove.
+            const viaBadge = defineAbilitiesFor(actor({ role: 'member', credential: badge }))
+            const viaSession = defineAbilitiesFor(actor({ role: 'member', credential: { kind: 'session', id: null } }))
+            expect(viaBadge.can('create', { type: 'Docket', orgId: ORG_A })).toBe(true)
+            expect(viaBadge.can('delete', { type: 'Docket', orgId: ORG_A })).toBe(false)
+            expect(viaSession.can('delete', { type: 'Docket', orgId: ORG_A })).toBe(true)
+        })
+    })
+
     // MACHINE actors: judged by a separate, deny-by-default table — the framework's for base subjects,
     // the seam's appMachineAbilityRules for the app's own. Under the fixture seam that grants exactly
     // one thing: a `fixture-intake` machine may create a Docket in its own org.
@@ -194,8 +240,8 @@ describe('defineAbilitiesFor', () => {
             expect(ability.can('update', { type: 'Job', orgId: null })).toBe(false)
         })
 
-        test("the job grant is keel's service-key issuer's alone: an app's machine gets no job power", () => {
-            const ability = defineAbilitiesFor(machine({ issuer: 'fixture-intake' }))
+        test("the job grant is keel's service keys' alone: an app's machine gets no job power", () => {
+            const ability = defineAbilitiesFor(machine('fixture-intake'))
             for (const action of ACTIONS) {
                 expect(ability.can(action, { type: 'Job', orgId: ORG_A }), action).toBe(false)
             }
@@ -214,11 +260,11 @@ describe('defineAbilitiesFor', () => {
                 'NotificationPref',
                 'AgreementAcceptance',
             ] as const
-            for (const issuer of ['service-key', 'fixture-intake']) {
-                const ability = defineAbilitiesFor(machine({ issuer }))
+            for (const kind of ['service-key', 'fixture-intake'] as const) {
+                const ability = defineAbilitiesFor(machine(kind))
                 for (const type of types) {
                     for (const action of ACTIONS) {
-                        expect(ability.can(action, { type, orgId: ORG_A }), `${issuer} ${action} ${type}`).toBe(false)
+                        expect(ability.can(action, { type, orgId: ORG_A }), `${kind} ${action} ${type}`).toBe(false)
                     }
                 }
             }
@@ -247,7 +293,7 @@ describe('defineAbilitiesFor', () => {
             // The fixture's PERSON rule lets any non-restricted member update or delete a docket; its
             // MACHINE rule lets only a `fixture-intake` machine create one. So each answer below shows
             // which table was asked.
-            const intake = defineAbilitiesFor(machine({ issuer: 'fixture-intake' }))
+            const intake = defineAbilitiesFor(machine('fixture-intake'))
             expect(intake.can('create', { type: 'Docket', orgId: ORG_A })).toBe(true)
             expect(intake.can('create', { type: 'Docket', orgId: ORG_B })).toBe(false)
             for (const action of ['read', 'update', 'delete', 'manage'] as const) {
@@ -266,7 +312,7 @@ describe('defineAbilitiesFor', () => {
 
     test('principalIdOf records a person by user id and a machine by its issuer-qualified id', () => {
         expect(principalIdOf(actor({ role: 'member', userId: 'user-1' }))).toBe('user-1')
-        expect(principalIdOf(machine({ issuer: 'fixture-intake', principalId: 'fixture-intake:crane' }))).toBe(
+        expect(principalIdOf(machine('fixture-intake', { principalId: 'fixture-intake:crane' }))).toBe(
             'fixture-intake:crane',
         )
     })

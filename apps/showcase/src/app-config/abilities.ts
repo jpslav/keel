@@ -29,6 +29,14 @@ export interface AppSubjectFields {
 }
 
 /**
+ * The credential kinds, beyond keel's own, by which a PERSON or a MACHINE can reach the desk (composed
+ * into keel/core/abilities' `PersonCredentialKind` / `MachineCredentialKind`). The desk adds none: its
+ * people arrive by session or by inbound email, and its counterparties by keel's service keys.
+ */
+export type AppPersonCredentialKind = never
+export type AppMachineCredentialKind = never
+
+/**
  * The designated staff/operator org slug. ACTIVE membership in this org — acting AS it —
  * grants the `manageAll` ability-layer superpower (derived in packages/keel/src/authz/authorize.ts). It is one
  * ordinary org WITHIN a tenant: staff powers stop at the tenant boundary and NEVER cross tenants

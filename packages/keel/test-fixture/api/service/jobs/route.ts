@@ -12,6 +12,7 @@ import type { ServiceIdentity } from 'keel/service-auth/verify'
  */
 const IDENTITY: ServiceIdentity = {
     kind: 'org-service',
+    keyId: 'wharf-key',
     tenantId: 'harbor',
     tenantSlug: 'harbor',
     orgId: 'wharf',

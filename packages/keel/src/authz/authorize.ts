@@ -1,15 +1,16 @@
 import { anchorSubjectExtras, staffOrgSlug } from '@app-config/abilities'
+import type { AppMachineCredentialKind } from '@app-config/abilities'
 import {
     type AbilityAction,
     type AbilityActor,
     type AbilitySubject,
     type Actor,
     type MachineActor,
-    SERVICE_KEY_ISSUER,
+    type PersonCredentialKind,
     type SubjectType,
     defineAbilitiesFor,
 } from '../core/abilities'
-import type { AuthUser } from '../ports/auth'
+import type { AuthPort, AuthUser } from '../ports/auth'
 import { ForbiddenError } from '../ports/errors'
 import type { ServiceIdentity } from '../service-auth/verify'
 
@@ -19,11 +20,12 @@ import type { ServiceIdentity } from '../service-auth/verify'
  * pre-wrapped as middleware). A build-time scanner (authorized-mutations.test.ts) proves every
  * mutating route either calls authorize(...) or is a justified exemption.
  *
- * It judges two kinds of actor (keel/core/abilities `Actor`): a PERSON, lifted from a session by
- * {@link abilityActorFromUser} (or built by hand for a person who arrived another way — a personal API
- * token), and a MACHINE, from {@link abilityActorFromService} or {@link machineActor}. Whatever the
- * credential, the route verifies it FIRST and builds the actor from what it proved; the actor's org is
- * the credential's, never a request field.
+ * It judges two kinds of actor (keel/core/abilities `Actor`), each carrying the credential it came with:
+ * - a PERSON, lifted from a session by {@link abilityActorFromUser}, or from another credential a person
+ *   holds (an inbound email, a personal API token) by {@link abilityActorFromCredential};
+ * - a MACHINE, from {@link abilityActorFromService} or {@link machineActor}.
+ * Whatever the credential, the route verifies it FIRST and builds the actor from what it proved. The
+ * actor's org is the credential's, never a request field.
  */
 
 /**
@@ -39,6 +41,8 @@ import type { ServiceIdentity } from '../service-auth/verify'
  */
 export function abilityActorFromUser(user: AuthUser, activeOrgId: string): AbilityActor {
     return {
+        kind: 'person',
+        credential: { kind: 'session', id: null },
         userId: user.id,
         role: user.role,
         restricted: user.restricted,
@@ -48,45 +52,93 @@ export function abilityActorFromUser(user: AuthUser, activeOrgId: string): Abili
 }
 
 /**
- * Issuers a {@link machineActor} may not claim: `service-key` is keel's own service keys, which only
- * {@link abilityActorFromService} builds (it is the issuer the framework's one machine grant names), and
- * `system` is what keel's background writers record as (`system:scheduler`, `system:webhooks`,
- * `system:inbound-email`), so a machine claiming it would be indistinguishable from them in the audit
- * trail.
+ * Build the PERSON actor for someone who reached the app with a credential other than a session: an
+ * inbound email from their address, a personal API token they minted. The credential's verifier has
+ * already proved WHO (`userId`) and WHERE (`org`, the org the credential is bound to); this reads the
+ * person's standing there through the auth port. It takes no role, so a role can be neither cached in
+ * the credential nor derived from it, and it reads on every call, so a person who has been removed or
+ * demoted is judged by what they are now.
+ *
+ * Returns null when the person is no longer an active member of that org: their credential is dead,
+ * and a route answers 401. The actor never wields `manageAll`, even acting in the staff org; that power
+ * belongs to a session, and keel/core/abilities enforces it whatever this field says.
  */
-const RESERVED_MACHINE_ISSUERS: readonly string[] = [SERVICE_KEY_ISSUER, 'system']
-
-/** An issuer is a short lowercase slug: it prefixes every principal id, so it may not contain `:`. */
-const ISSUER = /^[a-z][a-z0-9-]*$/
+export async function abilityActorFromCredential(
+    auth: Pick<AuthPort, 'getMember'>,
+    input: {
+        userId: string
+        org: { id: string; slug: string }
+        credential: { kind: Exclude<PersonCredentialKind, 'session'>; id: string }
+    },
+): Promise<AbilityActor | null> {
+    const standing = await auth.getMember(input.org.slug, input.userId)
+    if (!standing) return null
+    return {
+        kind: 'person',
+        credential: input.credential,
+        userId: input.userId,
+        role: standing.role,
+        restricted: standing.restricted,
+        activeOrgId: input.org.id,
+        manageAll: false,
+    }
+}
 
 /**
- * Build a MACHINE actor for a caller the APP verified — a CI identity, an integration's token. Call it
- * only with what the verifier PROVED: `id` is the machine's identity within `issuer` (a repository, a
- * client id), `activeOrgId` the org its credential is bound to. A machine gets exactly what the app's
- * `appMachineAbilityRules` grants it, and no framework power at all.
+ * Kinds a {@link machineActor} may not claim, checked at run time because the composed kind union cannot
+ * stop an app registering one. `service-key` is keel's own service keys, which only
+ * {@link abilityActorFromService} builds; it is the kind the framework's one machine grant names.
+ * `session` and `inbound-email` are PERSON credentials. `system` is what keel's background writers
+ * record as (`system:scheduler`, `system:webhooks`, `system:inbound-email`), so a machine claiming it
+ * would be indistinguishable from them in the audit trail.
+ */
+const RESERVED_MACHINE_KINDS: readonly string[] = ['service-key', 'session', 'inbound-email', 'system']
+
+/** A credential kind is a short lowercase slug: it prefixes every principal id, so it may not contain `:`. */
+const KIND = /^[a-z][a-z0-9-]*$/
+
+/**
+ * Build a MACHINE actor for a caller the APP verified, such as a CI identity or an integration's token.
+ * Call it only with what the verifier PROVED. `kind` is one of the app's machine credential kinds
+ * (`AppMachineCredentialKind` on the seam). `id` is the machine's identity within that kind (a
+ * repository, a client id). `credentialId` names the credential it presented this time (a workflow run,
+ * a key id), never a secret. `activeOrgId` is the org that credential is bound to. A machine gets
+ * exactly what the app's `appMachineAbilityRules` grants it, and no framework power at all.
  *
- * @throws Error (a programming error, so a 500 — never a 403) on a malformed or reserved issuer, or an
+ * @throws Error (a programming error, so a 500 — never a 403) on a malformed or reserved kind, or an
  *   empty id or org.
  */
-export function machineActor(input: { issuer: string; id: string; activeOrgId: string }): MachineActor {
-    const { issuer, id, activeOrgId } = input
-    if (!ISSUER.test(issuer)) throw new Error(`machineActor: issuer must be a lowercase slug, got "${issuer}"`)
-    if (RESERVED_MACHINE_ISSUERS.includes(issuer)) throw new Error(`machineActor: issuer "${issuer}" is reserved`)
+export function machineActor(input: {
+    kind: AppMachineCredentialKind
+    id: string
+    credentialId?: string
+    activeOrgId: string
+}): MachineActor {
+    const { kind, id, activeOrgId } = input
+    const name: string = kind
+    if (!KIND.test(name)) throw new Error(`machineActor: kind must be a lowercase slug, got "${name}"`)
+    if (RESERVED_MACHINE_KINDS.includes(name)) throw new Error(`machineActor: kind "${name}" is reserved`)
     if (id.length === 0) throw new Error('machineActor: id must not be empty')
     if (activeOrgId.length === 0) throw new Error('machineActor: activeOrgId must not be empty')
-    return { kind: 'machine', issuer, principalId: `${issuer}:${id}`, activeOrgId }
+    return {
+        kind: 'machine',
+        credential: { kind, id: input.credentialId ?? null },
+        principalId: `${name}:${id}`,
+        activeOrgId,
+    }
 }
 
 /**
  * Lift a VERIFIED service caller (keel's per-org RS256 keys, `verifyServiceCaller`) into a machine
- * actor. The verifying key row IS the org, so the actor acts in exactly that org; its principal id is
- * `service-key:<org slug>`, which is what an audit row records for it.
+ * actor. The verifying key row IS the org, so the actor acts in exactly that org. Its principal id is
+ * `service-key:<org slug>`, which is what an audit row records for it, and its credential names the
+ * key that verified the call.
  */
 export function abilityActorFromService(identity: ServiceIdentity): MachineActor {
     return {
         kind: 'machine',
-        issuer: SERVICE_KEY_ISSUER,
-        principalId: `${SERVICE_KEY_ISSUER}:${identity.orgSlug}`,
+        credential: { kind: 'service-key', id: identity.keyId },
+        principalId: `service-key:${identity.orgSlug}`,
         activeOrgId: identity.orgId,
     }
 }
@@ -95,8 +147,8 @@ export function abilityActorFromService(identity: ServiceIdentity): MachineActor
  * Throw ForbiddenError (→ 403 via withPortErrors) unless the actor may perform the action.
  *
  * Two forms, one choke point (the build-time scan matches both):
- * - `authorize(actor, action, subject)` — any {@link Actor}: a machine, or a person who did not arrive
- *   through a session.
+ * - `authorize(actor, action, subject)` — any {@link Actor}: a machine, or a person who arrived with
+ *   another credential (from {@link abilityActorFromCredential}).
  * - `authorize(user, activeOrgId, action, subject)` — a signed-in person; shorthand for
  *   `authorize(abilityActorFromUser(user, activeOrgId), action, subject)`, and what every session route
  *   calls.

@@ -3,7 +3,15 @@ import { describe, expect, test } from 'vitest'
 import type { AuthUser } from '../ports/auth'
 import { ForbiddenError } from '../ports/errors'
 import type { ServiceIdentity } from '../service-auth/verify'
-import { abilityActorFromService, abilityActorFromUser, authorize, canInActiveOrg, machineActor } from './authorize'
+import type { MemberStanding } from '../ports/auth'
+import {
+    abilityActorFromCredential,
+    abilityActorFromService,
+    abilityActorFromUser,
+    authorize,
+    canInActiveOrg,
+    machineActor,
+} from './authorize'
 
 // This suite covers the authz choke point over FRAMEWORK subjects (Job, Membership) and the staff
 // manage-all mechanism. The choke point's enforcement of an APP's own subjects is exercised app-side,
@@ -32,6 +40,8 @@ describe('abilityActorFromUser', () => {
         // The default fixture's active org is 'team-a', not the staff org, so manageAll stays off.
         const actor = abilityActorFromUser(user({ role: 'admin', restricted: true }), 'org-a')
         expect(actor).toEqual({
+            kind: 'person',
+            credential: { kind: 'session', id: null },
             userId: 'user-1',
             role: 'admin',
             restricted: true,
@@ -132,6 +142,7 @@ describe('canInActiveOrg', () => {
 // `fixture-intake` the one machine issuer the fixture seam grants an app power to (a Docket create).
 const wharfKey: ServiceIdentity = {
     kind: 'org-service',
+    keyId: 'key-wharf-1',
     tenantId: 'tenant-harbor',
     tenantSlug: 'harbor',
     orgId: 'org-wharf',
@@ -139,42 +150,140 @@ const wharfKey: ServiceIdentity = {
 }
 
 describe('abilityActorFromService', () => {
-    test("is a machine acting in the verified key's org, recorded as service-key:<org slug>", () => {
+    test("is a machine acting in the verified key's org, recorded as service-key:<org slug>, naming its key", () => {
         expect(abilityActorFromService(wharfKey)).toEqual({
             kind: 'machine',
-            issuer: 'service-key',
+            credential: { kind: 'service-key', id: 'key-wharf-1' },
             principalId: 'service-key:wharf',
             activeOrgId: 'org-wharf',
         })
     })
 })
 
-describe('machineActor', () => {
-    test('qualifies the id by its issuer', () => {
-        expect(machineActor({ issuer: 'fixture-intake', id: 'crane/7', activeOrgId: 'org-depot' })).toEqual({
-            kind: 'machine',
-            issuer: 'fixture-intake',
-            principalId: 'fixture-intake:crane/7',
+describe('abilityActorFromCredential (a person who arrived without a session)', () => {
+    // A stand-in for the auth port's getMember over a world the test edits between calls: it counts
+    // reads, so the suite can show the standing is read on EVERY call rather than remembered.
+    function world(initial: Record<string, MemberStanding>) {
+        const members = new Map(Object.entries(initial))
+        let reads = 0
+        return {
+            members,
+            reads: () => reads,
+            auth: {
+                getMember: async (orgSlug: string, userId: string) => {
+                    reads += 1
+                    return orgSlug === 'depot' ? (members.get(userId) ?? null) : null
+                },
+            },
+        }
+    }
+    const depot = { id: 'org-depot', slug: 'depot' }
+    const badge = { kind: 'fixture-badge', id: 'badge-7' } as const
+
+    test('is the PERSON, with the standing the auth port reports and the credential that proved them', async () => {
+        const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
+        const actor = await abilityActorFromCredential(w.auth, {
+            userId: 'fixture-lead',
+            org: depot,
+            credential: badge,
+        })
+        expect(actor).toEqual({
+            kind: 'person',
+            credential: badge,
+            userId: 'fixture-lead',
+            role: 'admin',
+            restricted: false,
             activeOrgId: 'org-depot',
+            manageAll: false,
         })
     })
 
-    test("refuses keel's own issuers, so an app machine cannot pass for a service key or a system writer", () => {
-        for (const issuer of ['service-key', 'system']) {
-            expect(() => machineActor({ issuer, id: 'x', activeOrgId: 'org-depot' }), issuer).toThrow(/reserved/)
+    test('a person removed from the org has no actor on the very next call: their credential is dead', async () => {
+        const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
+        const input = { userId: 'fixture-lead', org: depot, credential: badge }
+        const before = await abilityActorFromCredential(w.auth, input)
+        expect(() => authorize(before!, 'create', { type: 'Docket', orgId: 'org-depot' })).not.toThrow()
+
+        w.members.delete('fixture-lead')
+        expect(await abilityActorFromCredential(w.auth, input)).toBeNull()
+        expect(w.reads()).toBe(2)
+    })
+
+    test('a demotion takes effect on the next call (nothing is cached in, or derived from, the credential)', async () => {
+        const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
+        const input = { userId: 'fixture-lead', org: depot, credential: badge }
+        const asAdmin = await abilityActorFromCredential(w.auth, input)
+        expect(() => authorize(asAdmin!, 'create', { type: 'Membership', orgId: 'org-depot' })).not.toThrow()
+
+        w.members.set('fixture-lead', { role: 'member', restricted: true })
+        const demoted = await abilityActorFromCredential(w.auth, input)
+        expect(() => authorize(demoted!, 'create', { type: 'Membership', orgId: 'org-depot' })).toThrow(ForbiddenError)
+        expect(() => authorize(demoted!, 'create', { type: 'Docket', orgId: 'org-depot' })).toThrow(ForbiddenError)
+    })
+
+    test('a member of ANOTHER org is no member here', async () => {
+        const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
+        const annex = { id: 'org-annex', slug: 'annex' }
+        expect(
+            await abilityActorFromCredential(w.auth, { userId: 'fixture-lead', org: annex, credential: badge }),
+        ).toBeNull()
+    })
+
+    test('never wields the staff superpower, even acting in the staff org', async () => {
+        const w = world({})
+        const steward = { id: 'org-steward', slug: staffOrgSlug }
+        w.auth.getMember = async () => ({ role: 'admin', restricted: false })
+        const actor = await abilityActorFromCredential(w.auth, {
+            userId: 'fixture-lead',
+            org: steward,
+            credential: badge,
+        })
+        expect(actor?.manageAll).toBe(false)
+        expect(() => authorize(actor!, 'manage', { type: 'Membership', orgId: 'org-depot' })).toThrow(ForbiddenError)
+    })
+})
+
+describe('machineActor', () => {
+    test('qualifies the id by its credential kind and names the credential it presented', () => {
+        const actor = machineActor({
+            kind: 'fixture-intake',
+            id: 'crane/7',
+            credentialId: 'run-42',
+            activeOrgId: 'org-depot',
+        })
+        expect(actor).toEqual({
+            kind: 'machine',
+            credential: { kind: 'fixture-intake', id: 'run-42' },
+            principalId: 'fixture-intake:crane/7',
+            activeOrgId: 'org-depot',
+        })
+        expect(machineActor({ kind: 'fixture-intake', id: 'crane', activeOrgId: 'org-depot' }).credential.id).toBeNull()
+    })
+
+    // The kind is typed to the app's machine kinds, so the bad values below are casts: they stand for an
+    // app that REGISTERED a reserved or malformed kind, which the composed union cannot refuse.
+    test("refuses keel's own kinds, so an app machine cannot pass for a service key, a person or a system writer", () => {
+        for (const kind of ['service-key', 'session', 'inbound-email', 'system']) {
+            expect(
+                () => machineActor({ kind: kind as 'fixture-intake', id: 'x', activeOrgId: 'org-depot' }),
+                kind,
+            ).toThrow(/reserved/)
         }
     })
 
-    test('refuses an issuer that is not a lowercase slug (a `:` would make principal ids ambiguous)', () => {
-        for (const issuer of ['', 'Fixture', 'fixture:intake', 'fixture intake', '-fixture']) {
-            expect(() => machineActor({ issuer, id: 'x', activeOrgId: 'org-depot' }), issuer).toThrow(/lowercase slug/)
+    test('refuses a kind that is not a lowercase slug (a `:` would make principal ids ambiguous)', () => {
+        for (const kind of ['', 'Fixture', 'fixture:intake', 'fixture intake', '-fixture']) {
+            expect(
+                () => machineActor({ kind: kind as 'fixture-intake', id: 'x', activeOrgId: 'org-depot' }),
+                kind,
+            ).toThrow(/lowercase slug/)
         }
     })
 
     test('refuses an empty id or org (a programming error, never a 403)', () => {
-        expect(() => machineActor({ issuer: 'fixture-intake', id: '', activeOrgId: 'org-depot' })).toThrow(Error)
-        expect(() => machineActor({ issuer: 'fixture-intake', id: 'x', activeOrgId: '' })).toThrow(Error)
-        expect(() => machineActor({ issuer: 'fixture-intake', id: '', activeOrgId: 'org-depot' })).not.toThrow(
+        expect(() => machineActor({ kind: 'fixture-intake', id: '', activeOrgId: 'org-depot' })).toThrow(Error)
+        expect(() => machineActor({ kind: 'fixture-intake', id: 'x', activeOrgId: '' })).toThrow(Error)
+        expect(() => machineActor({ kind: 'fixture-intake', id: '', activeOrgId: 'org-depot' })).not.toThrow(
             ForbiddenError,
         )
     })
@@ -198,7 +307,7 @@ describe('authorize(actor, action, subject)', () => {
     })
 
     test("an app machine gets exactly what the seam's machine rules grant", () => {
-        const intake = machineActor({ issuer: 'fixture-intake', id: 'crane', activeOrgId: 'org-depot' })
+        const intake = machineActor({ kind: 'fixture-intake', id: 'crane', activeOrgId: 'org-depot' })
         expect(() => authorize(intake, 'create', { type: 'Docket', orgId: 'org-depot' })).not.toThrow()
         expect(() => authorize(intake, 'update', { type: 'Docket', orgId: 'org-depot' })).toThrow(ForbiddenError)
         expect(() => authorize(intake, 'update', { type: 'Job', orgId: 'org-depot' })).toThrow(ForbiddenError)

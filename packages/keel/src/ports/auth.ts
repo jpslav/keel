@@ -16,6 +16,16 @@ export interface AuthUser {
     restricted: boolean
 }
 
+/**
+ * A person's CURRENT standing in one org: what their session would carry if they were the caller. Read
+ * for someone who reached the app WITHOUT a session (an inbound email, a personal API token), so their
+ * role and `restricted` flag come from the same place a session's do, never from the credential.
+ */
+export interface MemberStanding {
+    role: Role
+    restricted: boolean
+}
+
 /** An org the current user belongs to; `role` is their role in THAT org (drives the OrgSwitcher). */
 export interface OrgRef {
     slug: string
@@ -59,6 +69,13 @@ export interface AuthPort {
     signOut(): Promise<void>
     updateProfile(update: ProfileUpdate): Promise<AuthUser>
     listMembers(orgSlug: string): Promise<Membership[]>
+    /**
+     * `userId`'s current standing in `orgSlug`, or null when they are not an ACTIVE member of it (never
+     * joined, removed, or only invited). Its caller is `abilityActorFromCredential`
+     * (keel/authz/authorize), which asks on EVERY non-session call, so removing a person from an org
+     * stops every credential they hold at once.
+     */
+    getMember(orgSlug: string, userId: string): Promise<MemberStanding | null>
     /** Records the invitation (per-org); sending the notification email is the caller's job (email port). */
     createInvite(invite: InviteInput): Promise<Membership>
     /** Orgs the current user belongs to (drives the OrgSwitcher). */

@@ -181,7 +181,7 @@ describe('app ability rules (via defineAbilitiesFor)', () => {
         // where any member could act.
         const counterparty = {
             kind: 'machine',
-            issuer: 'service-key',
+            credential: { kind: 'service-key', id: 'key-frontline' },
             principalId: 'service-key:frontline',
             activeOrgId: ORG_A,
         } as const

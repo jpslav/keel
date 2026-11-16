@@ -55,6 +55,10 @@ interface AuditEventsTable {
     subject_type: string
     /** The affected row's id. Null only for a hypothetical action with no single subject row. */
     subject_id: string | null
+    /** Which kind of credential the actor used (`session`, `api-token`…); NULL = not recorded (0014). */
+    credential_kind: string | null
+    /** WHICH credential (a token id, a key id), never a secret; NULL for a session or not recorded (0014). */
+    credential_id: string | null
     at: Generated<string>
 }
 

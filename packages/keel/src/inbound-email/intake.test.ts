@@ -81,6 +81,31 @@ describe('intakeInboundEmail', () => {
             trx.selectFrom('audit_events').select('action').where('subject_id', '=', outcome.id!).execute(),
         )
         expect(audit.map((a) => a.action)).toContain('inbound-email.received')
+
+        // ...and both rows name the PERSON as the actor and THIS email as the credential they acted with,
+        // so a docket filed by email never reads like one filed in the browser.
+        const credentialed = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select(['action', 'actor_user_id', 'credential_kind', 'credential_id'])
+                .where('subject_id', 'in', [outcome.id!, outcome.subjectId!])
+                .orderBy('action')
+                .execute(),
+        )
+        expect(credentialed).toEqual([
+            {
+                action: 'docket.created',
+                actor_user_id: 'fixture-lead',
+                credential_kind: 'inbound-email',
+                credential_id: outcome.id,
+            },
+            {
+                action: 'inbound-email.received',
+                actor_user_id: 'fixture-lead',
+                credential_kind: 'inbound-email',
+                credential_id: outcome.id,
+            },
+        ])
     })
 
     test('an unmatched sender is filed unmatched with no row created', async () => {

@@ -193,6 +193,17 @@ const EXEMPT_FILES: Record<string, Exemption> = {
     },
 }
 
+/**
+ * What the failure says to a route whose caller is not a session, because that is where an author is
+ * most likely to look for an exemption, and since 2026-11-16 there is none to find: `service/` routes
+ * used to be exempt, and an adopter's old one fails here on taking the update.
+ */
+const NON_SESSION_HINT =
+    'A caller that is not a session authorizes its actor with the three-argument form, ' +
+    'authorize(actor, action, subject): a service key via abilityActorFromService (withServiceCaller passes it as ' +
+    'ctx.actor), a machine the app verifies via machineActor, or a person holding a non-session credential (a ' +
+    'personal API token) via abilityActorFromCredential. The `service/` exemption was retired (ADR-0012 addendum, 2026-11-16).'
+
 function routeFiles(dir: string): string[] {
     const out: string[] = []
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -299,7 +310,8 @@ describe('every mutating API route is authorized', () => {
                 expect(
                     CALLS_AUTHORIZE.test(stripComments(file.content)),
                     `${file.rel} exports a mutating handler but neither calls authorize(...) nor is in the exemption map. ` +
-                        `Add an authorize(...) call, or (only if genuinely not a per-actor product mutation) a justified exemption.`,
+                        `Add an authorize(...) call, or (only if genuinely not a per-actor product mutation) a justified exemption. ` +
+                        NON_SESSION_HINT,
                 ).toBe(true)
             }
         })
