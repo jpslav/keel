@@ -1601,3 +1601,48 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **A tour start that rejects outright is a recorded miss,** never an unhandled rejection that leaves a resume marker for a tour that never began.
 - **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
 - **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
+
+## `authorize()` judges machine actors as well as people (2026-11-16, `feat/authorize-non-session-actors`)
+
+The design is in the ADR-0012 addendum of the same date. These are the calls it made that no plan
+anticipated.
+
+- **The requester's evidence.** The sharing site's console (`safeinsights/pages`, read-only) names three
+  kinds of caller in `apps/console/src/domain/pages/callers.ts`: a session, a CLI's API token and CI's
+  GitHub OIDC token. Its `sessionUser(ctx)` throws `AuthRequiredError` for anything but a session, so
+  token and CI callers cannot reach `authorize()` at all. Its rules (`Page`, `Publisher`) read
+  `actor.userId`, `actor.restricted`, and a console role that the route resolves and puts on the
+  subject. It needs no keel role for a machine. It does need two things keel lacked: a way into
+  `authorize()` without an `AuthUser`, and a machine whose ownership comparisons cannot collide with a
+  person's id.
+- **Machines get a separate rule function, not a role.** The alternative was to give a machine a role
+  and the `restricted` flag and pass it to `appAbilityRules`. That fails open: every app's person rules
+  grant authoring to any non-restricted member, so a machine would get a member's powers until someone
+  remembered to exclude it. `appMachineAbilityRules` with a `return false` default fails closed. It is
+  also an additive change for adopters (one new export), where the alternative would have changed the
+  signature of every adopter's rule function.
+- **Per-credential scopes were not built.** The other way to bound a machine is a grant stored with its
+  credential (OAuth-style scopes, intersected with the rules). It would split "who may do what" across the
+  rule file and a database column, and `service_keys` has no such column. The actor can take an optional
+  cap later without changing anything here. This was sent to JP as the one open fork; the rule-file
+  option is the conservative one taken meanwhile.
+- **The framework's one machine grant names an issuer.** Job `read`/`update` in the caller's own org goes
+  to keel's own service keys only (`SERVICE_KEY_ISSUER`), not to every machine. Granting it to all
+  machines would have handed an adopter's CI identity the power to move its org's jobs, which nothing asked
+  for. `machineActor` refuses that issuer, and `system`, so an app's machine cannot pass for either.
+- **An overload, not a migration.** `authorize(actor, action, subject)` was added beside the four-argument
+  session form rather than replacing it. Changing the 25 existing call sites would have been mechanical
+  here, but every adopter's routes would have changed too (the console has a dozen calls), and the
+  four-argument form is still the right shorthand for a session. The scan's `authorize(` pattern matches
+  both forms. A separately named function would have needed a second pattern.
+- **`kind` is optional on the person actor.** Requiring `kind: 'person'` would have broken every
+  `AbilityActor` literal: the inbound-email handlers, the preset checks, both static demos and every
+  adopter's tests. Optional on the person and required on the machine is enough for TypeScript to narrow
+  `actor.kind === 'machine'`.
+- **The seam's machine rules are bound at call time.** `defineAbilitiesFor` assigns
+  `appMachineAbilityRules` to its `MachineAbilityRules` type inside the function, not at module load. The
+  assignment is what lets the empty registration take no parameters, and doing it at call time means a seam
+  module that later value-imports `keel/core/abilities` cannot hit the import in its temporal dead zone.
+- **The `service/` exemption is retired rather than kept beside the new path.** Once a service route can
+  authorize, an exemption that says it need not is a second way through the gate. One showcase route
+  needed the change. The console has no `api/service/` routes, so it costs that adopter nothing.

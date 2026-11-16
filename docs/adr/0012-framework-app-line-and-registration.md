@@ -424,3 +424,78 @@ The body's "17" was already one off by the rule it seemed to use. So the count i
 corrected. CLAUDE.md now says what the fixture registers ("every `@app-config/*` module the framework
 reads"), and the seam-conformance suites, not a number, are what hold the fixture to it. The published
 and internal counts above keep their numbers, because each has a stated rule and a test.
+
+## Addendum (2026-11-16): `authorize()` judges machines as well as people
+
+**Why.** `authorize()` took only a session's `AuthUser`, so a caller that was not a browser session could
+not reach the choke point at all. An adopter (the sharing site's console) hit this with two callers it needs,
+a CLI holding a personal API token and CI holding a GitHub OIDC token, and worked around it: every non-session
+caller throws `AuthRequiredError` before its route ever authorizes. keel had one machine path of its own,
+the per-org service keys, and it sat under a `service/` prefix exemption whose reason was "org-scoped by
+construction". The exemption gave a service route no per-action check, no rule anyone could read, and a pass
+for any route at that path that contained the wrapper.
+
+**Two kinds of actor.** `keel/core/abilities` now exports `Actor = AbilityActor | MachineActor`.
+`AbilityActor` is still a person and is unchanged, apart from an optional `kind: 'person'`, so every existing
+literal stays a person. A `MachineActor` is `{ kind: 'machine', issuer, principalId, activeOrgId }`.
+`principalId` is `<issuer>:<id>`. A machine has no `role`, no `restricted` flag and no `manageAll`, because it
+is not a member of anything.
+
+**One choke point, two forms.** `authorize(actor, action, subject)` sits beside
+`authorize(user, activeOrgId, action, subject)`. The second form is shorthand for the first with
+`abilityActorFromUser`, so every existing call compiles and behaves as before. The scan matches both forms,
+which lets it enforce a machine route the same way it enforces any other route.
+
+**Machines are judged by a separate table, and it denies by default.**
+
+- **Base subjects** go to `frameworkMachineRules`, a record keyed by `BaseSubjectType`. A new base subject
+  therefore fails the typecheck until someone decides what machines may do with it. It makes one grant: a
+  caller with keel's own `service-key` issuer may read and update a Job in its own org, which is what the
+  job service API exists for. No other machine gets a framework power.
+- **App subjects** go to a new seam export, `appMachineAbilityRules`, which conforms to the exported
+  `MachineAbilityRules` type. The empty registration is a function that returns `false`; the starter and
+  the showcase ship that. The export joins the enumerated `abilities` value imports, since it is an
+  ability rule.
+
+Machines were not passed to `appAbilityRules`, for two reasons. Every app's person rules gate authoring on
+`!restricted` and on a role, so a machine given any role would inherit a member's powers by default. And it
+would have changed the signature of every adopter's rule function. A separate function makes the default
+"deny", and every machine power becomes a line someone wrote on purpose.
+
+**Building an actor.**
+
+- `abilityActorFromService(identity)` turns a verified `ServiceIdentity` into a machine acting in the org of
+  the key that verified it, recorded as `service-key:<org slug>`.
+- `machineActor({ issuer, id, activeOrgId })` is for a verifier the app owns. It refuses the reserved
+  issuers `service-key` and `system`, which keel's background writers record as. It also refuses an issuer
+  that is not a lowercase slug, and an empty id or org.
+- A person who arrives without a session, such as a personal API token, is a person actor built by hand
+  from the credential's owner, the way the inbound-email handlers build a sender. Set `manageAll` only if
+  the credential is meant to act as the operator org.
+
+**Tenant and audit.** The tenant binding is unchanged. The actor carries only its org. The tenant comes
+from the verified credential and still scopes every query through `withTenant`, and `authorize()` stays a
+pure decision. For the audit trail, `principalIdOf(actor)` gives the value for `actor_user_id`: a person's
+user id, or a machine's `<issuer>:<id>`. That column is already text and already records `system:*`
+writers, so there is no migration.
+
+**The `service/` exemption is retired.** The showcase's one mutating service route,
+`service/jobs/[id]/status/route.ts`, now calls `authorize(actor, 'update', Job)`, with the actor that
+`withServiceCaller` builds. The fixture's `service/jobs/route.ts` is now the scan's machine route: it is
+named as an invariant, and no exemption backs it. The body's "a service or webhook route must contain its
+signature wrapper" now holds only for webhook routes. The cost falls on adopters: any mutating route under
+`api/service/` must now call `authorize(...)`, and the scan names the file that does not.
+
+**ADR-0003's split still holds.** `AuthUser` and `ServiceIdentity` remain different types behind different
+seams. They meet at the ability layer, not at the auth port.
+
+**Not done:**
+
+- Per-credential scopes, which would cap what a given key or token may do, are not built. They would put
+  part of "who may do what" in a second place and need a scopes column. They can be added later as an
+  optional cap on the actor.
+- An audit row records the person behind a token, but not that a token was used.
+- The naming section says a service caller claiming a job "IS the authorization actor on the resulting
+  audit row". The first half is now true. The second is not, and was not before: a status report writes the
+  job timeline, not `audit_events`
+  (`.claude/future-tasks/machine-status-reports-unaudited.md`).
