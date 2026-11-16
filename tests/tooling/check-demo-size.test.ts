@@ -20,7 +20,9 @@ function run(bytes: number, budget?: string, env: Record<string, string> = {}) {
     const result = spawnSync(process.execPath, [SCRIPT, ...(budget === undefined ? [] : [budget])], {
         cwd: app,
         encoding: 'utf8',
-        env: { PATH: process.env.PATH ?? '', ...env },
+        // a clean environment: GITHUB_ACTIONS must be absent unless the test sets it. (The cast is for Next's
+        // augmentation, which makes NODE_ENV a required key of ProcessEnv.)
+        env: { PATH: process.env.PATH ?? '', ...env } as unknown as NodeJS.ProcessEnv,
     })
     return { status: result.status, out: result.stdout, err: result.stderr }
 }

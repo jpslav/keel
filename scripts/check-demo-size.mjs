@@ -13,6 +13,8 @@
 //   below what the starter measured before the CSS was pruned, below). Bloat in the framework of any size
 //   shows up in the showcase first, which is why this one can be roomy. It is not a pacing gate; an adopter
 //   who wants one sets the number to what their app measures plus the headroom they want.
+// After `pnpm init-app --eject-showcase` the showcase is gone and the surviving app's number is the only one that
+// matters. It is yours.
 // A number is raised or re-based in `apps/<app>/package.json` (`check:demo-size`) or, for the showcase, in
 // DEFAULT_BUDGET_BYTES below. Say what changed in the commit and in this header.
 //
