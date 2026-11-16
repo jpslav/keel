@@ -13,7 +13,8 @@ changes too — and CI installs with `--frozen-lockfile` by default, so a commit
 fails your first push with an error that never mentions `init-app`.
 
 That middle line renames the app you keep and repoints every file that named it. What it deliberately
-leaves for you — deployment params, seed data, cutover rows — it prints when it finishes.
+leaves for you — deployment params, seed data, cutover rows, your GitHub owner and repo name — it prints when
+it finishes.
 
 Adding `--eject-showcase` also deletes the demo app, and the gate stays green when you do — keel's own
 tests run against keel's own fixture seam (`packages/keel/test-fixture`), not against the demo's world.
