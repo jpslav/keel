@@ -1365,3 +1365,23 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
 - **The gate used to be invisible until red.** `check-demo-size` now prints the headroom and warns under 2%,
   as a workflow annotation on CI. The 2%-headroom trigger of the old future-task was something a person had
   to notice by measuring, and nobody had: the showcase sat at 99.4% for the length of the presets work.
+
+## A test of the adoption tool must vary the inputs that must not matter (2026-11-16, `fix/adopter-papercuts`)
+
+- **A gate that pins the output for one hard-coded input passes in exactly the tree that matches it.**
+  `adopter-identity.test.ts` adopted as `acme` and asserted `…/acme/…`, and the `adoption-probe` job adopts
+  as `acme` too, so the second run of that test inside the probe's ejected tree was green by coincidence.
+  Any other slug turned three tests red in an adopter's repo, and the same coincidence hid that the slug
+  was being written where the repository name belongs. The suite now uses a slug (`acme`) and a repo
+  (`pages`) that differ, so a link that carries the wrong one fails by name. The general rule: pick test
+  values so that confusing two inputs is visible.
+- **`describe.runIf` collects its suite and skips it; it does not run its `beforeAll`.** The adopter-side
+  runs show the template suite as skipped rather than absent. Decide the condition once at module load,
+  and make it independent of what the suite tests. The first version keyed on "do the files still name the
+  maintainer", which is exactly the thing `init-app` is supposed to change, so changing it in the template
+  switched the suite off with nothing red. Structure (the demo app exists, the root package keeps the
+  template's name) is what an adoption always changes and a maintainer's edit to contact files never does.
+- **Write a test file that ships to adopters as if it will be read in a tree you cannot see.** This repo is
+  taken by fork and updated by merge (ADR-0013), so a template-maintenance test lands in every adopter's
+  `pnpm verify` and returns with every merge. Deleting it on adoption conflicts on every later edit; a test
+  that recognises which tree it is in does not.
