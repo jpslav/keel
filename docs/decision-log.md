@@ -1661,7 +1661,7 @@ the calls the work made that no plan anticipated.
   `apps/console/src/domain/pages/callers.ts`: a session, a CLI's API token, and later CI's GitHub OIDC
   token. On its `main`, read before the requester's shape arrived, `sessionUser(ctx)` throws
   `AuthRequiredError` for anything but a session. The worker on its token branch then reported the
-  design of record. The token is PERSONAL: it acts as the publisher who approved it, its console role is
+  design of record, relayed by the keel manager; that branch was not read here. The token is PERSONAL: it acts as the publisher who approved it, its console role is
   resolved afresh on every call, removing the publisher stops it at once, and it never wields
   `manageAll`. Its stand-in actor is an `AuthUser` with placeholder role and locale. Its audit rows read
   exactly like browser ones. CI is a principal of its own.
@@ -1676,7 +1676,7 @@ the calls the work made that no plan anticipated.
   `abilityActorFromCredential` takes no role at all, so "never cache a role in the token" is a property
   of the function's signature rather than a convention. `listMembers` could not supply it, because
   `restricted` is not on `Membership`, so the port gained `getMember` (ADR-0003 addendum). Inbound email
-  had guessed `restricted` from the role; it now reads the same flag a session does.
+  had guessed `restricted` from the role; it now uses the same rule a session does (`isRestricted`).
 - **`manageAll` is a STATED session's alone, enforced in `defineAbilitiesFor`.** It is not left to
   whoever builds the actor. A token's owner acting in the operator org is an ordinary member there. The
   first version read a missing credential as a session, so a hand-built actor that left the field out
@@ -1691,8 +1691,7 @@ the calls the work made that no plan anticipated.
   per-credential cap would intersect `can()` is marked in `defineAbilitiesFor`, and nothing is built
   there.
 - **Machines get a separate rule function, not a role.** Giving a machine a role and passing it to
-  `appAbilityRules` fails open: every app's person rules allow authoring to any member who is not
-  restricted. `appMachineAbilityRules` with a `return false` default fails closed. It is also one new
+  `appAbilityRules` fails open: both apps' person rules let any member who is not restricted author the app's own subjects (the showcase's tickets and attachments, the starter's items). `appMachineAbilityRules` with a `return false` default fails closed. It is also one new
   export for an adopter, not a changed signature.
 - **The framework's one machine grant names a credential kind.** Job `read`/`update` in the caller's
   own org goes to `service-key` only. `machineActor` refuses that kind, keel's person kinds and
@@ -1710,8 +1709,8 @@ the calls the work made that no plan anticipated.
 - **`kind` and `credential` are optional on the person actor.** Requiring them would have broken every
   `AbilityActor` literal: the preset checks, both static demos and every adopter's tests. A literal with
   no credential keeps the person rules but neither wields `manageAll` nor records a credential. The
-  three literals in this repo that set `manageAll` (both static shells and the ticket-assign preset
-  check) stand for sessions, and now say so.
+  three literals in this repo that stand for a session (both static shells and the ticket-assign
+  preset check) now say so.
 - **The seam's machine rules are bound at call time.** `defineAbilitiesFor` assigns
   `appMachineAbilityRules` to `MachineAbilityRules` inside the function, not at module load. That lets
   the empty registration take no parameters, and a seam module that later value-imports
@@ -1739,7 +1738,7 @@ the calls the work made that no plan anticipated.
     - `abilityActorFromCredential` takes `org: { id, slug }` rather than resolving one from the other.
       The auth port names orgs by slug, as Clerk does, and resolving inside would couple `authz` to the
       database. The docstring now requires both from one organizations row.
-    - `machineActor` is kept although only the fixture calls it. Its consumer is the first adopter's
+    - `machineActor` is kept although only keel's own tests call it. Its consumer is the first adopter's
       planned CI identity, and its run-time checks are what a hand-written `MachineActor` would lack.
 - **What three review rounds changed** (a pre-PR review and two code rounds, all on Opus):
     - `service/` routes still need their verifying wrapper (`REQUIRED_ALONGSIDE`). Without it,
@@ -1757,3 +1756,7 @@ the calls the work made that no plan anticipated.
     - Requiring `authorize(ctx.actor…)` by name under `service/`: brittle, and bypassable by renaming.
     - An advisory lock around the migration preflight: two releases migrating one database at the same
       moment is outside keel's deploy model.
+- **JP decided the fork (2026-11-16, via the keel manager).** A machine's powers come from the app's
+  abilities seam, through a deny-by-default `appMachineAbilityRules`, and per-token scopes are not built.
+  The place for a later per-credential cap stays marked in `defineAbilitiesFor`, and retiring the
+  `service/` exemption stands.

@@ -72,8 +72,8 @@ export interface AuthPort {
     /**
      * `userId`'s current standing in `orgSlug`, or null when they are not an ACTIVE member of it (never
      * joined, removed, or only invited). Its caller is `abilityActorFromCredential`
-     * (keel/authz/authorize), which asks on EVERY non-session call, so removing a person from an org
-     * stops every credential they hold at once.
+     * (keel/authz/authorize), which asks on every call from a person who arrived without a session, so
+     * removing a person from an org stops every credential they hold at once.
      */
     getMember(orgSlug: string, userId: string): Promise<MemberStanding | null>
     /** Records the invitation (per-org); sending the notification email is the caller's job (email port). */

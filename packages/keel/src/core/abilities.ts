@@ -259,8 +259,9 @@ export function defineAbilitiesFor(actor: Actor): Ability {
 
     if (actor.kind === 'machine') {
         const machine = actor
-        // Typed against the contract here, at CALL time rather than module load: a seam module that ever
-        // value-imports this file would otherwise meet the binding before it is initialized.
+        // Typed against the contract here, at CALL time rather than module load. A seam module that
+        // value-imports this file AND exports this rule as a `const` would otherwise meet the binding before
+        // it is initialized (an `export function` is hoisted and would not).
         const appMachineRules: MachineAbilityRules = appMachineAbilityRules
         const machineCan = (action: AbilityAction, subject: AbilitySubject): boolean =>
             Object.hasOwn(frameworkMachineRules, subject.type)

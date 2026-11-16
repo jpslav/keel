@@ -22,6 +22,7 @@ import { go } from 'keel/demo-static/hash-route'
 import { DemoShell } from 'keel/demo-static/shell'
 import { useDemoWorld } from 'keel/demo-static/world'
 import { defineAbilitiesFor } from 'keel/core/abilities'
+import { isRestricted } from 'keel/core/roles'
 import { keysetPageInMemory, parseKeysetCursor } from 'keel/core/keyset'
 import type { Locale } from 'keel/core/locale'
 import { AttachmentsCard, type AttachmentItem } from '../components/attachments-card'
@@ -201,7 +202,8 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
             const ability = defineAbilitiesFor({
                 userId: sender.id,
                 role: membership.role,
-                restricted: sender.restricted,
+                // The server's sender reads its standing through the auth port, which applies this rule.
+                restricted: isRestricted(sender.restricted, membership.role),
                 activeOrgId: org.slug,
                 manageAll: false,
             })

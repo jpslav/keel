@@ -14,7 +14,8 @@ issuance, storage, verification and revocation in its own app. It looks like a c
 products of this kind need: a CLI, a script or an agent acting as a signed-in person. That is the
 universality test in `docs/development-approach.md`, and it plausibly passes.
 
-**The shape the console arrived at** (evidence, not a spec):
+**The shape the console arrived at** (evidence, not a spec; reported by its token-branch worker through
+the keel manager, and not on its `main`):
 
 - **Token format.** `<app>_<tenant slug>_<43 base64url chars>`. The tenant slug is not secret; it lets
   the row be found under RLS before the caller is known (`tenantIdForSlug`, then `withTenant`).

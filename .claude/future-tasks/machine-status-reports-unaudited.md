@@ -19,4 +19,5 @@ key) for the 0014 columns.
 
 **Decide first:** whether the timeline, which already records every hop with its message, is the record
 for job status. If it is, the fix is to amend the ADR sentence, not to add a write. The webhook completion
-path (`webhooks/jobs`, the `system:webhooks` writer) would need the same answer.
+path (`webhooks/jobs` → `recordWebhookCompletion`, which records no actor at all) would need the same
+answer.

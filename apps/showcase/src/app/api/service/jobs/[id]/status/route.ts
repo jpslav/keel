@@ -11,8 +11,8 @@ const isOptionalString = (value: unknown): value is string | undefined =>
  * Service caller reports a status change for one of ITS OWN jobs. `queued` is rejected (a caller
  * never re-queues) as is any non-status string. The job must belong to the caller's org — a foreign
  * org's job is indistinguishable from a missing one (404), so ids can't be probed. The caller is then
- * authorized as the MACHINE it is (`update Job`, which the framework grants a service-key caller in its
- * own org and nobody else). The transition is validated by recordJobStatus's state machine; an illegal
+ * authorized as the MACHINE it is (`update Job`, which, among machines, the framework grants only a
+ * service-key caller in its own org). The transition is validated by recordJobStatus's state machine; an illegal
  * hop surfaces as 409 via withServiceCaller.
  */
 export const POST = withServiceCaller<{ id: string }>(async ({ identity, actor, request, params }) => {

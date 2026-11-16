@@ -110,7 +110,7 @@ describe('POST /api/service/jobs/[id]/status', () => {
         expect(await response.json()).toEqual({ error: 'invalid-transition', from: 'completed', to: 'failed' })
     })
 
-    test('authorizes the caller as a MACHINE (update Job in its own org) before it writes', async () => {
+    test('authorizes the caller as a MACHINE (update Job in its own org); the 403 case pins that it precedes the write', async () => {
         h.jobForOrg.mockResolvedValue({ id: 'job-1', status: 'running' })
         h.record.mockResolvedValue(undefined)
 

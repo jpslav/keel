@@ -66,7 +66,8 @@ export function abilityActorFromUser(user: AuthUser, activeOrgId: string): Abili
  * other (`orgIdForSlug`) rather than taking either from the request.
  *
  * Returns null when the person is no longer an active member of that org: their credential is dead. A
- * route answers 401; the inbound-email handlers file the message 'unmatched'. The actor never wields `manageAll`, even acting in the staff org; that power
+ * route that uses this should answer 401 (throw `AuthRequiredError`); the inbound-email handlers, its
+ * only callers in this repo, file the message 'unmatched'. The actor never wields `manageAll`, even acting in the staff org; that power
  * belongs to a session, and keel/core/abilities enforces it whatever this field says.
  *
  * @throws Error (a programming error, never a 403) when handed a `session` credential: a session's
@@ -119,10 +120,11 @@ const KIND = /^[a-z][a-z0-9-]*$/
  * a key id), never a secret. `activeOrgId` is the org that credential is bound to. A machine gets
  * exactly what the app's `appMachineAbilityRules` grants it, and no framework power at all.
  *
- * Neither keel app registers a machine kind of its own, so only keel's fixture calls this today. Its
- * intended first consumer is an adopter's CI identity (a GitHub OIDC token from a listed repository),
- * which the first adopter has as a planned seam; the runtime checks below are what a hand-written
- * `MachineActor` literal would not give it.
+ * Neither keel app registers a machine kind of its own, so only keel's own tests call this today
+ * (`authorize.test.ts`, with the fixture seam's `fixture-intake` kind). Its intended first consumer is
+ * an adopter's CI identity (a GitHub OIDC token from a listed repository; docs/decision-log.md,
+ * 2026-11-16). The run-time checks below are what a hand-written `MachineActor` literal would not
+ * give it.
  *
  * @throws Error (a programming error, so a 500 — never a 403) on a malformed or reserved kind, or an
  *   empty id or org.

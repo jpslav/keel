@@ -437,8 +437,10 @@ root, `packages/keel/test-fixture/api`, is unchanged, and so is the rest of the 
 
 **Why.** `authorize()` took only a session's `AuthUser`, so a caller that was not a browser session
 could not reach the choke point. An adopter (the sharing site's console) hit this with two callers. A
-CLI holds a **personal API token**: it acts as the person who minted it, with that person's current
-role, and removing the person stops their tokens at once. CI will hold a GitHub OIDC token: it is a
+CLI holds a **personal API token**: it acts as the person who approved it, with that person's current
+role, and removing the person stops their tokens at once. That is the console's design of record as its
+token-branch worker reported it through the keel manager; its `main` has the token verifier only as a
+seam. CI will hold a GitHub OIDC token: it is a
 principal of its own, not a person. The console worked around this by building a stand-in `AuthUser`
 for the token's owner, with placeholder role and locale. keel had one non-person path of its own,
 the per-org service keys. They sat under a `service/` prefix exemption whose reason was "org-scoped by
@@ -483,8 +485,8 @@ port method, `getMember(orgSlug, userId)` (see ADR-0003's addendum of this date)
 
 keel exercises this kind itself through inbound email. The sender is matched by address, as before,
 and then becomes a person actor whose credential is the email. Their standing now comes from the same
-place their session's does. Before, `restricted` was derived from the role, which the real adapter does
-not do for a session.
+place their session's does. Before, inbound email derived `restricted` from the role alone, while a
+real-mode session read only the flag; both now use `isRestricted(flag, role)` (ADR-0003 addendum).
 
 **Narrowing is by credential kind, in the app's rules.** The console needs "publisher administration
 takes a browser session". The app's rules see `actor.credential.kind`, so that is one line in
@@ -508,8 +510,9 @@ non-session constructors.
   `MachineAbilityRules`. The empty registration returns `false`. The export joins the enumerated
   `abilities` value imports, since it is an ability rule.
 
-Machines were not passed to `appAbilityRules`: every app's person rules allow authoring to any member
-who is not `restricted`, so any role given to a machine would hand it a member's powers.
+Machines were not passed to `appAbilityRules`. Both apps' person rules let any member who is not
+`restricted` author the app's own subjects (the showcase's tickets and attachments, the starter's items), so any role given
+to a machine would hand it that authoring by default.
 
 **Building a machine.**
 
@@ -531,8 +534,7 @@ of writers that don't pass a credential. A NOT NULL default would have claimed a
 for. `app_user` keeps SELECT and INSERT only, because table-level grants cover added columns, and the
 RLS proofs insert and read the new columns as `app_user` on both engines.
 `auditActorOf(actor)` gives `{ actorUserId, credential }`. A person is recorded by user id, with
-their credential. A machine is recorded by its principal id. Keel's inbound intake and both apps' email
-handlers write it. The session routes still write `actorUserId` alone, so their rows record NULL.
+their credential. A machine is recorded by its principal id. Keel's inbound intake, the showcase's email handlers and the fixture's handler write it. The session routes still write `actorUserId` alone, so their rows record NULL.
 
 **The migrator now runs unordered.** 0014 is the first framework migration added after both apps had
 run their own (≥1001). It surfaced a defect in how the two numbered sequences compose: Kysely's default
@@ -551,8 +553,9 @@ numbered into the framework range. Both are now a seam-conformance test,
 `packages/keel/src/db/migrate.test.ts`, run against the fixture and every app:
 
 - it holds every app migration to ≥1001, with no name shared with a framework one;
-- it migrates an "old" database forward and compares its columns, policies, `app_user` grants and
-  indexes with a fresh one.
+- it migrates an "old" database forward and compares it with a fresh one: RLS enabled and forced per
+  table, policies (with roles), `app_user`'s table and column grants, columns, constraints, indexes,
+  triggers and functions.
 
 Under strict ordering the upgrade fails with the production error. A catalog-sweeping `GRANT` fails the
 comparison, and so does a migration that un-forces RLS.
@@ -570,8 +573,8 @@ on a stale read. That is accepted: keel migrates once per deploy.
 **The `service/` exemption is retired.** The showcase's one mutating service route,
 `service/jobs/[id]/status/route.ts`, calls `authorize(actor, 'update', Job)` with the actor that
 `withServiceCaller` now passes. The fixture's `service/jobs/route.ts` is the scan's machine route, named
-as an invariant and no longer backed by an exemption. The body's "a service or webhook route must
-contain its signature wrapper" now holds only for webhook routes. The cost falls on adopters: a mutating
+as an invariant and no longer backed by an exemption. The body's "a service or webhook route must contain its signature wrapper" still holds for both: for
+webhooks as the exemption's gate, for service routes as a gate required alongside `authorize(` (below). The cost falls on adopters: a mutating
 route under `api/service/` must now call `authorize(...)`, and the scan's message says how.
 
 What the old exemption also guaranteed is kept: under `service/` the scan requires `withServiceCaller`
@@ -594,3 +597,8 @@ stay in the app for now. They plausibly pass the universality test
 - The naming section says a service caller claiming a job "IS the authorization actor on the resulting
   audit row". The first half is now true. The second is not, and was not before: a status report writes
   the job timeline, not `audit_events` (`.claude/future-tasks/machine-status-reports-unaudited.md`).
+
+**JP's decision (2026-11-16).** The fork this work raised was put to JP: should a machine's powers come
+from the app's abilities seam, or from per-credential grants stored with each key or token? He chose the
+abilities seam: a deny-by-default `appMachineAbilityRules`, with no per-token scopes built and the place
+for a later cap left marked. Retiring the `service/` exemption stands.

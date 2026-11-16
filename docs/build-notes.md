@@ -1342,8 +1342,8 @@ Twenty-three test files made a scratch directory with a raw `mkdtempSync` and ne
   beside the new path keeps a second way through the gate.
 - **Don't hand a new kind of caller to rules written for an old kind.** The cheap version of this change
   gave a machine a role and passed it to `appAbilityRules`. It would have compiled and passed every
-  existing test. It would also have handed every machine a member's authoring powers, because every
-  person rule in both apps and in the console allows authoring to any non-restricted member. A separate
+  existing test. It would also have handed every machine a member's authoring powers, because both
+  apps' person rules let any non-restricted member author the app's own subjects (the showcase's tickets and attachments, the starter's items). A separate
   rule function with a `false` default is the version that fails closed.
 - **Make "decide this for every member" a type error.** `frameworkMachineRules` is a
   `Record<BaseSubjectType, …>`, so adding a framework subject without a machine decision fails
