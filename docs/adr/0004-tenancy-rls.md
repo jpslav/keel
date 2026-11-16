@@ -106,3 +106,43 @@ table deliberately, so keel's standalone proof is not vacuous either:
   app table.
 - The proofs run twice on every change (pglite and, in CI, real Postgres), which is the price of trusting
   an in-process database to stand in for the real one.
+
+## Addendum — 2026-11-16: the two-seeded-tenants rule is keel's own, not every adopter's
+
+The Decision says "Every app seeds at least two tenants, so cross-tenant isolation is exercised by simply
+using the app rather than only by tests." That is a rule about the apps this repo ships, and it reads as
+binding on every app built on it. An app deployed **one tenant per deployment** (each instance serves one
+customer) has no second tenant to seed and no reason to invent one.
+
+**What changes.** keel's own apps (`apps/showcase`, `apps/starter`) and any adopter that runs more than one
+tenant in a deployment keep seeding at least two. An app deployed one tenant per deployment **may seed one**,
+provided its half of the proof suite, registered at `@app-config/db/rls-proofs`, still exercises two tenants:
+every tenant-scoped table of its own proven against the other tenant's rows, as the framework's half and the
+starter's do (unfiltered reads both ways, `WITH CHECK` on a cross-tenant write). The rest of the Decision is
+untouched, including `tenant_id` on every tenant-scoped table and the policies on all of them.
+
+**Why that is safe.** Nothing in the framework reads the seed's tenant count. Checked on 2026-11-16: the
+Simulator's People tab shows its tenant chip only when the rows differ in tenant
+(`keel/components/simulator/people-dimensions.ts`, written for apps that "only ever run one tenant");
+the theme and the static demo's world fall back to the first seeded tenant, which needs one and not two
+(`keel/theme.ts`, `keel/demo-static/world.ts`); the preset conformance check names no tenant. And the proof
+suite never used the seed: `runRlsProofs` (`keel/db/rls-proof-runner.ts`) creates its own two tenants and an
+organization in each on every run, on pglite and on real Postgres alike, and hands both to the app's half. A
+one-tenant seed therefore cannot starve a proof of its second tenant. The starter's seed cut to one tenant
+type-checks and passes its i18n, preset and pglite RLS suites.
+
+**What is lost.** The Decision's second clause. With one seeded tenant, nothing in the running app lets
+anyone SEE isolation; the proof suite is the only evidence it holds for the adopter's own tables. That is
+why the proviso names the proof half and not the seed: it must not be left empty, or one-sided, once the app
+has tables of its own. An app's own e2e that signs in as a second tenant's person (the starter's
+`items.spec.ts` and the showcase's `tenancy.spec.ts` do) is that app's content, and goes in the same
+commit that shrinks its seed.
+
+**Not enforced by a gate.** What is enforced is structural and independent of the seed:
+`proveRlsCoverage` fails any relation `app_user` can reach that lacks `ENABLE` + `FORCE` row-level
+security and a policy keyed on `app.current_tenant`. Whether an app's half then exercises two tenants is a
+question about what its assertions say, and no cheap check answers it: counting that the half touched both
+tenant ids, or names each table, is satisfied by a comment or an `expect(1)`, and would reject the empty
+half that an app with no tables of its own is allowed. It stays a convention, carried by the `/new-entity` and
+`/new-slice` scaffolds (which now say to write each table's section of the proof half, using both proof
+tenants) and by review.

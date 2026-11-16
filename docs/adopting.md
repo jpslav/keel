@@ -222,8 +222,17 @@ What does read them by literal id is yours to change in the same commit:
 
 What the seed must keep is its SHAPE, not its content: the exports the framework reads through
 `@app-config/seed` (`tenants`, `organizations`, `people`, `agreements`, `jobSchedules`, `findTenant`,
-`findOrg` — `keel/seed/contracts` types the data), at least one person to sign in as, and two tenants for as long as you want tenant isolation to be
-something a test can observe. WHERE it lives is yours.
+`findOrg` — `keel/seed/contracts` types the data), at least one tenant and one person to sign in as,
+and — if your deployment serves more than one tenant — two tenants, so that tenant isolation is something
+you can see by using the app and not only in tests. WHERE it lives is yours.
+
+**An app deployed one tenant per deployment may seed one tenant**
+([ADR-0004](adr/0004-tenancy-rls.md), addendum of 2026-11-16), as long as the isolation proofs for your own
+tables still use two. They always can: `apps/<app>/src/app-config/db/rls-proofs.ts` is handed two tenants and an
+organization in each by the framework's proof runner, which creates them on every run and never reads your
+seed. Drop the second tenant's sign-in and its cross-tenant assertions from the specs above in the same commit,
+and keep the cross-tenant proofs. Nothing gates that last part — the RLS coverage check proves every table
+is protected, not that your proofs exercise two tenants — so it is yours to keep honest.
 
 **The Items slice is a worked example, so take what it teaches before you delete it.**
 `apps/<app>/src/app-config/db/migrations/1001_items.ts` is a worked RLS migration — after an eject, the only one left — and its
