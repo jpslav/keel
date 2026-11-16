@@ -27,7 +27,42 @@ const vendorSdkPattern = {
         'pg/*',
     ],
     message:
-        'Vendor SDKs may only be imported inside packages/keel/src/adapters/ — code against the port in keel/ports/ instead (see CONTRIBUTING.md).',
+        "Vendor SDKs may only be imported inside an adapters directory: packages/keel/src/adapters/ for keel's " +
+        'ports, apps/<app>/src/adapters/real/ for a port the app owns (docs/recipes/app-owned-adapter.md). ' +
+        'Code against the port instead (see CONTRIBUTING.md).',
+}
+
+// WHERE a vendor SDK may be imported: keel's adapters, and an app's REAL adapters (ADR-0012, addendum
+// 2026-11-16). Named once because two mechanisms enforce the one rule: `no-restricted-imports` sees
+// static imports and re-exports, `keel/no-dynamic-vendor-import` sees `import()` — and a zone the two
+// spelled differently would be a hole in exactly one of them.
+//
+// The app's zone is `adapters/real/`, NOT all of `adapters/`, on purpose. An app's fake and its
+// registry are what keep `pnpm dev` hermetic, so they get the same bans as the rest of the app: no
+// vendor SDK, no process.env. That leaves the registry no way to learn the run mode except importing
+// keel's `isSimulated` (and with it keel's fail-closed production guard), and the fake no way to be
+// configured to reach anything. keel's own tree has never needed that split — none of its fakes
+// imports a vendor SDK — but it is curated by keel's maintainers; an adopter writes this directory
+// without having read the history.
+const KEEL_ADAPTERS_GLOB = 'packages/keel/src/adapters/**'
+const APP_ADAPTERS_GLOB = 'apps/*/src/adapters/**'
+const APP_REAL_ADAPTERS_GLOB = 'apps/*/src/adapters/real/**'
+
+// An app's real adapter is reached through the app's adapter registry (apps/<app>/src/adapters/index.ts),
+// the module that picks the fake in simulated mode — the role keel's exports map plays for keel's own
+// real adapters, which are internals. Matches `@/…/adapters/real` and every relative spelling of it,
+// and nothing that starts with `keel/`, so keel's three published real-mode components stay importable.
+//
+// STATIC imports only, and deliberately so: `no-restricted-imports` does not see `import()`, and a
+// dynamic import inside an `!isSimulated` branch is exactly how a real-mode-only component is reached —
+// keel's own sign-in form is loaded that way by the app's sign-in page.
+const appRealAdapterPattern = {
+    regex: '^(?:@|\\.{1,2})/(?:.*/)?adapters/real(?:/|$)',
+    message:
+        "Reach the app's real adapters through its registry (apps/<app>/src/adapters/index.ts), which serves " +
+        'the fake in simulated mode — a static import loads the vendor in every run mode and skips the fake. ' +
+        'A real-mode-only component is the exception, reached by import() inside an !isSimulated branch the ' +
+        "way keel's sign-in form is (docs/recipes/app-owned-adapter.md).",
 }
 
 // The framework/app FENCE (ADR-0012). The framework IS a package (packages/keel), so
@@ -76,9 +111,33 @@ const getDbDestructureSelector = {
 const processEnvSelector = {
     selector: 'MemberExpression[object.name="process"][property.name="env"]',
     message:
-        'process.env is read ONLY inside packages/keel/src/adapters (CLAUDE.md) — deployment/service params ' +
-        'come from the app config/params.ts, run mode from keel/adapters (isSimulated/isDemoMode). Secret ' +
-        'readers are exempted per-file in eslint.config.mjs.',
+        "process.env is read ONLY inside an adapters directory — packages/keel/src/adapters, or an app's own " +
+        'apps/<app>/src/adapters/real (CLAUDE.md) — deployment/service params come from the app ' +
+        'config/params.ts, run mode from keel/adapters (isSimulated/isDemoMode). Secret readers are exempted ' +
+        'per-file in eslint.config.mjs.',
+}
+// An app's real adapter may read its OWN configuration from process.env, but never the run mode. That is
+// keel's: `appMode`/`isSimulated`/`isDemoMode` from keel/adapters/index, whose import also runs the
+// fail-closed production guard. A second reader of APP_MODE can disagree with it (keel treats a legacy
+// `APP_MODE=fake` as simulated) and never runs the guard. Three spellings are matched — `process.env.X`,
+// `process.env['X']` and destructuring — and, as with the getDb selectors above, no lint rule chases an
+// alias (`const env = process.env; env.APP_MODE`).
+const RUN_MODE_ENV = '/^(APP_MODE|DEMO_MODE|E2E_BUILD)$/'
+const runModeEnvMessage =
+    "Run mode is keel's — import isSimulated/isDemoMode/appMode from keel/adapters/index. An app adapter " +
+    "that reads APP_MODE, DEMO_MODE or E2E_BUILD itself can disagree with keel's registry and skips its " +
+    'fail-closed production guard (docs/recipes/app-owned-adapter.md).'
+const runModeEnvSelector = {
+    selector:
+        'MemberExpression[object.object.name="process"][object.property.name="env"]' +
+        `:matches([property.name=${RUN_MODE_ENV}], [property.value=${RUN_MODE_ENV}])`,
+    message: runModeEnvMessage,
+}
+const runModeEnvDestructureSelector = {
+    selector:
+        'VariableDeclarator[init.object.name="process"][init.property.name="env"] > ObjectPattern > ' +
+        `Property:matches([key.name=${RUN_MODE_ENV}], [key.value=${RUN_MODE_ENV}])`,
+    message: runModeEnvMessage,
 }
 // Hermetic dev (CLAUDE.md): next/font/google fetches from Google Fonts at build — banned so pnpm dev
 // never phones home. Self-host via next/font/local instead. Re-listed in every framework no-restricted-
@@ -226,6 +285,57 @@ const keelNoDirectMkdtempRule = {
     },
 }
 
+// ---------------------------------------------------------------------------------------------
+// NO DYNAMIC VENDOR IMPORT outside an adapters directory. `no-restricted-imports` checks import and
+// export DECLARATIONS only — it never sees `import()` — so until this rule existed,
+// `await import('@aws-sdk/client-s3')` passed `pnpm lint` in an app's domain module, a route, or
+// keel's own server-lib, while CLAUDE.md called the vendor boundary lint-enforced. It went unnoticed
+// because nothing in the tree did it; it mattered once app-owned adapters made `await import('./real/…')`
+// the house idiom one directory away. Static imports stay with `no-restricted-imports`
+// (vendorSdkPattern); this rule covers `import()` and `require()` with the SAME list, read from
+// vendorSdkPattern.group, so there is no second list to drift.
+//
+// The specifier must be a literal (or a template with no expressions). A computed one —
+// `import(name)` — is out of reach, as it is for every import rule.
+const isVendorSpecifier = (specifier) =>
+    vendorSdkPattern.group.some((pattern) =>
+        pattern.endsWith('/*')
+            ? specifier.startsWith(pattern.slice(0, -1)) && specifier.length > pattern.length - 1
+            : specifier === pattern || specifier.startsWith(`${pattern}/`),
+    )
+
+/** @type {import('eslint').Rule.RuleModule} */
+const keelNoDynamicVendorImportRule = {
+    meta: {
+        type: 'problem',
+        docs: { description: 'Vendor SDKs are not imported dynamically outside an adapters directory.' },
+        schema: [],
+        messages: {
+            dynamic:
+                '`{{specifier}}` is a vendor SDK, and loading it with import() or require() is still importing ' +
+                "it. Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or " +
+                'apps/<app>/src/adapters/real/ (a port the app owns) — code against the port instead ' +
+                '(docs/recipes/app-owned-adapter.md).',
+        },
+    },
+    create(context) {
+        const check = (node) => {
+            const specifier =
+                node?.type === 'Literal'
+                    ? node.value
+                    : node?.type === 'TemplateLiteral' && node.expressions.length === 0
+                      ? node.quasis[0].value.cooked
+                      : undefined
+            if (typeof specifier !== 'string' || !isVendorSpecifier(specifier)) return
+            context.report({ node, messageId: 'dynamic', data: { specifier } })
+        }
+        return {
+            ImportExpression: (node) => check(node.source),
+            'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
+        }
+    },
+}
+
 // ONE plugin object, shared by every block that registers `keel/*` rules. Flat config checks plugin
 // identity across overlapping blocks, so two inline `{ keel: { rules: … } }` literals matching the
 // same file would be a "Cannot redefine plugin" error the moment a file matched both.
@@ -233,6 +343,7 @@ const keelPlugin = {
     rules: {
         'public-surface': keelPublicSurfaceRule,
         'no-direct-mkdtemp': keelNoDirectMkdtempRule,
+        'no-dynamic-vendor-import': keelNoDynamicVendorImportRule,
     },
 }
 
@@ -317,7 +428,8 @@ const eslintConfig = [
             'no-restricted-syntax': ['error', getDbSelector, getDbComputedSelector, getDbDestructureSelector],
         },
     },
-    // params centralization (CLAUDE.md): process.env is read ONLY inside keel's adapters — every other module
+    // params centralization (CLAUDE.md): process.env is read ONLY inside keel's adapters and an app's own real
+    // adapters — every other module
     // imports the resolved value (the app's config/params.ts for deployment params; isSimulated/isDemoMode
     // from keel/adapters for run mode). Exempt: adapters, instrumentation (NEXT_PUBLIC needs literal inlining),
     // the two secret readers, and test files (which set APP_DATA_DIR for isolation). App/component
@@ -357,7 +469,8 @@ const eslintConfig = [
             'apps/*/src/app/**',
             'apps/*/src/components/**',
             'packages/keel/src/components/**',
-            'packages/keel/src/adapters/**',
+            KEEL_ADAPTERS_GLOB,
+            APP_REAL_ADAPTERS_GLOB,
             'apps/*/src/instrumentation*.ts',
             'packages/keel/src/service-auth/webhook.ts',
             'packages/keel/src/service-auth/mailgun.ts',
@@ -365,6 +478,18 @@ const eslintConfig = [
         ],
         rules: {
             'no-restricted-syntax': ['error', processEnvSelector],
+        },
+    },
+    // An app's REAL adapters read their own configuration from process.env, like keel's — but not the run
+    // mode (runModeEnvSelector above). Only real/: the app's registry and fakes keep the full ban from the
+    // block above (see APP_REAL_ADAPTERS_GLOB). That block ignores real/, so this is the only
+    // no-restricted-syntax block matching these files and there is nothing to re-list; the ignore is what
+    // keeps that true if the blocks are reordered (as in the ports boundary below). Tests exempt, as above.
+    {
+        files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
+        ignores: ['**/*.test.{ts,tsx}'],
+        rules: {
+            'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector],
         },
     },
     // Same tenancy ban as UI_GLOBS, wider net — and it MUST come after the process.env block above,
@@ -414,8 +539,8 @@ const eslintConfig = [
             'react/jsx-no-literals': ['error', { noStrings: true, ignoreProps: true, allowedStrings: [] }],
         },
     },
-    // Ports boundary: vendor SDKs only inside keel's adapters (ADR-0003, -0009, -0010, -0011);
-    // deployment params only via the app's config/params.ts.
+    // Ports boundary: vendor SDKs only inside keel's adapters (ADR-0003, -0009, -0010, -0011) or an app's
+    // own real adapters (ADR-0012, addendum 2026-11-16); deployment params only via the app's config/params.ts.
     //
     // The app glob is `apps/*/**`, NOT `apps/*/src/**`. It was the narrower one, which left 48 files
     // per app unfenced — including `config/app.ts`, which is ON the runtime module graph
@@ -431,12 +556,51 @@ const eslintConfig = [
     //    rather than a port for exactly this reason.
     //  - `tests/contract/**` drives real Postgres through `pg`/`embedded-postgres` on purpose — that
     //    IS the anti-drift proof, and routing it through a port would prove nothing about the port.
+    //
+    // An app's own adapters directory is carved out too, and fenced by the two blocks right below
+    // instead. Everywhere else in the app this block also bans a STATIC import of the app's real
+    // adapters (appRealAdapterPattern): they are reached through the app's registry.
+    //
+    // The carve-out is about ORDER, not outcome: without it the two blocks below would still win for
+    // that directory, but only because they come later (the merge trap). With it they are the only
+    // no-restricted-imports blocks matching it, and moving a block cannot change what is allowed there.
+    // tests/lint/app-owned-adapters.test.ts pins the outcome; a mutation run showed it cannot see this line.
     {
         files: ['apps/*/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'],
-        ignores: ['packages/keel/src/adapters/**', 'apps/*/next.config.ts', 'apps/*/tests/contract/**'],
+        ignores: [KEEL_ADAPTERS_GLOB, APP_ADAPTERS_GLOB, 'apps/*/next.config.ts', 'apps/*/tests/contract/**'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                { patterns: [vendorSdkPattern, nextFontPattern, appRealAdapterPattern] },
+            ],
+        },
+    },
+    // App-owned adapters (ADR-0012, addendum 2026-11-16) — for a vendor keel has no port for, which fails
+    // the universality and new-class tests (docs/development-approach.md) and so belongs to the app, not
+    // to keel. The registry (adapters/index.ts) and the fakes keep the vendor ban; only real/ may import a
+    // vendor SDK. Both re-list nextFontPattern (merge trap), and neither carries appRealAdapterPattern,
+    // because the registry is the module that is supposed to import real/.
+    {
+        files: ['apps/*/src/adapters/**/*.{ts,tsx}'],
+        ignores: [APP_REAL_ADAPTERS_GLOB],
         rules: {
             'no-restricted-imports': ['error', { patterns: [vendorSdkPattern, nextFontPattern] }],
         },
+    },
+    {
+        files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
+        rules: {
+            'no-restricted-imports': ['error', { patterns: [nextFontPattern] }],
+        },
+    },
+    // The dynamic half of the vendor boundary (see keelNoDynamicVendorImportRule). Its own rule id, so the
+    // merge trap cannot touch it; its scope is every file the static ban covers, minus the same two vendor
+    // zones and the same two carve-outs — the fixture included, as in the framework fence below.
+    {
+        files: ['apps/*/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}', FIXTURE_FILES_GLOB],
+        ignores: [KEEL_ADAPTERS_GLOB, APP_REAL_ADAPTERS_GLOB, 'apps/*/next.config.ts', 'apps/*/tests/contract/**'],
+        plugins: { keel: keelPlugin },
+        rules: { 'keel/no-dynamic-vendor-import': 'error' },
     },
     // Framework/app fence (ADR-0012): the framework package may not import app content directly — only
     // through the @app-config/* seam. TWO globs: the framework's source tree, and its own test fixture,
