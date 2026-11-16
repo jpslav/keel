@@ -38,8 +38,8 @@ export const isSimulated = appMode === 'simulated'
  * signals like this live here and everything else imports the boolean — the demo badge, the fail-closed
  * guard below, etc. A demo build is a simulated-mode build that opts in explicitly via DEMO_MODE=1.
  * An app's own adapters (apps/<app>/src/adapters/real) may read their own configuration from process.env,
- * but never these run-mode variables, and the app's registry imports `isSimulated` from here (lint-enforced),
- * which also runs the guard below for it.
+ * but never these run-mode variables (lint-enforced). The app's registry may not read process.env at all, and
+ * takes `isSimulated` from here by convention, which also runs the guard below for it.
  */
 export const isDemoMode = process.env.DEMO_MODE === '1'
 

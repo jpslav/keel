@@ -1616,7 +1616,11 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
   placeholders and cutover rows.
 - **A static import of an app's `adapters/real` is banned outside the adapters directory, and `import()` is
   not.** The dynamic form inside an `!isSimulated` branch is how keel's own real-mode sign-in form is
-  loaded, so banning it would forbid the one legitimate case.
+  loaded, so banning it would forbid the one legitimate case. Inside the directory it is stricter: the
+  registry and fakes may not import `real/` statically at all, so a fake cannot load the vendor (found by
+  the pre-PR review, which also found the first version's registry test passing vacuously).
+- **`process.env` is now banned in `apps/*/config/` too.** Nothing there read it, and without the ban it was
+  the obvious place for a helper handing the registry its own reading of `APP_MODE` (pre-PR review).
 - **The app's registry does not import `server-only` itself.** It must import `isSimulated` from
   `keel/adapters/index`, which imports `server-only`, so the guard arrives transitively. Neither app lists
   `server-only` as a dependency, and knip flagged it as unlisted when a scratch registry imported it

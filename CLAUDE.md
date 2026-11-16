@@ -51,10 +51,13 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   ports, or `apps/*/src/adapters/real/` for a port the APP owns, meaning a vendor keel has no port for,
   which fails the universality and new-class tests (`docs/recipes/app-owned-adapter.md`). Everything
   else codes against the port: `keel/ports/*`, or the app's `apps/*/src/ports/*` through its registry
-  `apps/*/src/adapters/index.ts`, which takes the run mode from keel's `isSimulated` and never reads
-  `process.env`. `process.env` follows the same line, bar the per-file exemptions `eslint.config.mjs`
-  names and test files, and an app's real adapters never read the run mode. Lint-enforced for static
-  imports and `import()` alike (`tests/lint/app-owned-adapters.test.ts`).
+  `apps/*/src/adapters/index.ts`, which takes the run mode from keel's `isSimulated` and loads `real/`
+  only with `import()`. Lint-enforced (`tests/lint/app-owned-adapters.test.ts`): vendor imports, static
+  or `import()`, outside those two directories; `process.env` anywhere else in `apps/*/src`,
+  `apps/*/config` and `packages/keel/src` (bar the per-file exemptions `eslint.config.mjs` names, and
+  tests), so the app's registry and fakes cannot read it; the run mode read in an app's real adapters; and
+  a static import of an app's `adapters/real` anywhere in the app outside `real/` itself. That the
+  registry uses `isSimulated` is convention: lint cannot follow a value.
 - **`keel/core` is pure TypeScript** — no framework imports. Lint-enforced.
 - **Screens are router-agnostic** — framework screens in `packages/keel/src/components`, app
   screens in `apps/*/src/components`; files under `apps/*/src/app` are thin wrappers. This keeps the `file://` static

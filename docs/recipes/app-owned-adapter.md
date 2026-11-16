@@ -34,21 +34,24 @@ apps/<app>/src/adapters/real/index.ts    builds the real adapters, fails fast on
 apps/<app>/src/adapters/real/<name>.ts   the real adapter: the only place the vendor SDK is imported
 ```
 
-| Where                                                                                    | Vendor SDK import         | `process.env`                                    | Import a real adapter            |
-| ---------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------ | -------------------------------- |
-| `apps/<app>/src/adapters/real/`                                                          | yes, static or `import()` | yes, except `APP_MODE`, `DEMO_MODE`, `E2E_BUILD` | yes                              |
-| `apps/<app>/src/adapters/index.ts` and `fake/`                                           | no                        | no                                               | yes (that is the registry's job) |
-| everything else in `apps/<app>/src/`                                                     | no                        | no                                               | not statically (see §6)          |
-| `packages/keel` outside `packages/keel/src/adapters/`, and `packages/keel/test-fixture/` | no                        | no, bar keel's two per-file secret readers       | —                                |
+| Where                                                                                    | Vendor SDK import         | `process.env`                                    | Import a real adapter   |
+| ---------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------ | ----------------------- |
+| `apps/<app>/src/adapters/real/`                                                          | yes, static or `import()` | yes, except `APP_MODE`, `DEMO_MODE`, `E2E_BUILD` | yes                     |
+| `apps/<app>/src/adapters/index.ts` and `fake/`                                           | no                        | no                                               | only by `import()` (§6) |
+| everything else in `apps/<app>/src/`                                                     | no                        | no                                               | not statically (see §6) |
+| `packages/keel` outside `packages/keel/src/adapters/`, and `packages/keel/test-fixture/` | no                        | no, bar keel's two per-file secret readers       | —                       |
 
-Unit tests (`*.test.ts`) may read `process.env`, as they already may everywhere in the app. The vendor
-ban also covers the rest of `apps/<app>/` (`apps/<app>/config/`, `apps/<app>/tests/`, `apps/<app>/scripts/`),
+Unit tests (`*.test.ts`) may read `process.env`, as they already may everywhere in the app. The
+`process.env` ban also covers `apps/<app>/config/`, so `params.ts` records names and never reads them.
+The vendor ban also covers the rest of `apps/<app>/` (`apps/<app>/config/`, `apps/<app>/tests/`, `apps/<app>/scripts/`),
 minus the two carve-outs `eslint.config.mjs` names: `apps/<app>/next.config.ts` and
 `apps/<app>/tests/contract/`.
 
 The split inside `adapters/` is the point. The registry and the fake are what keep `pnpm dev` hermetic,
-so they get the same bans as the rest of your app. With no `process.env`, the registry can learn the run
-mode only by importing keel's `isSimulated`, and the fake has nothing to configure.
+so they get the same bans as the rest of your app, and a stricter one: neither may import `real/`
+statically. With no `process.env` of its own, the registry takes the run mode from keel's `isSimulated`,
+and the fake has nothing to configure. Lint cannot follow a value to where it came from, so "the registry
+uses `isSimulated`" is the recipe's rule, not the lint's; the lint only removes the obvious alternatives.
 
 ## 3. The port
 
@@ -70,7 +73,7 @@ The rest of the app codes against this interface, as keel's code codes against `
 ## 4. The fake
 
 Offline and honest: it behaves like the real thing at the port surface, including the errors the app has
-to handle. It may not import the vendor SDK or read `process.env`, and the lint holds it to both. Choose
+to handle. It may not import the vendor SDK, read `process.env` or import `real/`, and the lint holds it to all three. Choose
 where its state lives, and say which in the file header:
 
 - **In memory, pinned on `globalThis`**, so a dev-server reload keeps it. A Simulator reset does not
@@ -147,8 +150,9 @@ Three properties come from importing keel's run mode instead of reading your own
 - **The registry is server-only.** `keel/adapters/index` imports `server-only`, so your registry
   inherits it and needs no `server-only` dependency of its own.
 
-The dynamic `import()` means the vendor SDK is never loaded in simulated mode. Everything else imports
-the registry (`@/adapters`). A static import of `@/adapters/real/…` from anywhere else fails lint, because
+The dynamic `import()` means the vendor SDK is never loaded in simulated mode, and it is the only way
+in: a static import of `real/` from the registry or a fake fails lint. Everything else imports the
+registry (`@/adapters`). A static import of `@/adapters/real/…` from anywhere else fails lint too, because
 it would load the vendor in every mode and let the caller skip the fake. Two exceptions are deliberate:
 
 - **A real-mode-only component** (a vendor's sign-in or payment widget) is loaded with `import()` inside

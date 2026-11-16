@@ -28,8 +28,8 @@ Follow `docs/recipes/app-owned-adapter.md`; it carries the sketches. In short, w
 
 1. Write `apps/<app>/src/ports/<name>.ts` — types only, sized the same way (ask me for the operations).
 2. Write `apps/<app>/src/adapters/fake/<name>.ts` — offline and honest, state in memory (pinned on
-   `globalThis`) or in the app's own tables, never under `.data/`. No vendor SDK and no `process.env`;
-   the lint refuses both here.
+   `globalThis`) or in the app's own tables, never under `.data/`. No vendor SDK, no `process.env` and no
+   import of `real/`; the lint refuses all three here.
 3. Write `apps/<app>/src/adapters/real/<name>.ts` — the only file that imports the vendor SDK, marked
    `AUTHORED — CUTOVER (<row>)`. Install the SDK in `apps/<app>/package.json`, never keel's. Read
    configuration from `process.env` in `apps/<app>/src/adapters/real/index.ts` with a REQUIRED_ENV map that

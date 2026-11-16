@@ -39,14 +39,20 @@ const vendorSdkPattern = {
 //
 // The app's zone is `adapters/real/`, NOT all of `adapters/`, on purpose. An app's fake and its
 // registry are what keep `pnpm dev` hermetic, so they get the same bans as the rest of the app: no
-// vendor SDK, no process.env. That leaves the registry no way to learn the run mode except importing
-// keel's `isSimulated` (and with it keel's fail-closed production guard), and the fake no way to be
-// configured to reach anything. keel's own tree has never needed that split — none of its fakes
-// imports a vendor SDK — but it is curated by keel's maintainers; an adopter writes this directory
-// without having read the history.
+// vendor SDK, no process.env, no static import of real/. The registry therefore cannot read the run mode
+// itself and takes keel's `isSimulated` (and with it keel's fail-closed production guard), and the fake
+// has nothing to configure. keel's own tree has never needed that split — none of its fakes imports a
+// vendor SDK — but it is curated by keel's maintainers; an adopter writes this directory without having
+// read the history. (Lint cannot follow an imported value to its source, so a helper somewhere the
+// process.env ban does not reach could still hand the registry its own idea of the mode. The ban covers
+// apps/*/src and apps/*/config, which is where such a helper would naturally go.)
 const KEEL_ADAPTERS_GLOB = 'packages/keel/src/adapters/**'
 const APP_ADAPTERS_GLOB = 'apps/*/src/adapters/**'
 const APP_REAL_ADAPTERS_GLOB = 'apps/*/src/adapters/real/**'
+// The files both halves of the vendor ban cover, and the two carve-outs both leave out (the ports-boundary
+// block below says why each carve-out exists). Named once for the same reason as the zones above.
+const VENDOR_FENCE_FILES = ['apps/*/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}']
+const VENDOR_CARVE_OUTS = ['apps/*/next.config.ts', 'apps/*/tests/contract/**']
 
 // An app's real adapter is reached through the app's adapter registry (apps/<app>/src/adapters/index.ts),
 // the module that picks the fake in simulated mode — the role keel's exports map plays for keel's own
@@ -63,6 +69,17 @@ const appRealAdapterPattern = {
         'the fake in simulated mode — a static import loads the vendor in every run mode and skips the fake. ' +
         'A real-mode-only component is the exception, reached by import() inside an !isSimulated branch the ' +
         "way keel's sign-in form is (docs/recipes/app-owned-adapter.md).",
+}
+// INSIDE the app's adapters directory the rule is stricter: real/ is reached only by `import()`, and the
+// registry's `await import('./real/index')` when !isSimulated is the one place that should do it. A static
+// import from a fake would load the vendor SDK into a simulated `pnpm dev`, and from the registry it would
+// load it in every mode. Matches `./real`, `../real`, `../../adapters/real` and `@/…/adapters/real`.
+const appRealAdapterStaticPattern = {
+    regex: '^(?:@/(?:.*/)?adapters|\\.{1,2}(?:/.*)?)/real(?:/|$)',
+    message:
+        "Inside apps/<app>/src/adapters, real/ is loaded only with import() — the registry's " +
+        "`await import('./real/index')` when !isSimulated. A static import loads the vendor SDK in simulated " +
+        'mode too (docs/recipes/app-owned-adapter.md).',
 }
 
 // The framework/app FENCE (ADR-0012). The framework IS a package (packages/keel), so
@@ -464,7 +481,10 @@ const eslintConfig = [
         },
     },
     {
-        files: ['apps/*/src/**/*.{ts,tsx}', 'packages/keel/src/**/*.{ts,tsx}'],
+        // apps/*/config too: params.ts records names and placeholders and never reads the environment, and
+        // without it the directory beside src/ was the obvious place for a helper that hands an app's registry
+        // its own reading of APP_MODE.
+        files: ['apps/*/src/**/*.{ts,tsx}', 'apps/*/config/**/*.{ts,tsx}', 'packages/keel/src/**/*.{ts,tsx}'],
         ignores: [
             'apps/*/src/app/**',
             'apps/*/src/components/**',
@@ -485,11 +505,22 @@ const eslintConfig = [
     // block above (see APP_REAL_ADAPTERS_GLOB). That block ignores real/, so this is the only
     // no-restricted-syntax block matching these files and there is nothing to re-list; the ignore is what
     // keeps that true if the blocks are reordered (as in the ports boundary below). Tests exempt, as above.
+    // The a11y-attribute literal ban rides along because a real-mode-only component (a vendor widget) lives
+    // here and renders copy; keel's own adapters get it from the next block.
     {
         files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
         ignores: ['**/*.test.{ts,tsx}'],
         rules: {
-            'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector],
+            'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector, a11yLiteralSelector],
+        },
+    },
+    // keel's adapters render copy too (the real sign-in and accept-invite forms), and no other
+    // no-restricted-syntax block matches them. Labels arrive as props today; this keeps it that way.
+    {
+        files: ['packages/keel/src/adapters/**/*.tsx'],
+        ignores: ['**/*.test.tsx', '**/*.stories.tsx'],
+        rules: {
+            'no-restricted-syntax': ['error', a11yLiteralSelector],
         },
     },
     // Same tenancy ban as UI_GLOBS, wider net — and it MUST come after the process.env block above,
@@ -534,6 +565,10 @@ const eslintConfig = [
             'apps/*/src/demo-static/**/*.tsx',
             'packages/keel/src/components/**/*.tsx',
             'packages/keel/src/demo-static/**/*.tsx',
+            // Real-mode-only components live in adapter directories, on both sides of the line, and render
+            // copy. keel's already complied when they were added here.
+            'packages/keel/src/adapters/**/*.tsx',
+            'apps/*/src/adapters/**/*.tsx',
         ],
         rules: {
             'react/jsx-no-literals': ['error', { noStrings: true, ignoreProps: true, allowedStrings: [] }],
@@ -566,8 +601,8 @@ const eslintConfig = [
     // no-restricted-imports blocks matching it, and moving a block cannot change what is allowed there.
     // tests/lint/app-owned-adapters.test.ts pins the outcome; a mutation run showed it cannot see this line.
     {
-        files: ['apps/*/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'],
-        ignores: [KEEL_ADAPTERS_GLOB, APP_ADAPTERS_GLOB, 'apps/*/next.config.ts', 'apps/*/tests/contract/**'],
+        files: VENDOR_FENCE_FILES,
+        ignores: [KEEL_ADAPTERS_GLOB, APP_ADAPTERS_GLOB, ...VENDOR_CARVE_OUTS],
         rules: {
             'no-restricted-imports': [
                 'error',
@@ -578,13 +613,17 @@ const eslintConfig = [
     // App-owned adapters (ADR-0012, addendum 2026-11-16) — for a vendor keel has no port for, which fails
     // the universality and new-class tests (docs/development-approach.md) and so belongs to the app, not
     // to keel. The registry (adapters/index.ts) and the fakes keep the vendor ban; only real/ may import a
-    // vendor SDK. Both re-list nextFontPattern (merge trap), and neither carries appRealAdapterPattern,
-    // because the registry is the module that is supposed to import real/.
+    // vendor SDK. Both re-list nextFontPattern (merge trap). The registry and fakes carry the STRICTER
+    // appRealAdapterStaticPattern instead of appRealAdapterPattern: no static import of real/ at all, so the
+    // registry's import() is the only way in.
     {
         files: ['apps/*/src/adapters/**/*.{ts,tsx}'],
         ignores: [APP_REAL_ADAPTERS_GLOB],
         rules: {
-            'no-restricted-imports': ['error', { patterns: [vendorSdkPattern, nextFontPattern] }],
+            'no-restricted-imports': [
+                'error',
+                { patterns: [vendorSdkPattern, nextFontPattern, appRealAdapterStaticPattern] },
+            ],
         },
     },
     {
@@ -597,8 +636,8 @@ const eslintConfig = [
     // merge trap cannot touch it; its scope is every file the static ban covers, minus the same two vendor
     // zones and the same two carve-outs — the fixture included, as in the framework fence below.
     {
-        files: ['apps/*/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}', FIXTURE_FILES_GLOB],
-        ignores: [KEEL_ADAPTERS_GLOB, APP_REAL_ADAPTERS_GLOB, 'apps/*/next.config.ts', 'apps/*/tests/contract/**'],
+        files: [...VENDOR_FENCE_FILES, FIXTURE_FILES_GLOB],
+        ignores: [KEEL_ADAPTERS_GLOB, APP_REAL_ADAPTERS_GLOB, ...VENDOR_CARVE_OUTS],
         plugins: { keel: keelPlugin },
         rules: { 'keel/no-dynamic-vendor-import': 'error' },
     },

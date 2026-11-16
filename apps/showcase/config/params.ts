@@ -10,8 +10,9 @@
  * may not read the run mode) — every other module imports the resolved value (this file for
  * deployment/service params; `isSimulated`/`isDemoMode` from keel/adapters for run mode). Exemptions:
  * instrumentation files (NEXT_PUBLIC needs literal inlining) and the two secret readers
- * (service-auth/{webhook,mailgun}.ts). An app-owned adapter's non-secret parameters and secret NAMES are
- * recorded here too, with their cutover rows (docs/recipes/app-owned-adapter.md).
+ * (service-auth/{webhook,mailgun}.ts). This file may not read process.env itself (the ban covers config/).
+ * An app-owned adapter's non-secret parameters and secret NAMES are recorded here too, with their cutover
+ * rows (docs/recipes/app-owned-adapter.md).
  * NOT enforced: that a param's literal VALUE appears nowhere else in the repo — that stays a convention,
  * not a scanner.
  */

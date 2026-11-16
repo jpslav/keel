@@ -444,12 +444,16 @@ around the new directory with the same invariants:
   app's registry (`adapters/index.ts`) and fakes are banned like the rest of the app. keel's fixture gets
   no such zone: `packages/keel/test-fixture/adapters/real/` is banned like the rest of the fixture.
 - **`process.env`** may be read in that same `real/` directory, for the adapter's own configuration, but
-  never `APP_MODE`, `DEMO_MODE` or `E2E_BUILD`. The registry cannot read `process.env` at all, so its only
-  way to learn the run mode is keel's `isSimulated`. Importing that also runs keel's fail-closed
-  production guard and makes the registry server-only.
-- **A real adapter is reached through the registry.** Outside the app's adapters directory, a static
-  import of `adapters/real` fails lint. A dynamic `import()` does not. That is the sanctioned way to load a
-  real-mode-only component inside an `!isSimulated` branch, as the sign-in page already loads keel's.
+  never `APP_MODE`, `DEMO_MODE` or `E2E_BUILD`. The registry cannot read `process.env` at all, and neither
+  can the app's `config/`, so the registry takes the run mode from keel's `isSimulated`. Importing that also
+  runs keel's fail-closed production guard and makes the registry server-only. That last step is
+  convention: lint cannot follow an imported value to its source.
+- **A real adapter is reached through the registry.** Inside the app's adapters directory, only `import()`
+  reaches `real/`: a static import from the registry or a fake would load the vendor in simulated mode.
+  Outside it, a static import of `adapters/real` fails lint and a dynamic `import()` does not. That is the
+  sanctioned way to load a real-mode-only component inside an `!isSimulated` branch, as the sign-in page
+  already loads keel's. Such a component renders copy, so `react/jsx-no-literals` and the a11y-attribute
+  literal ban now cover both adapter trees' `.tsx` files; keel's already complied.
 
 **The vendor fence had a hole, now closed.** `no-restricted-imports` sees import and export declarations
 and never `import()`. Before this change, `await import('@aws-sdk/client-s3')` passed lint in an app's
@@ -480,7 +484,7 @@ Rejected alternatives:
   is dead code they would have to delete. A real adapter would also need a vendor dependency added purely
   for demonstration. keel's seven ports already demonstrate the shape, and the new directory is proved by
   `tests/lint/app-owned-adapters.test.ts`, which lints virtual files against the repo's real config.
-  Removing any one of six fences turned it red. Removing either of two carve-outs did not, because those
+  Removing any one of twelve fences turned it red. Removing either of two carve-outs did not, because those
   only make the outcome independent of block order, as `eslint.config.mjs` says beside them.
 
 `docs/recipes/app-owned-adapter.md` is the how-to, and `/new-port` now asks whose port it is first.
