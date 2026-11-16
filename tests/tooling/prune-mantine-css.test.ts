@@ -107,6 +107,13 @@ describe('pruneUnreachableRules', () => {
         expect(css('@media screen{@supports (display:grid){.m_cccccccc{x:1}}}')).toBe('')
     })
 
+    it('removes only the at-rules the pruning emptied: an empty block that was already there keeps its job', () => {
+        // `@layer base {}` still declares the layer's place in the cascade order
+        expect(css('@layer base{}@media screen{.m_cccccccc{x:1}}@layer a{@media print{}}.m_aaaaaaaa{y:1}')).toBe(
+            '@layer base{}@layer a{@media print{}}.m_aaaaaaaa{y:1}',
+        )
+    })
+
     it('leaves @keyframes and block-less at-rules alone', () => {
         const rules = '@layer a,b;@keyframes m_cccccccc{from{opacity:0}to{opacity:1}}'
         expect(css(rules)).toBe(rules)

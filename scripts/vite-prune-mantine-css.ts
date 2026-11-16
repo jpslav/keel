@@ -1,4 +1,4 @@
-import postcss from 'postcss'
+import postcss, { type AtRule } from 'postcss'
 import type { Plugin } from 'vite'
 
 /**
@@ -89,25 +89,31 @@ export function pruneUnreachableRules(css: string, shipped: ReadonlySet<string>)
     const root = postcss.parse(css)
     let removedRules = 0
     let keptRules = 0
+    // The at-rules a removed rule sat in: only these can have been emptied BY THIS PASS.
+    const touched = new Set<AtRule>()
     root.walkRules((rule) => {
         const unreachable = rule.selectors.every((selector) =>
             requiredHashedClasses(selector).some((name) => !shipped.has(name)),
         )
         if (unreachable) {
+            for (let parent = rule.parent; parent?.type === 'atrule'; parent = parent.parent) {
+                touched.add(parent as AtRule)
+            }
             rule.remove()
             removedRules++
         } else keptRules++
     })
-    // An at-rule that only held removed rules (a `@media` of them) goes too; a block-less one (`@layer a;`) stays.
+    // An at-rule this pass emptied (a `@media` of removed rules) goes too. One that was empty to begin with
+    // (`@layer base {}`, which still orders a cascade layer) and a block-less one (`@layer a;`) stay.
     // Nested at-rules empty from the inside out, so repeat until a pass removes nothing.
     for (let removed = true; removed;) {
         removed = false
-        root.walkAtRules((atRule) => {
-            if (atRule.nodes !== undefined && atRule.nodes.length === 0) {
+        for (const atRule of touched) {
+            if (atRule.parent && atRule.nodes?.length === 0) {
                 atRule.remove()
                 removed = true
             }
-        })
+        }
     }
     return { css: root.toString(), removedRules, keptRules }
 }

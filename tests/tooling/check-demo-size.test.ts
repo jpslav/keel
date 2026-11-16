@@ -42,6 +42,12 @@ describe('check-demo-size', () => {
         expect(err).toContain('only 0 bytes (0.0%) of headroom left')
     })
 
+    it('rounds the percentage down, so the warning never sits beside the threshold it is under', () => {
+        // 19.6 bytes of every 1000 is 1.96%: it warns, and must not print "2.0%"
+        expect(run(9804, '10000').err).toContain('only 196 bytes (1.9%) of headroom left')
+        expect(run(9804, '10000').out).toContain('(196 bytes, 1.9% headroom)')
+    })
+
     it('warns under 2% headroom and not at 2% or over', () => {
         expect(run(981, '1000').err).toContain('only 19 bytes (1.9%) of headroom left')
         expect(run(980, '1000').err).toBe('')

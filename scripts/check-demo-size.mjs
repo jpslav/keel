@@ -91,7 +91,8 @@ if (size > budget) {
     process.exit(1)
 }
 const headroom = budget - size
-const percent = ((headroom / budget) * 100).toFixed(1)
+// Rounded DOWN, so a headroom under THIN_HEADROOM never prints as the threshold itself ("2.0%" beside a warning).
+const percent = (Math.floor((headroom * 1000) / budget) / 10).toFixed(1)
 console.log(`${file}: ${size} / ${budget} bytes — OK (${headroom} bytes, ${percent}% headroom)`)
 if (headroom / budget < THIN_HEADROOM) {
     const message =
