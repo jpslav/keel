@@ -419,6 +419,62 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
     })
 
     /**
+     * The demo size budget is the adopter's number the moment they keep the starter, and the closing
+     * output is the only place they are told. What it says must be what their tree holds, so the number is
+     * read back from the probe's own package.json rather than restated here, and the script it sends them
+     * to must carry the parts it names.
+     */
+    describe('`pnpm init-app` tells the adopter the demo size budget is theirs now', () => {
+        const flat = (text: string) => text.replace(/\s+/g, ' ')
+        const budgetOf = (probe: Probe) => {
+            const pkg = JSON.parse(readProbe(`apps/${SLUG}/package.json`, probe)) as {
+                scripts?: Record<string, string>
+            }
+            return /check-demo-size\.mjs\s+(\d+)\s*$/.exec(pkg.scripts?.['check:demo-size'] ?? '')?.[1]
+        }
+
+        it("names the number the app's own package.json passes", () => {
+            const budget = budgetOf(ejected)
+            expect(
+                budget,
+                'the starter no longer passes check-demo-size.mjs a number: rewrite the bullet',
+            ).toBeDefined()
+            expect(flat(ejected.output)).toContain(
+                `apps/${SLUG}/package.json's check:demo-size passes the static demo's byte budget, ${budget}.`,
+            )
+        })
+
+        it('says the showcase is gone, and what that left behind, only when it was ejected', () => {
+            expect(flat(ejected.output)).toContain('still describe the showcase you removed')
+            expect(flat(named.output)).not.toContain('still describe the showcase you removed')
+            expect(flat(named.output)).toContain('The demo size budget')
+        })
+
+        it('leaves scripts/check-demo-size.mjs exactly as the template has it, whichever way it is called', () => {
+            // A rewrite of its history is the false-sentence trap; the bullet says what is stale instead.
+            const template = readFileSync(path.join(ROOT, 'scripts/check-demo-size.mjs'), 'utf8')
+            expect(readProbe('scripts/check-demo-size.mjs', ejected)).toBe(template)
+            expect(readProbe('scripts/check-demo-size.mjs', named)).toBe(template)
+        })
+
+        it('points at a script that has what it promises: a default, and a WHEN IT GOES RED section', () => {
+            const script = readProbe('scripts/check-demo-size.mjs')
+            expect(script).toContain('DEFAULT_BUDGET_BYTES')
+            expect(script).toContain('WHEN IT GOES RED')
+        })
+
+        it('says the default applies when the app passes no number (a renamed showcase)', () => {
+            // --dry-run on an untouched copy: the showcase's own script passes no number.
+            const result = spawnInitApp(pristineDir, ['demo', '--app', 'showcase', '--dry-run'])
+            expect(result.status, result.stderr).toBe(0)
+            expect(flat(result.stdout)).toContain(
+                "apps/demo/package.json's check:demo-size passes no number, so DEFAULT_BUDGET_BYTES in scripts/check-demo-size.mjs is your budget",
+            )
+            expect(flat(result.stdout)).not.toContain('still describe the showcase you removed')
+        })
+    })
+
+    /**
      * The other thing a rename leaves behind is CONTENT: the starter's seed world, welcome copy, Items
      * slice and static-demo wiring are all still on screen afterwards, and no gate can call leftover
      * content an error. The closing output is the only place an adopter is told, so it is pinned — the

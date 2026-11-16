@@ -519,7 +519,6 @@ function ejectShowcase(survivor: string, onDisk: string): void {
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
         rewrite(file, [[`apps/${SHOWCASE}/config/app`, `apps/${survivor}/config/app`]], 'APP_SLUG import')
     }
-    rewrite('scripts/check-demo-size.mjs', [["the showcase's size", "the reference app's size"]], 'stale comment')
 
     for (const doc of gatedDocs()) {
         rewrite(
@@ -767,7 +766,70 @@ WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone
  * showcase` keeps an app whose seed lives in a workspace package and which has no Items slice, and
  * for it every path and every instruction below would be false.
  */
-function reportUntouched(survivor: string, hasParams: boolean, hasStarterContent: boolean): void {
+/**
+ * The survivor's static-demo size budget, read from its own `check:demo-size` script, because what is true
+ * to say about it depends on that script: the starter passes a number, the showcase passes none (it takes
+ * `DEFAULT_BUDGET_BYTES` from scripts/check-demo-size.mjs), and an app without the script has nothing to
+ * describe. `null` means say nothing rather than guess.
+ */
+type DemoBudget = { kind: 'explicit'; bytes: string } | { kind: 'default' } | null
+
+function readDemoBudget(onDisk: string): DemoBudget {
+    const file = `apps/${onDisk}/package.json`
+    if (!existsSync(abs(file))) return null
+    const script = readJson<PackageJson>(file).scripts?.['check:demo-size']
+    if (script === undefined || !script.includes('check-demo-size.mjs')) return null
+    const bytes = /check-demo-size\.mjs\s+([0-9][0-9_]*)\s*$/.exec(script)?.[1]
+    return bytes ? { kind: 'explicit', bytes } : { kind: 'default' }
+}
+
+/**
+ * Why this is in "WHAT THIS DID NOT TOUCH" and not a rewrite: the budget is a number the adopter has to
+ * own, and the script that enforces it carries the template's two-app history in its header. That header
+ * is not rewritten for the same reason no prose is (`.claude/future-tasks/eject-rewrites-prose-into-
+ * false-sentences.md`): a repair pass cannot tell a history from a claim. So it is pointed at instead.
+ */
+function demoBudgetBullet(survivor: string, budget: DemoBudget, showcaseGone: boolean): string {
+    if (budget === null) return ''
+    const subject = `apps/${survivor}/package.json's check:demo-size`
+    const redIs = 'When it goes red, scripts/check-demo-size.mjs says what to look at first.'
+    const paragraph =
+        budget.kind === 'default'
+            ? `The demo size budget — ${subject} passes no number, so DEFAULT_BUDGET_BYTES in ` +
+              `scripts/check-demo-size.mjs is your budget. It is thin on purpose, so growth is a decision someone ` +
+              `makes. Re-set it to what your app measures plus the headroom you want, in its own commit. ${redIs}`
+            : `The demo size budget — ${subject} passes the static demo's byte budget, ${budget.bytes}. It is ` +
+              `yours now: the starter ships it roomy on purpose, sized for an app's own screens and not as a pacing ` +
+              `gate. Re-set it when you want a tighter gate (what your app measures plus the headroom you want, in ` +
+              `its own commit). ${redIs}` +
+              (showcaseGone
+                  ? " That script's header and DEFAULT_BUDGET_BYTES still describe the showcase you removed; only " +
+                    'the number you pass counts.'
+                  : '')
+    return `\n${wrapBullet(paragraph)}`
+}
+
+/** One "  • " bullet, word-wrapped to the width the hand-written bullets around it keep. */
+function wrapBullet(paragraph: string, width = 100): string {
+    const lines: string[] = []
+    let line = '  •'
+    for (const word of paragraph.split(' ')) {
+        if (line.length + 1 + word.length > width) {
+            lines.push(line)
+            line = `    ${word}`
+        } else line += ` ${word}`
+    }
+    lines.push(line)
+    return lines.join('\n')
+}
+
+function reportUntouched(
+    survivor: string,
+    hasParams: boolean,
+    hasStarterContent: boolean,
+    demoBudget: DemoBudget,
+    showcaseGone: boolean,
+): void {
     const params = hasParams
         ? `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
         : `apps/${survivor} ships no config/params.ts yet. You get one when you eject the\n    showcase, or write it when you reach your first cloud cutover row.`
@@ -776,7 +838,7 @@ WHAT THIS DID NOT TOUCH — the parts that need judgement, not a rename:
 
   • Deployment parameters — ${params}
   • The cutover checklist — docs/cutover-checklist.md is yours: owners, dates, and the proof each
-    row owes. Nothing here closed a row.
+    row owes. Nothing here closed a row.${demoBudgetBullet(survivor, demoBudget, showcaseGone)}
   • The licence — this template is MIT; your product's licence is still yours to choose.
   • Git remotes, CI secrets, and infra account IDs.`)
     if (hasStarterContent) {
@@ -958,6 +1020,8 @@ async function main(): Promise<void> {
         survivor,
         options.ejectShowcase || existsSync(abs(`apps/${survivorOnDisk}/config/params.ts`)),
         existsSync(abs(`apps/${survivorOnDisk}/src/seed`)),
+        readDemoBudget(survivorOnDisk),
+        options.ejectShowcase || !existsSync(abs(`apps/${SHOWCASE}`)),
     )
 }
 
