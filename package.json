@@ -42,8 +42,8 @@
         "keel": "workspace:*",
         "next": "^16.4.6",
         "next-intl": "^4.14.9",
-        "react": "^19.3.1",
-        "react-dom": "^19.3.1"
+        "react": "~19.2.8",
+        "react-dom": "~19.2.8"
     },
     "devDependencies": {
         "@commitlint/cli": "^21.2.4",
@@ -54,8 +54,8 @@
         "@testing-library/jest-dom": "^7.0.1",
         "@types/node": "^26.6.5",
         "@types/pg": "^8.23.1",
-        "@types/react": "^19.3.0",
-        "@types/react-dom": "^19.3.0",
+        "@types/react": "~19.2.17",
+        "@types/react-dom": "~19.2.3",
         "@vitejs/plugin-react": "^6.1.2",
         "@vitest/coverage-v8": "^4.1.10",
         "concurrently": "^10.0.6",

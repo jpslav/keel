@@ -1700,10 +1700,10 @@ worth keeping.
   `next-intl`, `react` and `@mantine/core` in the root and both apps but left `packages/keel`'s
   `peerDependencies` at the old floors. Before it, each of the four peer floors was the floor the apps
   named. Leaving keel's lower is what kept the old `next-intl` and `@mantine/core` in keel's part of the
-  lockfile (build-notes, same date, has the mechanism). keel's peer floors now match the apps' again
-  (`^19.3.1`, `^16.4.6`, `^4.14.9`, `^9.7.3`). A lower floor would mean something only to a consumer
-  installing keel from a registry with an older host, and nobody does: `packages/keel` is `private` and
-  ships by fork and merge (ADR-0013).
+  lockfile (build-notes, same date, has the mechanism). keel's peer ranges now match the apps' again:
+  `^16.4.6`, `^4.14.9` and `^9.7.3`, and `react` at `~19.2.8` for the hold below. A lower floor would
+  mean something only to a consumer installing keel from a registry with an older host, and nobody does:
+  `packages/keel` is `private` and ships by fork and merge (ADR-0013).
 - **next 16.4.6, not the group's 16.4.2.** GHSA-mfr8-8qww-v76h (medium, published 2026-11-16) covers next
   16.3.0 through 16.4.4 and is fixed in 16.4.5. keel calls neither `'use cache'` nor `unstable_cache`, so
   its code was not exposed, but 16.4.2 is the version `next dev` stopped on (build-notes). 16.4.6 is the
@@ -1716,6 +1716,16 @@ worth keeping.
   work rather than part of a dependency catch-up. The tilde keeps the hold through a lockfile
   regeneration: with 4.14.0 already in the lockfile, `^4.12.1` resolved to 4.14.0. The fix and the way to
   lift the hold are in `.claude/future-tasks/label-in-name-axe-4-14.md`.
+- **`react`, `react-dom` and their types are held at 19.2 (`~19.2.8`, `~19.2.17`, `~19.2.3`).** The group
+  took React to 19.3.1, which put the showcase's static demo at 845,719 bytes, over the 840,000 budget
+  re-based the same day (starter 755,326 of 820,000). With only `react` and `react-dom` pinned back to
+  19.2.8, the showcase built at 816,387 and the starter at 725,995: React was about 29 KB of the
+  showcase's ~31 KB growth. It is React's own code, not something keel can trim: react-dom's
+  `cjs/react-dom-client.production.js` is 536,016 bytes in 19.2.8 and 625,168 in 19.3.1. Taking it means
+  raising the showcase budget, which the budget's own rule reserves for a feature, so that is JP's call.
+  Until then the tildes keep 19.2 through a lockfile regeneration. keel's `react` peer is `~19.2.8` too,
+  the same range the apps name. Holding React back took one more lockfile regeneration (build-notes,
+  same date).
 - **Next's generated `AGENTS.md` is switched off (`agentRules: false` in both apps' `next.config.ts`).**
   With next 16.4, `next dev` writes `apps/<app>/AGENTS.md` whenever it detects an AI coding agent, and
   the block it writes tells the agent to commit the file. CI is not an agent and never sees it, but every

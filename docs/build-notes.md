@@ -1393,10 +1393,18 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   `dependencies`, but left its `peerDependencies` alone. Its lockfile kept keel's copies at the old versions
   (`next-intl` 4.13.4, `@mantine/core` 9.5.0) while the apps moved to 4.14.9 and 9.7.3. That is the fork the
   "Pre-publication review" entry above warns about, and it looked the same: `useTranslations` found no
-  `NextIntlClientProvider` context, and `lint-typecheck-unit` stayed green. Raising keel's peer floors to the
-  apps' (decision-log, same date) brought `react`, `next`, `next-intl` and `@mantine/core` back to one
+  `NextIntlClientProvider` context, and `lint-typecheck-unit` stayed green. Giving keel's peers the apps'
+  ranges (decision-log, same date) brought `react`, `next`, `next-intl` and `@mantine/core` back to one
   realpath each. After a dependency PR that bumps any of those four, run the `readlink -f` check before
   reading the e2e log.
+- **Moving a singleton's types BACK can fork it too, through an optional peer.** `next-intl` 4.15 and
+  `@mantine/core` (through `react-remove-scroll`) take `@types/react` as an optional peer, so its version
+  is part of their store path. Holding React at 19.2 changed the root's `@types/react` range, and
+  `pnpm install` re-resolved only the importers whose specifiers changed. keel's and the starter's
+  `next-intl` and `@mantine/core` kept `@types/react@19.3.0` in their peer resolution while the showcase
+  got 19.2.18: two instances each, from a change that only lowered a version. Taking main's lockfile and
+  running `pnpm install` again re-resolved all of them to one. Run the realpath check after a downgrade as
+  well as an upgrade.
 - **`next dev` stopped once on a version with a fresh advisory.** On the day GHSA-mfr8-8qww-v76h was
   published, with next 16.4.2 installed, Playwright's `webServer` (`next dev`) printed an upgrade notice and
   exited 1. e2e failed before its first test with "Process from config.webServer was not able to start". The
