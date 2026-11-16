@@ -75,6 +75,7 @@ must pick ONE app (`pnpm dev`, `pnpm start`, and the showcase-only `pnpm ladle`,
 ```
 pnpm init-app <slug> [options]        rename the app you keep
 pnpm init-app --eject-showcase        delete the demo app (slug optional; both can run at once)
+pnpm init-app --repo <name>           fill in the repository name on a tree adopted without it
 
   <slug>              the new APP_SLUG: lowercase letters, digits and dashes. Also becomes the app's
                       directory name and package name (the workspace root becomes <slug>-workspace,
@@ -141,10 +142,11 @@ right. So pass the name you will push to: `pnpm init-app console --repo pages`. 
 — not `owner/name`, because the owner also fills `CODEOWNERS`, where it may be a team. Without `--repo`
 the links say `PLACEHOLDER_GITHUB_REPO` beside the owner placeholder, and the closing output says so;
 replace both (`git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github` finds
-them). `init-app` does not read the name from `git remote`: at adoption time `origin` is often still the
-template, or a fork under its default name, and a derived value would be plausible and wrong. Passing
-`--repo` on a later run is reported as ignored once the links no longer name the template, so edit the
-three files directly then.
+them). Forgot it? Run `pnpm init-app --repo pages` afterwards: it replaces the placeholder in those three
+files and touches nothing else. Once they name a repository, a further `--repo` is reported as ignored
+(and the run says so rather than claiming a change), so edit the files directly then. `init-app` does not
+read the name from `git remote`: at adoption time `origin` is often still the template, or a fork under
+its default name, and a derived value would be plausible and wrong.
 
 Filling in the owner and repository is necessary and not sufficient: **two of those links depend on repository
 settings that are off by default.** `/security/advisories/new` resolves for a non-maintainer only once

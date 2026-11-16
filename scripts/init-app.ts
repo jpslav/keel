@@ -36,6 +36,7 @@ const PLACEHOLDER_REPO = 'PLACEHOLDER_GITHUB_REPO'
 const USAGE = `
 pnpm init-app <slug> [options]        rename the app you keep
 pnpm init-app --eject-showcase        delete the demo app (slug optional; both can run at once)
+pnpm init-app --repo <name>           fill in the repository name on a tree adopted without it
 
   <slug>              the new APP_SLUG: lowercase letters, digits and dashes. Also becomes the app's
                       directory name and package name (the workspace root becomes <slug>-workspace,
@@ -88,7 +89,13 @@ function parseArgs(argv: string[]): Options {
     const takesValue = new Map<string, (value: string) => void>([
         ['--name', (value) => (options.displayName = value)],
         ['--app', (value) => (options.app = value)],
-        ['--repo', (value) => (options.repo = value)],
+        [
+            '--repo',
+            (value) => {
+                if (options.repo !== null) fail('--repo given twice')
+                options.repo = value
+            },
+        ],
     ])
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -563,23 +570,39 @@ const CONTACT_LINK_FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 
  *   - `docs/adr/**` approver lines — honest provenance for keel's OWN decisions, which an adopter
  *     inherits as historical record, not as their own project's contact info.
  */
-function rewriteAdopterIdentity(repo: string | null): void {
-    const oldAdvisory = 'github.com/jpslav/keel/security/advisories/new'
-    const oldDiscussions = 'github.com/jpslav/keel/discussions'
+/**
+ * Where the contact links stand, which decides what `--repo` can do and what the output may claim:
+ *   - `template`:    they still name `jpslav/keel` — the first adoption, with a repository to write.
+ *   - `placeholder`: an earlier run wrote `PLACEHOLDER_GITHUB_REPO` (no `--repo` then). A `--repo` now
+ *                    fills it in, which is what makes "I forgot the flag" a re-run and not a hand edit.
+ *   - `settled`:     neither — they name a repository already. `--repo` has nothing to replace.
+ * Read from the files, before any rewrite, so `--dry-run` and the confirmation summary tell the truth too.
+ */
+type ContactLinks = 'template' | 'placeholder' | 'settled'
+
+const TEMPLATE_ADVISORY = 'github.com/jpslav/keel/security/advisories/new'
+const TEMPLATE_DISCUSSIONS = 'github.com/jpslav/keel/discussions'
+const PLACEHOLDER_HOME = `github.com/${PLACEHOLDER_OWNER}/${PLACEHOLDER_REPO}`
+
+function contactLinks(): ContactLinks {
+    const text = CONTACT_LINK_FILES.filter((file) => existsSync(abs(file)))
+        .map(readText)
+        .join('\n')
+    if (text.includes(TEMPLATE_ADVISORY) || text.includes(TEMPLATE_DISCUSSIONS)) return 'template'
+    return text.includes(PLACEHOLDER_HOME) ? 'placeholder' : 'settled'
+}
+
+function rewriteAdopterIdentity(repo: string | null, links: ContactLinks): void {
     const home = `github.com/${PLACEHOLDER_OWNER}/${repo ?? PLACEHOLDER_REPO}`
     const newAdvisory = `${home}/security/advisories/new`
+    // Replacing the placeholder with itself is skipped by `rewrite`, so this is inert without --repo.
+    const fillRepo: [string, string] = [PLACEHOLDER_HOME, home]
 
-    // A re-run on a tree whose links were already rewritten has nothing left to repoint, so an
-    // explicit --repo would be silently ignored. Say so rather than let it look like it worked.
-    const linksStillNameTemplate = CONTACT_LINK_FILES.some(
-        (file) =>
-            existsSync(abs(file)) && (readText(file).includes(oldAdvisory) || readText(file).includes(oldDiscussions)),
-    )
-    if (repo !== null && !linksStillNameTemplate) {
+    if (repo !== null && links === 'settled') {
         note(
             skipped,
-            `--repo ${repo} ignored: the links in ${CONTACT_LINK_FILES.join(', ')} no longer name the template ` +
-                '(an earlier run rewrote them) — edit them directly',
+            `--repo ${repo} ignored: the links in ${CONTACT_LINK_FILES.join(', ')} no longer name the template or ` +
+                `${PLACEHOLDER_REPO} — edit them directly`,
         )
     }
 
@@ -600,18 +623,15 @@ function rewriteAdopterIdentity(repo: string | null): void {
         'code owner → placeholder you must fill in',
     )
 
-    rewrite('SECURITY.md', [[oldAdvisory, newAdvisory]], 'advisory URL → your own repo')
+    rewrite('SECURITY.md', [[TEMPLATE_ADVISORY, newAdvisory], fillRepo], 'advisory URL → your own repo')
 
     rewrite(
         '.github/ISSUE_TEMPLATE/config.yml',
-        [
-            [oldAdvisory, newAdvisory],
-            [oldDiscussions, `${home}/discussions`],
-        ],
+        [[TEMPLATE_ADVISORY, newAdvisory], [TEMPLATE_DISCUSSIONS, `${home}/discussions`], fillRepo],
         'contact links → your own repo',
     )
 
-    rewrite('CODE_OF_CONDUCT.md', [[oldAdvisory, newAdvisory]], 'enforcement contact → your own repo')
+    rewrite('CODE_OF_CONDUCT.md', [[TEMPLATE_ADVISORY, newAdvisory], fillRepo], 'enforcement contact → your own repo')
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -692,16 +712,24 @@ function proseToReview(words: string[]): string[] {
  * exactly the wrong answer. Now that init-app touches these files, they get their own section, named
  * for what is still missing (real values) rather than what already happened (a rewrite).
  */
-function reportNeedsYourDetails(repo: string | null): void {
-    const home = `github.com/${PLACEHOLDER_OWNER}/${repo ?? PLACEHOLDER_REPO}`
-    const repoBullet = repo
-        ? ''
-        : `
+function reportNeedsYourDetails(repo: string | null, links: ContactLinks): void {
+    // What the three contact files say AFTER this run, from what the run found in them: never from
+    // `repo` alone, because a `--repo` on links that were already settled changed nothing.
+    const named = repo !== null && links !== 'settled'
+    const home = named
+        ? `github.com/${PLACEHOLDER_OWNER}/${repo}`
+        : links === 'settled'
+          ? 'the repository it already names (this run did not change it)'
+          : PLACEHOLDER_HOME
+    const repoBullet =
+        links !== 'settled' && !named
+            ? `
   • The repository name — SECURITY.md, the issue-template config and CODE_OF_CONDUCT.md say
     ${PLACEHOLDER_REPO}, because no --repo was given and the app slug is not a reliable guess
-    (a "console" app can live in a repo called "pages"). Replace it with the repository's NAME,
-    not the slug. \`git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github\`
-    lists every placeholder, owner and repo both.`
+    (a "console" app can live in a repo called "pages"). Run \`pnpm init-app --repo <name>\` to fill it in,
+    or replace it by hand with the repository's NAME, not the slug. \`git grep PLACEHOLDER_GITHUB --
+    CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github\` lists every placeholder, owner and repo both.`
+            : ''
     console.log(`
 WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone:
 
@@ -782,8 +810,9 @@ function checkRepoName(repo: string): void {
     if (repo.includes('/')) {
         fail(`--repo takes the repository NAME only ("pages"), not "${repo}": the owner stays ${PLACEHOLDER_OWNER}`)
     }
-    if (repo.endsWith('.git'))
+    if (/\.git$/i.test(repo))
         fail(`--repo "${repo}": drop the .git suffix — it is the repository name, not a clone URL`)
+    if (repo === PLACEHOLDER_REPO) fail(`--repo "${repo}" is the placeholder itself: give the real repository name`)
     if (!/^[A-Za-z0-9._-]{1,100}$/.test(repo) || repo === '.' || repo === '..') {
         fail(`"${repo}" is not a valid GitHub repository name: letters, digits, ".", "_" and "-"`)
     }
@@ -811,7 +840,8 @@ async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2))
     dryRun = options.dryRun
 
-    if (!options.slug && !options.ejectShowcase) {
+    // `--repo` alone is a real run: it fills the repository name in on a tree adopted without it.
+    if (!options.slug && !options.ejectShowcase && options.repo === null) {
         console.log(USAGE)
         process.exit(0)
     }
@@ -853,16 +883,31 @@ async function main(): Promise<void> {
     summary.push('repoint path citations in the gated docs (docs/, .claude/, README, CLAUDE, CONTRIBUTING)')
     summary.push(
         `replace the maintainer's identity in CODEOWNERS, SECURITY.md, the issue-template config and ` +
-            `CODE_OF_CONDUCT.md: github.com/${PLACEHOLDER_OWNER}/${options.repo ?? PLACEHOLDER_REPO}` +
-            (options.repo ? '' : ' (no --repo given)'),
+            `CODE_OF_CONDUCT.md with ${PLACEHOLDER_OWNER}`,
     )
+    const links = contactLinks()
+    // `--repo` alone is the fix-up for a tree init-app already adopted. On one it has not, it would scrub
+    // the maintainer's identity and leave everything else, a half-adoption nobody asked for.
+    if (!options.slug && !options.ejectShowcase && links === 'template') {
+        fail('--repo on its own only fills in a repository name on a tree init-app has already adopted; give a slug')
+    }
+    if (links === 'settled') {
+        if (options.repo)
+            summary.push(`NOT change the contact links: they no longer name the template, so --repo is ignored`)
+    } else {
+        const name = options.repo ?? PLACEHOLDER_REPO
+        summary.push(
+            `point the contact links at github.com/${PLACEHOLDER_OWNER}/${name}` +
+                (options.repo ? '' : ' (no --repo given: the repository name stays a placeholder)'),
+        )
+    }
     if (dryRun) summary.push('(--dry-run: nothing will actually be written)')
 
     await confirm(summary, options.assumeYes || dryRun)
 
     if (slug) renameApp(current, slug, displayName)
     if (options.ejectShowcase) ejectShowcase(survivor, dryRun ? targetDir : survivor)
-    rewriteAdopterIdentity(options.repo)
+    rewriteAdopterIdentity(options.repo, links)
     repairAppCitations()
     formatTouchedFiles()
 
@@ -883,7 +928,7 @@ async function main(): Promise<void> {
         for (const doc of review) console.log(`  ${doc}`)
     }
 
-    reportNeedsYourDetails(options.repo)
+    reportNeedsYourDetails(options.repo, links)
 
     // `survivor` is the name AFTER the rename; on disk that directory only exists if the rename
     // actually ran, so a dry run still has to look under the old name (the ejectShowcase convention).

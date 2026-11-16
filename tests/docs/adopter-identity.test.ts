@@ -16,21 +16,28 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
  * rots; this is the test.
  *
  * THIS FILE SHIPS TO EVERY ADOPTER and comes back with every upstream merge (ADR-0013), so it has to be
- * right in three different trees, and it works out which one it is in before it asserts anything:
+ * right in two different trees, and it works out which one it is in before it asserts anything:
  *
- *   TEMPLATE  all four identity files still name the maintainer, and `scripts/init-app.ts` is there.
- *             The rewrite has work to do, so the suite below runs the SAME command the `adoption-probe`
- *             CI job runs (`.github/workflows/checks.yml`) against throwaway copies of the tree and
- *             inspects what comes out. `init-app.ts` resolves its own root from `import.meta.url`, so
- *             "run it and check the output" is the only way to test it: the module cannot be imported
- *             (`main()` runs unconditionally on import and would exit the test process).
- *   ADOPTED   none of the four names the maintainer: `init-app` already ran. There is no rewrite to
- *             test — it replaces the template's literals, and they are gone — so the only claim left
- *             is the one that matters to an adopter, checked directly on their real files: nothing in
- *             them routes people to someone else's inbox. That also catches the way it comes back in
- *             a fork: an upstream merge that adds a line owned by `@jpslav` to your CODEOWNERS.
- *   MIXED     some do, some do not. In an adopted repo a file was missed; in the template one lost the
- *             identity the rewrite is tested against. Either way: red, naming the files.
+ *   TEMPLATE  `apps/showcase` exists and the root package is still `keel-workspace`. The identity files
+ *             must ALL name the maintainer (that is `init-app`'s input), and the suite below runs the
+ *             SAME command the `adoption-probe` CI job runs (`.github/workflows/checks.yml`) against
+ *             throwaway copies of the tree and inspects what comes out. `init-app.ts` resolves its own
+ *             root from `import.meta.url`, so "run it and check the output" is the only way to test it:
+ *             the module cannot be imported (`main()` runs unconditionally on import and would exit the
+ *             test process).
+ *   ADOPTED   anything else. `init-app` already ran, so there is no rewrite to test — it replaces the
+ *             template's literals and they are gone — and the one claim left is the one that matters to
+ *             an adopter, checked directly on their real files: none of the four names the maintainer.
+ *             That also catches the way it comes back in a fork: an upstream merge adding a line owned
+ *             by `@jpslav` to your CODEOWNERS (the exact spelling; the template's own files use one).
+ *
+ * THE TWO ARE TOLD APART BY STRUCTURE, NOT BY THE IDENTITY BEING TESTED. Every `init-app` run that is
+ * allowed to adopt renames the root package (`<slug>-workspace`) or deletes `apps/showcase`, so an
+ * adopted tree fails one of the two conditions. Keying on "do the files still name the maintainer"
+ * instead looks equivalent and has a hole: move the maintainer's identity (a repo transfer, a new
+ * handle), update the four files and nothing else, and every file reads as "adopted" — the init-app
+ * suite switches itself off and `init-app` silently stops scrubbing anything. Here the same change
+ * leaves a template-shaped tree whose files no longer name the maintainer, which is red.
  *
  * WHY IT IS NOT "SKIP WHEN THE SHOWCASE IS GONE". This file used to run `init-app` on a copy of
  * WHATEVER tree it was in, with the slug `acme` hard-coded, and assert what the rewrite produced. In an
@@ -99,7 +106,19 @@ const ANY_EMAIL_ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
 /** The four files the bug was about — none of them may name the maintainer after an adoption. */
 const IDENTITY_FILES = ['CODEOWNERS', 'SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
 
-const INIT_APP = path.join(ROOT, 'scripts/init-app.ts')
+/** What `init-app` renames the root package away from. `keel` itself is a reserved slug, so no adoption keeps it. */
+const TEMPLATE_ROOT_PACKAGE = 'keel-workspace'
+
+function rootPackageName(): unknown {
+    try {
+        return (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { name?: unknown }).name
+    } catch {
+        return undefined
+    }
+}
+
+/** See "TEMPLATE" above. Decided once, at load, so the suites below can be switched on and off by it. */
+const isTemplate = existsSync(path.join(ROOT, 'apps/showcase')) && rootPackageName() === TEMPLATE_ROOT_PACKAGE
 
 /** A file that does not exist cannot name anyone — an adopter may delete one. */
 function namesMaintainer(relative: string): boolean {
@@ -109,34 +128,22 @@ function namesMaintainer(relative: string): boolean {
     return text.includes(MAINTAINER_HANDLE) || text.includes(MAINTAINER_REPO)
 }
 
-const carriers = IDENTITY_FILES.filter(namesMaintainer)
-/** See "TEMPLATE" above. Decided once, at load, so the suites below can be switched on and off by it. */
-const isTemplate = carriers.length === IDENTITY_FILES.length && existsSync(INIT_APP)
-
 describe('the maintainer identity lives in the template only', () => {
-    it('no identity file names the maintainer unless this is the pristine template', () => {
-        const others = IDENTITY_FILES.filter((file) => !carriers.includes(file))
-        const contrast = others.length > 0 ? ` (${others.join(', ')} ${others.length === 1 ? 'does' : 'do'} not)` : ''
-        expect(
-            isTemplate || carriers.length === 0,
-            `These files still name the template maintainer (${MAINTAINER_HANDLE}, ${MAINTAINER_REPO}): ` +
-                `${carriers.join(', ')}${contrast}. In an adopted repo that file still routes people to the ` +
-                `template's maintainer: replace it (\`pnpm init-app\` writes the placeholders). In the template ` +
-                `itself it means an identity file lost what the rewrite is tested against: restore it, or change ` +
-                `the constants in this file and \`rewriteAdopterIdentity\` together.`,
-        ).toBe(true)
-    })
-
-    // The sentinel that keeps the template suite below from going quietly vacuous. It only runs when
-    // the identity strings are present in the files, so if someone moves the maintainer's identity and
-    // updates the files and one of {this file, init-app} but not the other, every file reads as
-    // "adopted", the suite switches itself off, and nothing is red. Both halves must name the same
-    // identity for as long as init-app is in the tree.
-    it("the identity this file looks for is the one init-app's rewrite replaces", () => {
-        if (!existsSync(INIT_APP)) return // an adopter who deleted the script has no rewrite to keep in step
-        const source = readFileSync(INIT_APP, 'utf8')
-        expect(source, 'init-app no longer names the maintainer handle it rewrites').toContain(`'${MAINTAINER_HANDLE}'`)
-        expect(source, 'init-app no longer names the repo whose links it rewrites').toContain(MAINTAINER_REPO)
+    it('the identity files name the maintainer exactly when this is the pristine template', () => {
+        const carriers = IDENTITY_FILES.filter(namesMaintainer)
+        const expected = isTemplate ? IDENTITY_FILES : []
+        const explanation = isTemplate
+            ? `This tree is shaped like the pristine template (apps/showcase exists and the root package is still ` +
+              `${TEMPLATE_ROOT_PACKAGE}), so all four identity files must name the template maintainer ` +
+              `(${MAINTAINER_HANDLE}, ${MAINTAINER_REPO}): that is the input init-app's rewrite is tested on. ` +
+              `Only ${carriers.join(', ') || 'none of them'} do. If the maintainer's identity changed, change the ` +
+              `constants in this file and \`rewriteAdopterIdentity\` together. If you adopted by hand, rename the ` +
+              `root package or delete apps/showcase so this tree stops looking like the template.`
+            : `These files still name the template maintainer (${MAINTAINER_HANDLE}, ${MAINTAINER_REPO}): ` +
+              `${carriers.join(', ')}. In an adopted repo that file routes people to someone else: replace it ` +
+              `(\`pnpm init-app\` writes the placeholders). If this IS the template, it no longer looks like one to ` +
+              `this test, which needs apps/showcase and a root package named ${TEMPLATE_ROOT_PACKAGE}.`
+        expect(carriers, explanation).toEqual(expected)
     })
 })
 
@@ -147,12 +154,16 @@ interface Probe {
     output: string
 }
 
+function spawnInitApp(dir: string, args: string[]) {
+    const tsx = path.join(ROOT, 'node_modules/.bin/tsx')
+    return spawnSync(tsx, [path.join(dir, 'scripts/init-app.ts'), ...args], { cwd: dir, encoding: 'utf8' })
+}
+
 /** Copies the tree, runs `init-app <args>` in the copy, and hands back the result for inspection. */
 function runInitApp(prefix: string, args: string[]): Probe {
     const dir = makeTestTmpDir(prefix)
     copyTree(ROOT, dir)
-    const tsx = path.join(ROOT, 'node_modules/.bin/tsx')
-    const initApp = spawnSync(tsx, [path.join(dir, 'scripts/init-app.ts'), ...args], { cwd: dir, encoding: 'utf8' })
+    const initApp = spawnInitApp(dir, args)
     if (initApp.status !== 0) {
         throw new Error(
             `pnpm init-app ${args.join(' ')} exited ${initApp.status}\n` +
@@ -173,10 +184,15 @@ const REPO = 'pages'
 const OWNER = 'PLACEHOLDER_GITHUB_OWNER'
 const REPO_PLACEHOLDER = 'PLACEHOLDER_GITHUB_REPO'
 
+const CONTACT_FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
+
 /** The harshest path init-app supports, same as the adoption-probe CI job: rename AND eject in one call. */
 let ejected: Probe
 /** Rename-only, with the repository named: the other path through the identity rewrite. */
 let named: Probe
+/** Adopted without `--repo`, then given it by a second run: "I forgot the flag". */
+let fixedUp: Probe
+let fixUpRun: ReturnType<typeof spawnInitApp>
 
 function readProbe(relative: string, probe: Probe = ejected): string {
     return readFileSync(path.join(probe.dir, relative), 'utf8')
@@ -186,6 +202,8 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
     beforeAll(() => {
         ejected = runInitApp('keel-adopter-identity-', [SLUG, '--eject-showcase', '--yes'])
         named = runInitApp('keel-adopter-identity-named-', [SLUG, '--repo', REPO, '--yes'])
+        fixedUp = runInitApp('keel-adopter-identity-fixup-', [SLUG, '--yes'])
+        fixUpRun = spawnInitApp(fixedUp.dir, ['--repo', REPO, '--yes'])
     }, 120_000)
 
     describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inherit the maintainer identity', () => {
@@ -247,9 +265,7 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
      * are different here (`acme` in `pages`), so a link that still carries the slug fails by name.
      */
     describe('`pnpm init-app --repo <name>` writes the repository name into the contact links', () => {
-        const FILES = ['SECURITY.md', '.github/ISSUE_TEMPLATE/config.yml', 'CODE_OF_CONDUCT.md']
-
-        it.each(FILES)('%s links github.com/<owner>/<repo>, never the app slug', (relative) => {
+        it.each(CONTACT_FILES)('%s links github.com/<owner>/<repo>, never the app slug', (relative) => {
             const text = readProbe(relative, named)
             expect(text).toContain(`github.com/${OWNER}/${REPO}/security/advisories/new`)
             expect(text).not.toContain(REPO_PLACEHOLDER)
@@ -274,29 +290,59 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
         })
 
         it.each([
-            ['owner/name', 'a/b', 'NAME only'],
-            ['a clone URL suffix', 'pages.git', '.git'],
-            ['a dot-dot', '..', 'not a valid'],
-            ['a space', 'my repo', 'not a valid'],
-        ])('rejects %s as a repository name', (_label, value, message) => {
+            ['owner/name', ['--repo', 'a/b'], 'NAME only'],
+            ['a clone URL suffix', ['--repo', 'pages.git'], '.git'],
+            ['a clone URL suffix in any case', ['--repo', 'Pages.GIT'], '.git'],
+            ['a dot-dot', ['--repo', '..'], 'not a valid'],
+            ['a space', ['--repo', 'my repo'], 'not a valid'],
+            ['the placeholder itself', ['--repo', REPO_PLACEHOLDER], 'the placeholder itself'],
+            ['a second --repo', ['--repo', 'a', '--repo', 'b'], 'given twice'],
+        ])('rejects %s', (_label, args, message) => {
             // --dry-run: validation runs before anything is planned, and nothing may be written either way.
-            const result = spawnSync(
-                path.join(ROOT, 'node_modules/.bin/tsx'),
-                [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', value, '--dry-run'],
-                { cwd: named.dir, encoding: 'utf8' },
-            )
+            const result = spawnInitApp(named.dir, [SLUG, ...args, '--dry-run'])
             expect(result.status).toBe(1)
             expect(result.stderr).toContain(message)
         })
 
-        it("a re-run's --repo is reported as ignored instead of silently dropped", () => {
-            const result = spawnSync(
-                path.join(ROOT, 'node_modules/.bin/tsx'),
-                [path.join(named.dir, 'scripts/init-app.ts'), SLUG, '--repo', 'elsewhere', '--dry-run'],
-                { cwd: named.dir, encoding: 'utf8' },
+        it('on its own, on a tree init-app has not adopted, refuses rather than half-adopting', () => {
+            const pristine = makeTestTmpDir('keel-adopter-identity-pristine-')
+            copyTree(ROOT, pristine)
+            const result = spawnInitApp(pristine, ['--repo', REPO, '--yes'])
+            expect(result.status).toBe(1)
+            expect(result.stderr).toContain('already adopted')
+            expect(readFileSync(path.join(pristine, 'CODEOWNERS'), 'utf8')).toContain(MAINTAINER_HANDLE)
+        })
+    })
+
+    /**
+     * Adopting without `--repo` is the easy mistake, and the fix has to be a command and not a hand edit
+     * across three files — and what the run PRINTS has to match what it did.
+     */
+    describe('`pnpm init-app --repo <name>` on a tree adopted without it fills the placeholder in', () => {
+        it('exits cleanly and names the repository in all three contact files', () => {
+            expect(fixUpRun.status, fixUpRun.stderr).toBe(0)
+            for (const relative of CONTACT_FILES) {
+                const text = readProbe(relative, fixedUp)
+                expect(text).toContain(`github.com/${OWNER}/${REPO}/security/advisories/new`)
+                expect(text).not.toContain(REPO_PLACEHOLDER)
+            }
+            expect(readProbe('.github/ISSUE_TEMPLATE/config.yml', fixedUp)).toContain(
+                `github.com/${OWNER}/${REPO}/discussions`,
             )
+        })
+
+        it('no longer asks for the repository name it was just given', () => {
+            expect(fixUpRun.stdout).toContain(`github.com/${OWNER}/${REPO}`)
+            expect(fixUpRun.stdout).not.toContain('The repository name')
+        })
+
+        it('a further --repo, with nothing left to replace, is reported as ignored and claims no change', () => {
+            const result = spawnInitApp(named.dir, [SLUG, '--repo', 'elsewhere', '--dry-run'])
             expect(result.status).toBe(0)
             expect(result.stdout).toContain('--repo elsewhere ignored')
+            expect(result.stdout).toContain('NOT change the contact links')
+            expect(result.stdout).not.toContain(`github.com/${OWNER}/elsewhere`)
+            expect(result.stdout).not.toContain('The repository name')
         })
     })
 

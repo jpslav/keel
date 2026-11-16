@@ -1615,18 +1615,27 @@ worth keeping.
   the derived value would be plausible and wrong with nothing to flag it, and `--dry-run` would print a
   different plan on each machine. The flag takes the NAME only (not `owner/name`, because the owner also
   fills CODEOWNERS, where it may be a team). Without it the links carry `PLACEHOLDER_GITHUB_REPO` beside
-  `PLACEHOLDER_GITHUB_OWNER`, which the closing output names and `git grep` finds. A later `--repo` on an
-  already-rewritten tree is reported as ignored, not dropped silently.
+  `PLACEHOLDER_GITHUB_OWNER`, which the closing output names and `git grep` finds. "I forgot the flag" is a
+  re-run: `pnpm init-app --repo <name>` alone replaces the placeholder in the three files (and refuses on a
+  tree init-app has not adopted, where it would scrub the identity and nothing else). On links that already
+  name a repository a `--repo` is reported as ignored, and the summary and closing text are driven by the
+  state the run found in the files, not by the flag, so they never claim a change that did not happen.
 - **`tests/docs/adopter-identity.test.ts` classifies its tree before asserting, rather than skipping.** It
   ran `init-app acme --eject-showcase` on a copy of whatever tree it was in and asserted what the rewrite
   produced. In an adopted tree the rewrite has nothing to replace (it replaces the template's literals),
   so the assertions read the adopter's own files and went red on their slug and, once filled in, their
   owner. It was green in the `adoption-probe` job only because that job also adopts as `acme`. The test
-  now runs the `init-app` suite only in the pristine template (all four identity files name the
-  maintainer, and `scripts/init-app.ts` is present). Everywhere else it checks the real files directly:
-  none may name the template's maintainer, which is also the check that catches an upstream merge adding a
-  `@jpslav`-owned line to an adopter's CODEOWNERS. A file naming him in some of the four and not the
-  others is red, and a sentinel keeps the template suite from going quietly vacuous if the identity moves.
+  now runs the `init-app` suite only in the pristine template, which it recognises by STRUCTURE
+  (`apps/showcase` exists and the root package is still `keel-workspace`; every adopting `init-app` run
+  renames the root or deletes the showcase). Everywhere else it checks the real files directly: none may
+  name the template's maintainer, which is also the check that catches an upstream merge adding a
+  `@jpslav`-owned line to an adopter's CODEOWNERS. In the template all four must name him. The first
+  version recognised the template by the identity strings themselves, and review found the hole in that:
+  move the maintainer's identity in the four files and nothing else, and every file reads as "adopted", the
+  suite switches itself off and `init-app` silently stops scrubbing anything. A sentinel comparing the
+  test's constants with `init-app`'s literals was added to patch it, then dropped once the structural
+  test made it redundant (and it was red in adopters who scrubbed the script). Exact-spelling matching is
+  deliberate: the template's files use one spelling and the rewrite is a literal replace.
   Rejected: skipping on "`apps/showcase` is absent" (the probe's ejected tree has none, so it would switch
   the gate off where it is meant to run), and having `init-app` delete the test (ADR-0013 makes updates a
   merge, so a file deleted in the fork and edited upstream is a modify/delete conflict on every merge).
