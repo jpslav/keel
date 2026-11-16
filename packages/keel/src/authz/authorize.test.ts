@@ -2,7 +2,8 @@ import { staffOrgSlug } from '@app-config/abilities'
 import { describe, expect, test } from 'vitest'
 import type { AuthUser } from '../ports/auth'
 import { ForbiddenError } from '../ports/errors'
-import { abilityActorFromUser, authorize, canInActiveOrg } from './authorize'
+import type { ServiceIdentity } from '../service-auth/verify'
+import { abilityActorFromService, abilityActorFromUser, authorize, canInActiveOrg, machineActor } from './authorize'
 
 // This suite covers the authz choke point over FRAMEWORK subjects (Job, Membership) and the staff
 // manage-all mechanism. The choke point's enforcement of an APP's own subjects is exercised app-side,
@@ -124,5 +125,115 @@ describe('canInActiveOrg', () => {
     test('managership gates Membership create the same way', () => {
         expect(canInActiveOrg(user({ role: 'admin' }), 'create', 'Membership')).toBe(true)
         expect(canInActiveOrg(user({ role: 'member' }), 'create', 'Membership')).toBe(false)
+    })
+})
+
+// The NON-SESSION forms. Fixture vocabulary: `wharf` is the counterparty org whose service key calls,
+// `fixture-intake` the one machine issuer the fixture seam grants an app power to (a Docket create).
+const wharfKey: ServiceIdentity = {
+    kind: 'org-service',
+    tenantId: 'tenant-harbor',
+    tenantSlug: 'harbor',
+    orgId: 'org-wharf',
+    orgSlug: 'wharf',
+}
+
+describe('abilityActorFromService', () => {
+    test("is a machine acting in the verified key's org, recorded as service-key:<org slug>", () => {
+        expect(abilityActorFromService(wharfKey)).toEqual({
+            kind: 'machine',
+            issuer: 'service-key',
+            principalId: 'service-key:wharf',
+            activeOrgId: 'org-wharf',
+        })
+    })
+})
+
+describe('machineActor', () => {
+    test('qualifies the id by its issuer', () => {
+        expect(machineActor({ issuer: 'fixture-intake', id: 'crane/7', activeOrgId: 'org-depot' })).toEqual({
+            kind: 'machine',
+            issuer: 'fixture-intake',
+            principalId: 'fixture-intake:crane/7',
+            activeOrgId: 'org-depot',
+        })
+    })
+
+    test("refuses keel's own issuers, so an app machine cannot pass for a service key or a system writer", () => {
+        for (const issuer of ['service-key', 'system']) {
+            expect(() => machineActor({ issuer, id: 'x', activeOrgId: 'org-depot' }), issuer).toThrow(/reserved/)
+        }
+    })
+
+    test('refuses an issuer that is not a lowercase slug (a `:` would make principal ids ambiguous)', () => {
+        for (const issuer of ['', 'Fixture', 'fixture:intake', 'fixture intake', '-fixture']) {
+            expect(() => machineActor({ issuer, id: 'x', activeOrgId: 'org-depot' }), issuer).toThrow(/lowercase slug/)
+        }
+    })
+
+    test('refuses an empty id or org (a programming error, never a 403)', () => {
+        expect(() => machineActor({ issuer: 'fixture-intake', id: '', activeOrgId: 'org-depot' })).toThrow(Error)
+        expect(() => machineActor({ issuer: 'fixture-intake', id: 'x', activeOrgId: '' })).toThrow(Error)
+        expect(() => machineActor({ issuer: 'fixture-intake', id: '', activeOrgId: 'org-depot' })).not.toThrow(
+            ForbiddenError,
+        )
+    })
+})
+
+describe('authorize(actor, action, subject)', () => {
+    test("a service caller may report status on its own org's job", () => {
+        const actor = abilityActorFromService(wharfKey)
+        expect(() => authorize(actor, 'update', { type: 'Job', orgId: 'org-wharf' })).not.toThrow()
+    })
+
+    test("a service caller is refused another org's job, with the usual message", () => {
+        const actor = abilityActorFromService(wharfKey)
+        expect(() => authorize(actor, 'update', { type: 'Job', orgId: 'org-depot' })).toThrow('cannot update Job')
+    })
+
+    test('a machine is refused what only people may do, in its own org', () => {
+        const actor = abilityActorFromService(wharfKey)
+        expect(() => authorize(actor, 'create', { type: 'Membership', orgId: 'org-wharf' })).toThrow(ForbiddenError)
+        expect(() => authorize(actor, 'create', { type: 'Job', orgId: 'org-wharf' })).toThrow(ForbiddenError)
+    })
+
+    test("an app machine gets exactly what the seam's machine rules grant", () => {
+        const intake = machineActor({ issuer: 'fixture-intake', id: 'crane', activeOrgId: 'org-depot' })
+        expect(() => authorize(intake, 'create', { type: 'Docket', orgId: 'org-depot' })).not.toThrow()
+        expect(() => authorize(intake, 'update', { type: 'Docket', orgId: 'org-depot' })).toThrow(ForbiddenError)
+        expect(() => authorize(intake, 'update', { type: 'Job', orgId: 'org-depot' })).toThrow(ForbiddenError)
+    })
+
+    test('a person who arrived without a session (a personal API token) is judged exactly as the session form', () => {
+        // The token's owner, built by hand as the inbound-email handlers build a sender: same rules, and
+        // no manageAll unless the credential means to wield the operator org.
+        const owner = {
+            userId: 'user-1',
+            role: 'member',
+            restricted: false,
+            activeOrgId: 'org-a',
+            manageAll: false,
+        } as const
+        const allowed = (call: () => void): boolean => {
+            try {
+                call()
+                return true
+            } catch (error) {
+                if (error instanceof ForbiddenError) return false
+                throw error
+            }
+        }
+        for (const subject of [
+            { type: 'Job', orgId: 'org-a' },
+            { type: 'Membership', orgId: 'org-a' },
+            { type: 'Job', orgId: 'org-b' },
+        ] as const) {
+            expect(
+                allowed(() => authorize(owner, 'create', subject)),
+                `${subject.type} in ${subject.orgId}`,
+            ).toBe(allowed(() => authorize(user({ role: 'member' }), 'org-a', 'create', subject)))
+        }
+        expect(allowed(() => authorize(owner, 'create', { type: 'Job', orgId: 'org-a' }))).toBe(true)
+        expect(allowed(() => authorize(owner, 'create', { type: 'Membership', orgId: 'org-a' }))).toBe(false)
     })
 })

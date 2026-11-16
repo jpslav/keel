@@ -132,13 +132,11 @@ interface Exemption {
     mustMatch: RegExp
 }
 
+// No `service/` entry, deliberately. A service caller used to be exempt here as "org-scoped by
+// construction"; it is now a MACHINE actor (keel/core/abilities `MachineActor`) and its mutations call
+// authorize(...) like any other route, so the per-action check replaced the blanket one (ADR-0012
+// addendum, 2026-11-16). The fixture's service/jobs/route.ts is that machine route.
 const EXEMPT_PREFIXES: Record<string, Exemption> = {
-    'service/': {
-        reason:
-            'service callers are org-scoped by construction (the verifying key row IS an org); gated by ' +
-            'withServiceCaller (ServiceIdentity — see the decision-log service-auth entry)',
-        mustMatch: /withServiceCaller\s*[(<]/,
-    },
     'webhooks/': {
         reason:
             'authenticated by a machine caller, not a user session — a shared webhook secret ' +
@@ -263,7 +261,8 @@ describe('every mutating API route is authorized', () => {
 
     it('the fixture tree still carries a route for every invariant this scan asserts', () => {
         // Named explicitly so a rename inside the fixture cannot quietly retire an invariant: an
-        // authorized product mutation, a framework membership mutation, and one route per gated
+        // authorized product mutation, a framework membership mutation, a MACHINE mutation (a service
+        // caller, authorized with its machine actor rather than exempted), and one route per gated
         // prefix. The exemption-staleness cases below cover the EXEMPT_FILES half.
         for (const rel of [
             'dockets/route.ts',

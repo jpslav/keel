@@ -65,3 +65,13 @@ export function appAbilityRules(
             return false
     }
 }
+
+/**
+ * The app's rules for MACHINE actors (keel/core/abilities `MachineActor` — a caller that is not a
+ * person: a CI identity, an integration). This app grants machines nothing, so every machine is denied
+ * every app subject; this function is the off switch. To let one in, switch on `subject.type` and the
+ * machine's `issuer` here, the way `appAbilityRules` does for people.
+ */
+export function appMachineAbilityRules(): boolean {
+    return false
+}

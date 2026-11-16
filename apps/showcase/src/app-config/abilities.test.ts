@@ -174,4 +174,32 @@ describe('app ability rules (via defineAbilitiesFor)', () => {
             expect(god.can('update', { type: 'Escalation', requesterOrgId: ORG_B, responderOrgId: 'org-c' })).toBe(true)
         })
     })
+
+    describe('machine actors (appMachineAbilityRules is the off switch here)', () => {
+        // The desk's one machine caller is a counterparty's service key. It may report status on its own
+        // team's jobs (the framework's machine table) and nothing in the app — not even in its own team,
+        // where any member could act.
+        const counterparty = {
+            kind: 'machine',
+            issuer: 'service-key',
+            principalId: 'service-key:frontline',
+            activeOrgId: ORG_A,
+        } as const
+
+        test('is denied every ticket, attachment and escalation action, in its own team', () => {
+            const ability = defineAbilitiesFor(counterparty)
+            for (const action of ['create', 'read', 'update', 'delete', 'manage'] as const) {
+                expect(ability.can(action, { type: 'Ticket', orgId: ORG_A }), `${action} Ticket`).toBe(false)
+                expect(ability.can(action, { type: 'Attachment', orgId: ORG_A }), `${action} Attachment`).toBe(false)
+                const escalation = { type: 'Escalation', requesterOrgId: ORG_A, responderOrgId: ORG_A } as const
+                expect(ability.can(action, escalation), `${action} Escalation`).toBe(false)
+            }
+        })
+
+        test("may report status on its own team's job, as the service API needs, and on no other team's", () => {
+            const ability = defineAbilitiesFor(counterparty)
+            expect(ability.can('update', { type: 'Job', orgId: ORG_A })).toBe(true)
+            expect(ability.can('update', { type: 'Job', orgId: ORG_B })).toBe(false)
+        })
+    })
 })

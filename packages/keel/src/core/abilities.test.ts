@@ -1,10 +1,17 @@
 import { describe, expect, test } from 'vitest'
-import { type AbilityActor, defineAbilitiesFor } from './abilities'
+import { type AbilityActor, type MachineActor, defineAbilitiesFor, principalIdOf } from './abilities'
 import type { Role } from './roles'
 
 // Low-entropy, readable fixture ids only (gitleaks): no hex runs, no UUIDs.
 const ORG_A = 'org-a'
 const ORG_B = 'org-b'
+
+function machine(overrides: Partial<MachineActor> = {}): MachineActor {
+    const issuer = overrides.issuer ?? 'service-key'
+    return { kind: 'machine', issuer, principalId: `${issuer}:wharf`, activeOrgId: ORG_A, ...overrides }
+}
+
+const ACTIONS = ['create', 'read', 'update', 'delete', 'manage'] as const
 
 function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
     return {
@@ -165,5 +172,102 @@ describe('defineAbilitiesFor', () => {
         const ability = defineAbilitiesFor(actor({ role: 'restricted', restricted: true }))
         expect(ability.cannot('create', { type: 'Job', orgId: ORG_A })).toBe(true)
         expect(ability.cannot('read', { type: 'Job', orgId: ORG_A })).toBe(false)
+    })
+
+    // MACHINE actors: judged by a separate, deny-by-default table — the framework's for base subjects,
+    // the seam's appMachineAbilityRules for the app's own. Under the fixture seam that grants exactly
+    // one thing: a `fixture-intake` machine may create a Docket in its own org.
+    describe('machine actors', () => {
+        test("a service-key machine may read and update (report status on) its own org's jobs, nothing more", () => {
+            const ability = defineAbilitiesFor(machine())
+            expect(ability.can('read', { type: 'Job', orgId: ORG_A })).toBe(true)
+            expect(ability.can('update', { type: 'Job', orgId: ORG_A })).toBe(true)
+            for (const action of ['create', 'delete', 'manage'] as const) {
+                expect(ability.can(action, { type: 'Job', orgId: ORG_A }), action).toBe(false)
+            }
+        })
+
+        test("a service-key machine reaches no other org's job, and no org-less one", () => {
+            const ability = defineAbilitiesFor(machine())
+            expect(ability.can('update', { type: 'Job', orgId: ORG_B })).toBe(false)
+            expect(ability.can('read', { type: 'Job', orgId: ORG_B })).toBe(false)
+            expect(ability.can('update', { type: 'Job', orgId: null })).toBe(false)
+        })
+
+        test("the job grant is keel's service-key issuer's alone: an app's machine gets no job power", () => {
+            const ability = defineAbilitiesFor(machine({ issuer: 'fixture-intake' }))
+            for (const action of ACTIONS) {
+                expect(ability.can(action, { type: 'Job', orgId: ORG_A }), action).toBe(false)
+            }
+        })
+
+        test('every other base subject is denied every action, even in its own org', () => {
+            const types = [
+                'Membership',
+                'Org',
+                'User',
+                'JobSchedule',
+                'WebhookEndpoint',
+                'WebhookDelivery',
+                'InboundEmail',
+                'Notification',
+                'NotificationPref',
+                'AgreementAcceptance',
+            ] as const
+            for (const issuer of ['service-key', 'fixture-intake']) {
+                const ability = defineAbilitiesFor(machine({ issuer }))
+                for (const type of types) {
+                    for (const action of ACTIONS) {
+                        expect(ability.can(action, { type, orgId: ORG_A }), `${issuer} ${action} ${type}`).toBe(false)
+                    }
+                }
+            }
+        })
+
+        test('a machine has no self: a self-only subject owned by its own principal id is still denied', () => {
+            const robot = machine()
+            const ability = defineAbilitiesFor(robot)
+            for (const type of ['User', 'Notification', 'NotificationPref', 'AgreementAcceptance'] as const) {
+                for (const action of ACTIONS) {
+                    expect(ability.can(action, { type, ownerId: robot.principalId }), `${action} ${type}`).toBe(false)
+                }
+            }
+        })
+
+        test('the staff superpower cannot be smuggled onto a machine', () => {
+            // A MachineActor has no manageAll field, so only a cast can put one there; the machine table
+            // never reads it. The same grant on a PERSON allows everything (the manageAll suite above).
+            const smuggled = { ...machine(), manageAll: true, role: 'admin' } as MachineActor
+            const ability = defineAbilitiesFor(smuggled)
+            expect(ability.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(false)
+            expect(ability.can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
+        })
+
+        test("app subjects go to the seam's machine rules, never to the person rules", () => {
+            // The fixture's PERSON rule lets any non-restricted member update or delete a docket; its
+            // MACHINE rule lets only a `fixture-intake` machine create one. So each answer below shows
+            // which table was asked.
+            const intake = defineAbilitiesFor(machine({ issuer: 'fixture-intake' }))
+            expect(intake.can('create', { type: 'Docket', orgId: ORG_A })).toBe(true)
+            expect(intake.can('create', { type: 'Docket', orgId: ORG_B })).toBe(false)
+            for (const action of ['read', 'update', 'delete', 'manage'] as const) {
+                expect(intake.can(action, { type: 'Docket', orgId: ORG_A }), action).toBe(false)
+            }
+            const serviceKey = defineAbilitiesFor(machine())
+            expect(serviceKey.can('create', { type: 'Docket', orgId: ORG_A })).toBe(false)
+        })
+
+        test('cannot is the negation of can for a machine too', () => {
+            const ability = defineAbilitiesFor(machine())
+            expect(ability.cannot('update', { type: 'Job', orgId: ORG_A })).toBe(false)
+            expect(ability.cannot('create', { type: 'Job', orgId: ORG_A })).toBe(true)
+        })
+    })
+
+    test('principalIdOf records a person by user id and a machine by its issuer-qualified id', () => {
+        expect(principalIdOf(actor({ role: 'member', userId: 'user-1' }))).toBe('user-1')
+        expect(principalIdOf(machine({ issuer: 'fixture-intake', principalId: 'fixture-intake:crane' }))).toBe(
+            'fixture-intake:crane',
+        )
     })
 })

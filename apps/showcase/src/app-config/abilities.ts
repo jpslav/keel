@@ -108,3 +108,13 @@ export function appAbilityRules(
             return false
     }
 }
+
+/**
+ * The app's rules for MACHINE actors (keel/core/abilities `MachineActor`). The desk grants machines
+ * nothing of its own: its one machine caller, a counterparty over /api/service/*, only ever touches
+ * framework Jobs, which the framework's own machine table governs. So every machine is denied every
+ * ticket, escalation and attachment, and this function is the off switch.
+ */
+export function appMachineAbilityRules(): boolean {
+    return false
+}

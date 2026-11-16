@@ -1,4 +1,4 @@
-import type { AbilityAction, AbilityActor, AbilitySubject } from 'keel/core/abilities'
+import type { AbilityAction, AbilityActor, AbilitySubject, MachineActor } from 'keel/core/abilities'
 
 /**
  * The APP's authorization extension (the seam side of keel/core/abilities.ts, ADR-0012). The framework
@@ -63,6 +63,27 @@ export function appAbilityRules(
             return false
         default:
             // Deny by default: an app subject added here without a rule is denied.
+            return false
+    }
+}
+
+/**
+ * The fixture's rules for MACHINE actors (keel/core/abilities `MachineActor`), invoked for the fixture's
+ * own subjects only — framework subjects have the framework's machine table. Deny by default, and kept
+ * deliberately narrower than the person rule above so the tests can tell which table answered:
+ * - Docket: create = a `fixture-intake` machine (an integration that files dockets), sameOrg. A machine
+ *   never updates or deletes a docket, and no other issuer may file one.
+ */
+export function appMachineAbilityRules(
+    actor: MachineActor,
+    action: AbilityAction,
+    subject: AbilitySubject,
+    { sameOrg }: { sameOrg: (subject: AbilitySubject) => boolean },
+): boolean {
+    switch (subject.type) {
+        case 'Docket':
+            return actor.issuer === 'fixture-intake' && action === 'create' && sameOrg(subject)
+        default:
             return false
     }
 }
