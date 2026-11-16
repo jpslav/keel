@@ -1601,3 +1601,41 @@ uses: the outsourced desk has gone quiet, the bundle analyzer keeps running.
 - **A tour start that rejects outright is a recorded miss,** never an unhandled rejection that leaves a resume marker for a tour that never began.
 - **CLAUDE.md no longer counts the fixture's seam modules.** The number had no stated counting rule: top-level files, `db/` files and `presets/operations/` files each gave a different answer, and it drifted three times in one day. The sentence now says what the fixture registers: every `@app-config/*` module the framework reads.
 - **`main`'s role check (`isAssignableRole`) lives in the static `sendInvite`**, the path that mirrors the route, not in the shared `inviteInto`. A preset's invite is held to the same rule at build time, by the `invite` kind's check.
+
+## Demo size budgets re-based, and the starter's is the adopter's (2026-11-16, `demo-size-headroom`)
+
+Requested by an adopter whose ejected app sat at 873,581 of its 880,000-byte budget with one small screen.
+
+- **Prune the demo's CSS instead of raising a budget.** The budget file's rule is that its tightness is
+  deliberate, and the growth since 2026-08-01 (+18,787 showcase, +10,061 starter) was mostly the presets, a
+  feature. But the largest thing in the artifact was never growth: Mantine's whole stylesheet, 15% of it.
+  Removing what no shipped component can match is a smaller change in what the artifact IS than raising the
+  number 25 KB and calling the next 25 KB a decision. Rejected: per-component CSS imports (a hand-kept list
+  whose misses are silent), and trimming only what grew.
+- **Budgets went down.** Showcase 950,000 → 840,000, starter 880,000 → 820,000, each below its unpruned
+  size, so the savings are not slack and a regression in the pruning is a red gate. The showcase keeps ~3%
+  headroom on purpose, as the Tours raise did.
+- **The starter's budget is the adopter's, and is sized for them.** An adopter inherits it. A budget kept
+  3% over the framework's own size is 3% for their first screens. So the two apps' numbers now have two jobs: the showcase's paces the
+  framework (every framework screen and twin is in it, so a framework change costs bytes there first); the
+  starter's lets the starter grow to the showcase's size before it asks anything, and still fails on gross
+  bloat and on the pruning stopping. Rejected: a gate that
+  separates framework baseline from app growth (the bundle has no such attribution, and the adopter wants
+  a ceiling, not a ledger); a tight starter budget plus a note (red on their second screen); raising 880,000.
+  **JP's call to overrule:** if the starter's number should pace as tightly as the showcase's, set it to ~745,000 (721,386 plus 3%).
+- **The gate warns under 2% headroom** and says what to do, on CI as a workflow annotation. It passes: the
+  cue to look while it is cheap. It would have fired through the whole of the presets work.
+- **`init-app` should say whose number it is.** `scripts/init-app.ts` is PR B's, so this is the proposed
+  wording for its "WHAT THIS DID NOT TOUCH" list, where it names deployment parameters and the cutover
+  checklist:
+
+    > • The demo size budget — apps/<slug>/package.json's `check:demo-size` passes the static demo's byte
+    > budget. It is yours now: the starter ships it with room to grow to the showcase's size, which is
+    > sized for an app's own screens, not for the framework's pace. Re-set it when you want a tighter
+    > gate (what your app measures plus the headroom you want, in its own commit). When it goes red,
+    > scripts/check-demo-size.mjs says what to look at first.
+
+- **Not done.** An app's own preset operation definition still ships in its demo (~2.8 KB on the showcase);
+  fixing it is a seam change for 0.3% of the file, recorded in
+  `.claude/future-tasks/resolved/demo-size-budget-headroom-thin.md`. The Next apps still serve the whole
+  Mantine stylesheet; nothing gates their page weight.
