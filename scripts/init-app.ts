@@ -583,20 +583,26 @@ type ContactLinks = 'template' | 'placeholder' | 'settled'
 const TEMPLATE_ADVISORY = 'github.com/jpslav/keel/security/advisories/new'
 const TEMPLATE_DISCUSSIONS = 'github.com/jpslav/keel/discussions'
 const PLACEHOLDER_HOME = `github.com/${PLACEHOLDER_OWNER}/${PLACEHOLDER_REPO}`
+/**
+ * The repository placeholder as a path SEGMENT, which is all that is ever replaced: an adopter who has
+ * already filled in the owner (`github.com/myorg/PLACEHOLDER_GITHUB_REPO`) is the natural order, since the
+ * closing output lists both placeholders, and must not be told there is nothing left to fill.
+ */
+const REPO_SEGMENT = `/${PLACEHOLDER_REPO}/`
 
 function contactLinks(): ContactLinks {
     const text = CONTACT_LINK_FILES.filter((file) => existsSync(abs(file)))
         .map(readText)
         .join('\n')
     if (text.includes(TEMPLATE_ADVISORY) || text.includes(TEMPLATE_DISCUSSIONS)) return 'template'
-    return text.includes(PLACEHOLDER_HOME) ? 'placeholder' : 'settled'
+    return text.includes(REPO_SEGMENT) ? 'placeholder' : 'settled'
 }
 
 function rewriteAdopterIdentity(repo: string | null, links: ContactLinks): void {
     const home = `github.com/${PLACEHOLDER_OWNER}/${repo ?? PLACEHOLDER_REPO}`
     const newAdvisory = `${home}/security/advisories/new`
-    // Replacing the placeholder with itself is skipped by `rewrite`, so this is inert without --repo.
-    const fillRepo: [string, string] = [PLACEHOLDER_HOME, home]
+    // Replacing the segment with itself is skipped by `rewrite`, so this is inert without --repo.
+    const fillRepo: [string, string] = [REPO_SEGMENT, `/${repo ?? PLACEHOLDER_REPO}/`]
 
     if (repo !== null && links === 'settled') {
         note(
@@ -720,7 +726,9 @@ function reportNeedsYourDetails(repo: string | null, links: ContactLinks): void 
         ? `github.com/${PLACEHOLDER_OWNER}/${repo}`
         : links === 'settled'
           ? 'the repository it already names (this run did not change it)'
-          : PLACEHOLDER_HOME
+          : links === 'template'
+            ? PLACEHOLDER_HOME
+            : `github.com/<owner>/${PLACEHOLDER_REPO}`
     const repoBullet =
         links !== 'settled' && !named
             ? `
@@ -866,6 +874,7 @@ async function main(): Promise<void> {
         if (slug === 'keel') fail('"keel" is reserved for the framework package')
     }
     if (options.repo !== null) checkRepoName(options.repo)
+    if (options.displayName !== null && slug === null) fail('--name goes with a slug: it names the app being renamed')
     const displayName = options.displayName ?? (slug ? titleCase(slug) : current.displayName)
     const survivor = slug ?? targetDir
 
@@ -880,15 +889,20 @@ async function main(): Promise<void> {
         summary.push('DELETE apps/showcase and packages/seed')
         summary.push('repoint tsconfig, both vitest configs, knip and infra at the surviving app')
     }
-    summary.push('repoint path citations in the gated docs (docs/, .claude/, README, CLAUDE, CONTRIBUTING)')
-    summary.push(
-        `replace the maintainer's identity in CODEOWNERS, SECURITY.md, the issue-template config and ` +
-            `CODE_OF_CONDUCT.md with ${PLACEHOLDER_OWNER}`,
-    )
+    // `--repo` alone is the fix-up for a tree init-app already adopted, and does only that: no citations, no
+    // prose review, no "run pnpm install" (nothing about the workspace changed).
+    const repoOnly = !slug && !options.ejectShowcase
+    if (!repoOnly) {
+        summary.push('repoint path citations in the gated docs (docs/, .claude/, README, CLAUDE, CONTRIBUTING)')
+        summary.push(
+            `replace the maintainer's identity in CODEOWNERS, SECURITY.md, the issue-template config and ` +
+                `CODE_OF_CONDUCT.md with ${PLACEHOLDER_OWNER}`,
+        )
+    }
     const links = contactLinks()
-    // `--repo` alone is the fix-up for a tree init-app already adopted. On one it has not, it would scrub
-    // the maintainer's identity and leave everything else, a half-adoption nobody asked for.
-    if (!options.slug && !options.ejectShowcase && links === 'template') {
+    // On a tree init-app has not adopted, `--repo` alone would scrub the maintainer's identity and leave
+    // everything else, a half-adoption nobody asked for.
+    if (repoOnly && links === 'template') {
         fail('--repo on its own only fills in a repository name on a tree init-app has already adopted; give a slug')
     }
     if (links === 'settled') {
@@ -908,7 +922,7 @@ async function main(): Promise<void> {
     if (slug) renameApp(current, slug, displayName)
     if (options.ejectShowcase) ejectShowcase(survivor, dryRun ? targetDir : survivor)
     rewriteAdopterIdentity(options.repo, links)
-    repairAppCitations()
+    if (!repoOnly) repairAppCitations()
     formatTouchedFiles()
 
     console.log(`\n${dryRun ? 'WOULD CHANGE' : 'CHANGED'} (${changed.length}):`)
@@ -918,6 +932,11 @@ async function main(): Promise<void> {
     if (skipped.length) {
         console.log(`\nNOT CHANGED (${skipped.length}):`)
         for (const line of skipped) console.log(`  ${line}`)
+    }
+
+    if (repoOnly) {
+        reportNeedsYourDetails(options.repo, links)
+        return
     }
 
     const words = options.ejectShowcase ? [SHOWCASE, current.displayName] : [current.displayName]

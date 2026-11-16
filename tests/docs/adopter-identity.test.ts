@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -109,16 +109,21 @@ const IDENTITY_FILES = ['CODEOWNERS', 'SECURITY.md', '.github/ISSUE_TEMPLATE/con
 /** What `init-app` renames the root package away from. `keel` itself is a reserved slug, so no adoption keeps it. */
 const TEMPLATE_ROOT_PACKAGE = 'keel-workspace'
 
-function rootPackageName(): unknown {
+function rootPackageName(root: string): unknown {
     try {
-        return (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { name?: unknown }).name
+        return (JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { name?: unknown }).name
     } catch {
         return undefined
     }
 }
 
-/** See "TEMPLATE" above. Decided once, at load, so the suites below can be switched on and off by it. */
-const isTemplate = existsSync(path.join(ROOT, 'apps/showcase')) && rootPackageName() === TEMPLATE_ROOT_PACKAGE
+/** See "TEMPLATE" above. Takes a root so the probes can be classified too: that is how it is tested. */
+function looksLikeTemplate(root: string): boolean {
+    return existsSync(path.join(root, 'apps/showcase')) && rootPackageName(root) === TEMPLATE_ROOT_PACKAGE
+}
+
+/** Decided once, at load, so the suites below can be switched on and off by it. */
+const isTemplate = looksLikeTemplate(ROOT)
 
 /** A file that does not exist cannot name anyone — an adopter may delete one. */
 function namesMaintainer(relative: string): boolean {
@@ -193,6 +198,13 @@ let named: Probe
 /** Adopted without `--repo`, then given it by a second run: "I forgot the flag". */
 let fixedUp: Probe
 let fixUpRun: ReturnType<typeof spawnInitApp>
+/** Ejected with no slug: the one adopting run that renames nothing. */
+let ejectOnly: Probe
+/** Adopted without `--repo`, the OWNER filled in by hand (the natural order), then `--repo`. */
+let ownerFirst: Probe
+let ownerFirstRun: ReturnType<typeof spawnInitApp>
+/** An untouched copy: the positive control for the classifier, and the target of the bare-`--repo` refusal. */
+let pristineDir: string
 
 function readProbe(relative: string, probe: Probe = ejected): string {
     return readFileSync(path.join(probe.dir, relative), 'utf8')
@@ -204,7 +216,35 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
         named = runInitApp('keel-adopter-identity-named-', [SLUG, '--repo', REPO, '--yes'])
         fixedUp = runInitApp('keel-adopter-identity-fixup-', [SLUG, '--yes'])
         fixUpRun = spawnInitApp(fixedUp.dir, ['--repo', REPO, '--yes'])
+        ejectOnly = runInitApp('keel-adopter-identity-eject-', ['--eject-showcase', '--yes'])
+        ownerFirst = runInitApp('keel-adopter-identity-owner-', [SLUG, '--yes'])
+        for (const relative of IDENTITY_FILES) {
+            const file = path.join(ownerFirst.dir, relative)
+            writeFileSync(file, readFileSync(file, 'utf8').split(OWNER).join('myorg'))
+        }
+        ownerFirstRun = spawnInitApp(ownerFirst.dir, ['--repo', REPO, '--yes'])
+        pristineDir = makeTestTmpDir('keel-adopter-identity-pristine-')
+        copyTree(ROOT, pristineDir)
     }, 120_000)
+
+    /**
+     * The always-on test above is only as good as the classifier, and nothing else proves the classifier
+     * flips: an adopted tree has to fail one of its two conditions, whichever way `init-app` was called.
+     */
+    describe('the structural classifier tells the template from every tree `init-app` produces', () => {
+        it('calls an untouched copy the template (the positive control)', () => {
+            expect(looksLikeTemplate(pristineDir)).toBe(true)
+        })
+
+        it.each([
+            ['renamed and ejected', () => ejected],
+            ['renamed only (the showcase stays, the root package does not)', () => named],
+            ['adopted, then given its repo name', () => fixedUp],
+            ['ejected with no slug (the root package keeps its name, the showcase goes)', () => ejectOnly],
+        ])('calls a tree %s adopted', (_label, probe) => {
+            expect(looksLikeTemplate(probe().dir)).toBe(false)
+        })
+    })
 
     describe('after `pnpm init-app --eject-showcase`, the adopter repo does not inherit the maintainer identity', () => {
         it.each(IDENTITY_FILES)('%s no longer names the maintainer', (relative) => {
@@ -305,12 +345,16 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
         })
 
         it('on its own, on a tree init-app has not adopted, refuses rather than half-adopting', () => {
-            const pristine = makeTestTmpDir('keel-adopter-identity-pristine-')
-            copyTree(ROOT, pristine)
-            const result = spawnInitApp(pristine, ['--repo', REPO, '--yes'])
+            const result = spawnInitApp(pristineDir, ['--repo', REPO, '--yes'])
             expect(result.status).toBe(1)
             expect(result.stderr).toContain('already adopted')
-            expect(readFileSync(path.join(pristine, 'CODEOWNERS'), 'utf8')).toContain(MAINTAINER_HANDLE)
+            expect(readFileSync(path.join(pristineDir, 'CODEOWNERS'), 'utf8')).toContain(MAINTAINER_HANDLE)
+        })
+
+        it('rejects --name without a slug, which would be accepted and silently dropped', () => {
+            const result = spawnInitApp(named.dir, ['--repo', REPO, '--name', 'Brand New', '--dry-run'])
+            expect(result.status).toBe(1)
+            expect(result.stderr).toContain('goes with a slug')
         })
     })
 
@@ -332,8 +376,32 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
         })
 
         it('no longer asks for the repository name it was just given', () => {
-            expect(fixUpRun.stdout).toContain(`github.com/${OWNER}/${REPO}`)
-            expect(fixUpRun.stdout).not.toContain('The repository name')
+            // The CLOSING section, not the plan above it: the plan says the same words before anything ran.
+            const closing = fixUpRun.stdout.slice(fixUpRun.stdout.indexOf('WHAT NOW NEEDS YOUR DETAILS'))
+            expect(closing).toContain(`the advisory link now points at github.com/${OWNER}/${REPO}`)
+            expect(closing).not.toContain('The repository name')
+            expect(closing).not.toContain(REPO_PLACEHOLDER)
+        })
+
+        it('does only that: no citation rewrite, no prose review, no "run pnpm install"', () => {
+            for (const unrelated of [
+                'repoint path citations',
+                'PROSE STILL TO REVIEW',
+                'WHAT THIS DID NOT TOUCH',
+                'pnpm install',
+            ]) {
+                expect(fixUpRun.stdout, unrelated).not.toContain(unrelated)
+            }
+        })
+
+        it('fills the placeholder even after the owner was filled in first', () => {
+            expect(ownerFirstRun.status, ownerFirstRun.stderr).toBe(0)
+            for (const relative of CONTACT_FILES) {
+                const text = readProbe(relative, ownerFirst)
+                expect(text).toContain(`github.com/myorg/${REPO}/security/advisories/new`)
+                expect(text).not.toContain(REPO_PLACEHOLDER)
+            }
+            expect(ownerFirstRun.stdout).not.toContain('ignored')
         })
 
         it('a further --repo, with nothing left to replace, is reported as ignored and claims no change', () => {

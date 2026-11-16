@@ -142,9 +142,11 @@ right. So pass the name you will push to: `pnpm init-app console --repo pages`. 
 — not `owner/name`, because the owner also fills `CODEOWNERS`, where it may be a team. Without `--repo`
 the links say `PLACEHOLDER_GITHUB_REPO` beside the owner placeholder, and the closing output says so;
 replace both (`git grep PLACEHOLDER_GITHUB -- CODEOWNERS SECURITY.md CODE_OF_CONDUCT.md .github` finds
-them). Forgot it? Run `pnpm init-app --repo pages` afterwards: it replaces the placeholder in those three
-files and touches nothing else. Once they name a repository, a further `--repo` is reported as ignored
-(and the run says so rather than claiming a change), so edit the files directly then. `init-app` does not
+them). Forgot it? Run `pnpm init-app --repo pages` afterwards: it replaces `PLACEHOLDER_GITHUB_REPO` in those
+three files, whatever you have put for the owner by then, and does nothing else (no citation rewrite, no
+`pnpm install` to run). On a tree `init-app` has not adopted yet it refuses, because it would scrub the
+maintainer's identity and leave the rest. Once the links name a repository, a further `--repo` is reported
+as ignored (the run says so rather than claiming a change), so edit the files directly then. `init-app` does not
 read the name from `git remote`: at adoption time `origin` is often still the template, or a fork under
 its default name, and a derived value would be plausible and wrong.
 

@@ -1616,8 +1616,9 @@ worth keeping.
   different plan on each machine. The flag takes the NAME only (not `owner/name`, because the owner also
   fills CODEOWNERS, where it may be a team). Without it the links carry `PLACEHOLDER_GITHUB_REPO` beside
   `PLACEHOLDER_GITHUB_OWNER`, which the closing output names and `git grep` finds. "I forgot the flag" is a
-  re-run: `pnpm init-app --repo <name>` alone replaces the placeholder in the three files (and refuses on a
-  tree init-app has not adopted, where it would scrub the identity and nothing else). On links that already
+  re-run: `pnpm init-app --repo <name>` alone replaces the placeholder segment in the three files (whatever
+  the owner says by then, since filling the owner first is the natural order) and does nothing else; it
+  refuses on a tree init-app has not adopted, where it would scrub the identity and nothing else. On links that already
   name a repository a `--repo` is reported as ignored, and the summary and closing text are driven by the
   state the run found in the files, not by the flag, so they never claim a change that did not happen.
 - **`tests/docs/adopter-identity.test.ts` classifies its tree before asserting, rather than skipping.** It
