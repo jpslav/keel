@@ -617,9 +617,9 @@ const eslintConfig = [
     },
     // The fixture's syntax bans, decided one at a time rather than by inheriting the app's set.
     // APPLIED: getDb (its api/ + domain/ files are the app-shaped request path this template teaches —
-    // tenant access goes through withTenant, ADR-0004) and process.env (only keel's adapters read
-    // it; the fixture is on the app side of that line). It has no test files of its own — keel's tests
-    // live in src/ — so neither needs a test carve-out.
+    // tenant access goes through withTenant, ADR-0004) and process.env (only keel's adapters and an app's
+    // own real adapters read it; the fixture is on the app side of that line). It has no test files of its
+    // own — keel's tests live in src/ — so neither needs a test carve-out.
     // NOT APPLIED, deliberately: react/jsx-no-literals and the a11y-attribute literal ban (ADR-0008).
     // Those govern user-visible COPY, and the fixture ships none: it has no components tree, and its
     // route files are scanned by authorized-mutations.test.ts, never served. Applying them would assert

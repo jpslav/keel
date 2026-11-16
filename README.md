@@ -53,16 +53,16 @@ again. None of this reaches production: real builds ship zero Simulator client c
 Every architectural rule here is a check that fails, because a rule that lives only in a document is a rule
 that erodes on the first busy Friday:
 
-| Rule                                            | What stops you                                                                |
-| ----------------------------------------------- | ----------------------------------------------------------------------------- |
-| Vendor SDKs only inside adapters                | lint (`no-restricted-imports`)                                                |
-| No untenanted database access in a request path | lint bans raw `getDb()`                                                       |
-| Every mutating route authorizes                 | a build-time scan walks the routes and fails any that don't                   |
-| Tenant isolation actually isolates              | one RLS proof suite, run against both the in-process engine and real Postgres |
-| The framework never reaches into your app       | a package fence — one registration seam is the only door                      |
-| No hard-coded UI strings                        | lint, plus a test that both locale catalogs stay key-identical                |
-| Docs don't lie about paths                      | a test fails if a doctrine doc cites a path that doesn't exist                |
-| Dead code                                       | `knip` fails the build                                                        |
+| Rule                                            | What stops you                                                                     |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Vendor SDKs only inside adapters                | lint (`no-restricted-imports`, and `keel/no-dynamic-vendor-import` for `import()`) |
+| No untenanted database access in a request path | lint bans raw `getDb()`                                                            |
+| Every mutating route authorizes                 | a build-time scan walks the routes and fails any that don't                        |
+| Tenant isolation actually isolates              | one RLS proof suite, run against both the in-process engine and real Postgres      |
+| The framework never reaches into your app       | a package fence — one registration seam is the only door                           |
+| No hard-coded UI strings                        | lint, plus a test that both locale catalogs stay key-identical                     |
+| Docs don't lie about paths                      | a test fails if a doctrine doc cites a path that doesn't exist                     |
+| Dead code                                       | `knip` fails the build                                                             |
 
 One command runs all of it: `pnpm verify`.
 

@@ -5,7 +5,8 @@ description: Verify, run a subagent branch review against the house rules, fix f
 1. Run `pnpm verify`. If anything fails, fix it and re-run until green. If Playwright complains about a
    missing browser, run `pnpm exec playwright install chromium` once, then retry.
 2. Spawn a read-only review subagent on the full branch diff vs `main`. Give it this checklist:
-    - CLAUDE.md hard-rule violations: vendor SDK imports outside `packages/keel/src/adapters/`, framework imports in
+    - CLAUDE.md hard-rule violations: vendor SDK imports (static or `import()`) outside `packages/keel/src/adapters/` and
+      `apps/*/src/adapters/real/`, `process.env` reads outside those two, framework imports in
       `keel/core`, tenant queries not routed through `db.withTenant()`, hard-coded UI strings.
     - Dead or speculative code.
     - Copy-paste that should be a shared function or component.
