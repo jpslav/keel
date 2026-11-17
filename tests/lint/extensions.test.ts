@@ -108,7 +108,7 @@ describe('the carve-outs still let through what they were made for, in every spe
         expect(fired(await lint(`${APP}/vite.demo.config.mjs`, composesSentry), VENDOR_STATIC)).toBe(1)
     })
 
-    // The app-root tool configs may read the environment (the Playwright configs do, for ports and modes):
+    // The app-root tool configs may read the environment (the Playwright configs read E2E_BUILD and CI):
     // the process.env ban covers src/ and config/ only.
     it.each([
         `${APP}/playwright.config.ts`,
