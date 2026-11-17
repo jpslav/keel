@@ -1643,6 +1643,10 @@ the panel is the element that carries it.
   `no-restricted-imports` compiles a `regex` as `new RegExp(regex, 'iu')`. The declarationless half has to do
   the same, flags included, or the two halves disagree on `Apps/`. `tests/lint/framework-fence.test.ts`'s
   parity table pins it.
+- **The allowed door is a path too.** `@app-config/*` maps to a directory, so `@app-config/../seed` resolves to
+  the app's seed through the one alias the fence leaves open. And a pattern that bans paths into `apps/` will
+  close the seam itself unless it skips `@` specifiers (`@app-config/apps/registry`). Test the allowed door
+  with the same spellings as the banned ones.
 - **Reflection needs the name as a string, so ban the string.** `Reflect.get(db, 'getDb')` and
   `const k = 'getDb'; db[k]()` got past three selectors that matched how getDb is accessed. Nothing in a zone
   file says `'getDb'` for another reason, so the string is the finding. It is left to the other selectors where

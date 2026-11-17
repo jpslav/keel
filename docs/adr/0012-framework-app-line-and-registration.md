@@ -736,7 +736,9 @@ that specifier by specifier.
 ## Addendum (2026-11-16, later still): a path into `apps/` is app content too
 
 The fence banned the app's `@/*` alias and `@app/seed`, but `../../../apps/showcase/src/domain/tickets` from
-keel's fixture names the same file, and passed both halves of the fence. `appPathPattern` bans any specifier with
-an `apps/<name>` segment, in declarations and (through the same matcher) outside them; no keel directory and no
-package keel imports is called `apps`. It travels with `appCodePattern` as `appCodePatterns`, so no fenced block
-lists one without the other.
+keel's fixture names the same file, and passed both halves of the fence. `appPathPattern` bans any specifier
+that does not start with `@` and has an `apps` segment followed by `/` or `\`, in declarations and (through the
+same matcher) outside them; no keel directory and no package keel imports is called `apps`. An `@` specifier is
+left out so that the seam stays open (`@app-config/apps/…`). The seam itself was the other door:
+`@app-config/../seed` resolves to the app's seed. `appSeamTraversalPattern` bans a `..` segment after the alias.
+All three patterns travel together as `appCodePatterns`, so no fenced block lists one without the others.
