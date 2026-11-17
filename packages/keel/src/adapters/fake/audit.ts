@@ -1,3 +1,4 @@
+import type { AuditDetail } from '../../db/audit'
 import { toIso } from '../../db/jobs'
 import { fakeDb } from './db'
 
@@ -11,6 +12,8 @@ export interface WorldAuditEvent {
     tenantSlug: string
     orgSlug: string
     at: string
+    /** Why, as codes and counts (0016); null when the writer recorded none. Shown as escaped text. */
+    detail: AuditDetail | null
 }
 
 /**
@@ -34,6 +37,7 @@ export async function listWorldAuditEvents(): Promise<WorldAuditEvent[]> {
             'audit_events.subject_id as subject_id',
             'audit_events.actor_user_id as actor_user_id',
             'audit_events.at as at',
+            'audit_events.detail as detail',
             'tenants.slug as tenant_slug',
             'organizations.slug as org_slug',
         ])
@@ -49,5 +53,6 @@ export async function listWorldAuditEvents(): Promise<WorldAuditEvent[]> {
         tenantSlug: r.tenant_slug,
         orgSlug: r.org_slug,
         at: toIso(r.at),
+        detail: r.detail,
     }))
 }

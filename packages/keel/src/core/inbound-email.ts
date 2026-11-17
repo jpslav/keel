@@ -74,6 +74,23 @@ export function parseInboundRecipient(rawRecipient: string): InboundRecipient | 
     return { orgSlug, handler }
 }
 
+/**
+ * WHY intake filed an inbound email as it did: the `detail` of its `inbound-email.received` audit row
+ * (keel/db/audit, migration 0016), written by the server intake and its static twin alike.
+ *
+ * A closed vocabulary on purpose. A handler's refusal `reason` is free text, and the reference handlers
+ * (the showcase's and keel's test fixture's) put the sender's address in it ("sender … is not a member of …"). It stays on the inbound_emails row, which
+ * `app_user` may UPDATE. The audit trail grants no UPDATE, so nothing a sender wrote goes there.
+ */
+export type InboundReceivedDetail =
+    | { outcome: 'handled' }
+    | { outcome: 'unmatched'; cause: 'no-handler' | 'declined' }
+    /**
+     * `handler-threw`: the handler did. `intake-threw`: the handler returned, and keel's own recording of
+     * its result then threw, so whatever the handler did may already have happened.
+     */
+    | { outcome: 'failed'; cause: 'handler-threw' | 'intake-threw' }
+
 /** Build the intake address for an org+handler under a domain — the inverse of parseInboundRecipient. */
 export function formatInboundRecipient(orgSlug: string, handler: string, domain: string): string {
     return `${orgSlug}+${handler}@${domain}`
