@@ -128,6 +128,8 @@ const SECRET_KEY_WORDS = new Set([
     'bearer',
     'jwt',
     'otp',
+    'totp',
+    'pin',
     'pem',
     'apikey',
     'accesskey',
@@ -137,9 +139,16 @@ const SECRET_KEY_WORDS = new Set([
     'sessionkey',
     'encryptionkey',
     'hmackey',
+    'passwordhash',
+    'cardnumber',
+    'cvv',
+    'cvc',
+    'ssn',
 ])
 
-const EMAIL_SHAPE = /[^\s@]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i
+// These run only on the serialized detail, which is bounded first, so no pattern ever sees more than
+// AUDIT_DETAIL_MAX_BYTES (EMAIL_SHAPE's leading run backtracks, quadratically in a string's length).
+const EMAIL_SHAPE = /[^\s@]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}/u
 const JWT_SHAPE = /eyJ[\w-]+\.[\w-]+\./
 const BEARER_SHAPE = /\bbearer\s+[\w.~+/=-]{16,}/i
 const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
@@ -153,24 +162,32 @@ function keyWords(key: string): string[] {
         .filter(Boolean)
 }
 
-/** Whether a key names a secret (`accessToken`), names secrets as a plural (`tokens`), or neither. */
-function secretNamed(key: string): 'one' | 'plural' | null {
+/**
+ * Whether a key names a secret. `plural` for `tokens` or `revokedApiKeys`; `qualified` when a word comes
+ * before the secret's own name (`revoked`), which is what makes a number under it read as a count.
+ */
+function secretNamed(key: string): { plural: boolean; qualified: boolean } | null {
     const words = keyWords(key)
     const last = words.at(-1)
     if (last === undefined) return null
     const before = words.length > 1 ? words.at(-2) : ''
-    const names = (word: string) => SECRET_KEY_WORDS.has(word) || SECRET_KEY_WORDS.has(`${before}${word}`)
-    if (names(last)) return 'one'
-    if (last.length > 1 && last.endsWith('s') && names(last.slice(0, -1))) return 'plural'
-    return null
+    const own = (word: string): number => {
+        if (SECRET_KEY_WORDS.has(`${before}${word}`) && before) return 2
+        return SECRET_KEY_WORDS.has(word) ? 1 : 0
+    }
+    const singular = own(last)
+    if (singular) return { plural: false, qualified: words.length > singular }
+    if (last.length < 2 || !last.endsWith('s')) return null
+    const plural = own(last.slice(0, -1))
+    return plural ? { plural: true, qualified: words.length > plural } : null
 }
 
 /** What is wrong with a string, without repeating it. */
 function stringProblem(value: string): string | null {
     if (value.includes('\u0000')) return 'holds a NUL character, which Postgres jsonb cannot store'
     if (UNPAIRED_SURROGATE.test(value)) return 'holds an unpaired surrogate, which Postgres jsonb cannot store'
-    if (EMAIL_SHAPE.test(value)) return 'looks like an email address'
-    if (JWT_SHAPE.test(value)) return 'looks like a JWT'
+    if (value.includes('@') && EMAIL_SHAPE.test(value)) return 'looks like an email address'
+    if (value.includes('eyJ') && JWT_SHAPE.test(value)) return 'looks like a JWT'
     if (BEARER_SHAPE.test(value)) return 'looks like a Bearer credential'
     return null
 }
@@ -191,10 +208,15 @@ function refuse(path: string, problem: string): never {
     )
 }
 
-function checkValue(value: unknown, path: string, depth: number): void {
+/**
+ * One walk, run twice. `content: false` checks only that the value is JSON (types, depth, plain objects):
+ * it runs on what the caller handed over, before anything bounds it. `content: true` adds every rule about
+ * what a string or key says, and runs only on the serialized, bounded detail.
+ */
+function checkValue(value: unknown, path: string, depth: number, content: boolean): void {
     if (value === null || typeof value === 'boolean') return
     if (typeof value === 'string') {
-        const problem = stringProblem(value)
+        const problem = content ? stringProblem(value) : null
         if (problem) refuse(path, problem)
         return
     }
@@ -206,49 +228,63 @@ function checkValue(value: unknown, path: string, depth: number): void {
     if (typeof value !== 'object') refuse(path, `is a ${typeof value}, not JSON`)
     if (depth > AUDIT_DETAIL_MAX_DEPTH) refuse(path, `nests deeper than ${AUDIT_DETAIL_MAX_DEPTH} levels`)
     if (Array.isArray(value)) {
-        for (let i = 0; i < value.length; i++) checkValue(value[i], `${path}[${i}]`, depth + 1)
+        for (let i = 0; i < value.length; i++) checkValue(value[i], `${path}[${i}]`, depth + 1, content)
         return
     }
-    checkObject(value, path, depth)
+    checkObject(value, path, depth, content)
 }
 
-function checkObject(value: object, path: string, depth: number): void {
+function checkObject(value: object, path: string, depth: number, content: boolean): void {
     if (!isPlainObject(value)) refuse(path, 'is not a plain object (a Date, a Map or a class instance)')
     if (Object.getOwnPropertySymbols(value).length > 0) refuse(path, 'has a symbol key')
     for (const [key, child] of Object.entries(value)) {
-        const keyProblem = stringProblem(key)
-        // A key that fails a shape check is not repeated either: it may be the very thing refused.
-        if (keyProblem) refuse(path, `has a key that ${keyProblem}`)
         // An optional property left undefined is absent, as JSON writes it (and as the type allows).
         if (child === undefined) continue
-        const named = secretNamed(key)
-        if (named === 'one') refuse(`${path}.${key}`, 'names a secret')
-        if (named === 'plural' && typeof child !== 'number')
-            refuse(`${path}.${key}`, 'names secrets, and is not a count')
-        checkValue(child, `${path}.${key}`, depth + 1)
+        if (content) checkKey(key, child, path)
+        checkValue(child, `${path}.${key}`, depth + 1, content)
     }
 }
 
+function checkKey(key: string, child: unknown, path: string): void {
+    const keyProblem = stringProblem(key)
+    // A key that fails a shape check is not repeated: it may be the very thing refused.
+    if (keyProblem) refuse(path, `has a key that ${keyProblem}`)
+    const named = secretNamed(key)
+    // A flag or a null cannot carry a secret (`missingToken: true`), and a number under a qualified plural
+    // counts them (`revokedTokens: 3`). A bare plural's number may be the secret itself (`otps: 482913`).
+    if (!named || child === null || typeof child === 'boolean') return
+    if (named.plural && named.qualified && typeof child === 'number') return
+    refuse(
+        `${path}.${key}`,
+        named.plural
+            ? 'names secrets, and is not a count of them (a number under a key like revokedTokens)'
+            : 'names a secret',
+    )
+}
+
 /**
- * The detail as it will be WRITTEN, or a refusal naming the rule and the path. Two walks: one of what the
- * caller handed over, which refuses what JSON cannot carry, and one of what `JSON.stringify` made of it,
- * since a `toJSON`, a getter or a Proxy can make the two differ. The second is what is bounded and written.
+ * The detail as it will be WRITTEN, or a refusal naming the rule and the path. What the caller handed
+ * over is checked for JSON's types first, so nothing is silently converted (a Date to a string, a
+ * function dropped). It is then serialized ONCE, and that text is bounded before any pattern reads it.
+ * The parsed text is what every content rule checks and what is written: a `toJSON`, a getter or a Proxy
+ * can make it differ from what the caller handed over.
  */
 function writableDetail(detail: unknown): AuditDetail {
     if (!isTopLevelObject(detail)) refuse('detail', 'is not an object')
-    checkObject(detail, 'detail', 1)
-    let text: string
+    checkObject(detail, 'detail', 1, false)
+    let text: unknown
     try {
         text = JSON.stringify(detail)
     } catch {
         refuse('detail', 'cannot be serialized as JSON')
     }
+    if (typeof text !== 'string') refuse('detail', 'cannot be serialized as JSON')
     const bytes = new TextEncoder().encode(text).length
     if (bytes > AUDIT_DETAIL_MAX_BYTES)
         refuse('detail', `is ${bytes} bytes of JSON, over the ${AUDIT_DETAIL_MAX_BYTES}-byte bound`)
     const written: unknown = JSON.parse(text)
     if (!isTopLevelObject(written)) refuse('detail', 'is not an object once serialized')
-    checkObject(written, 'detail', 1)
+    checkObject(written, 'detail', 1, true)
     return written as AuditDetail
 }
 

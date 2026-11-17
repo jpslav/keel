@@ -236,6 +236,16 @@ describe('recordAuditEvent detail', () => {
         ['a pwd', { pwd: 'x' }, 'detail.pwd names a secret'],
         ['a passcode', { passcode: 'x' }, 'detail.passcode names a secret'],
         ['a PEM', { privateKeyPem: 'x' }, 'detail.privateKeyPem names a secret'],
+        ['a bare plural holding a number', { otps: 482913 }, 'detail.otps names secrets'],
+        ['a numeric code under a singular', { otp: 482913 }, 'detail.otp names a secret'],
+        ['a pin', { pin: '4821' }, 'detail.pin names a secret'],
+        ['a totp', { totp: '482913' }, 'detail.totp names a secret'],
+        ['a password hash', { passwordHash: 'x' }, 'detail.passwordHash names a secret'],
+        ['an OAuth refresh token', { refresh_token: 'x' }, 'detail.refresh_token names a secret'],
+        ['an API key header', { 'x-api-key': 'x' }, 'detail.x-api-key names a secret'],
+        ['a card number', { cardNumber: '4111111111111111' }, 'detail.cardNumber names a secret'],
+        ['a card security code', { cvv: 123 }, 'detail.cvv names a secret'],
+        ['a social security number', { ssn: 'x' }, 'detail.ssn names a secret'],
         ['a header name', { Authorization: 'x' }, 'detail.Authorization names a secret'],
         ['a kebab-case cookie', { 'set-cookie': 'x' }, 'detail.set-cookie names a secret'],
         ['a nested secret', { items: [{ ok: 1 }, { privateKey: 'x' }] }, 'detail.items[1].privateKey names a secret'],
@@ -247,6 +257,14 @@ describe('recordAuditEvent detail', () => {
         ['an email address', { reason: 'sender jo.doe@example.test is not a member' }, 'looks like an email address'],
         ['a JWT', { seen: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' }, 'looks like a JWT'],
         ['a Bearer credential', { header: 'Bearer sk_live_51HxYzAbCdEfGh0123' }, 'looks like a Bearer credential'],
+        ['an address with an accented domain', { member: 'josé@bücher.de' }, 'looks like an email address'],
+        ['an address in another script', { member: '李@例子.中国' }, 'looks like an email address'],
+        ['an address with a suffix', { member: 'alice@example.com_admin' }, 'looks like an email address'],
+        [
+            'credentials in a URL',
+            { dsn: 'postgres://app:hunter2@db.internal.example/keel' },
+            'looks like an email address',
+        ],
     ])('refuses a value shaped like %s, and never repeats it', async (_name, detail, message) => {
         const refused = await attempt(detail)
         expect(refused).toContain(message)
@@ -273,7 +291,14 @@ describe('recordAuditEvent detail', () => {
         ['keyId', { keyId: 'key-1' }],
         ['a refusal code', { refusal: 'revoked' }],
         ['a count of revoked tokens', { revokedTokens: 3 }],
-        ['a count of cookies', { cookies: 2 }],
+        ['a count of stale cookies', { staleCookies: 2 }],
+        ['a count of revoked api keys', { revokedApiKeys: 3 }],
+        ['a flag under a secret name', { refusal: 'unknown', missingToken: true }],
+        ['a false flag', { hadPassword: false }],
+        ['a null under a secret name', { apiKey: null }],
+        ['a token limit', { maxTokens: 1000, outputTokens: 12 }],
+        ['a reset count', { passwordResetCount: 2 }],
+        ['a flag about a pin', { hasPin: true, pinRequired: false }],
         ['a count of input tokens', { inputTokens: 512 }],
         ['a package version', { adapter: 'mailgun.js@4.1.0' }],
         ['a refusal that mentions a bearer', { refusal: 'bearer missing' }],
@@ -305,10 +330,27 @@ describe('recordAuditEvent detail', () => {
         }
         expect(await attempt(flipping)).toContain('detail.reason looks like an email address')
 
+        // A toJSON that serializes to nothing at all.
+        const nothing = {}
+        Object.defineProperty(nothing, 'toJSON', { value: () => undefined })
+        expect(await attempt(nothing)).toContain('detail cannot be serialized as JSON')
+
         // And a toJSON that JSON cannot serialize at all.
         const unserializable = { outcome: 'ok' }
         Object.defineProperty(unserializable, 'toJSON', { value: () => ({ n: BigInt(1) }) })
         expect(await attempt(unserializable)).toContain('detail cannot be serialized as JSON')
+    })
+
+    test('bounds the serialized detail before any pattern reads it', async () => {
+        const { AUDIT_DETAIL_MAX_BYTES } = await import('./audit')
+        // An address up front: had the patterns run first, this would be refused as an email address.
+        const spread = { note: `jo.doe@example.test ${'x'.repeat(AUDIT_DETAIL_MAX_BYTES)}` }
+        expect(await attempt(spread)).toContain('bytes of JSON, over the')
+        // A long string no pattern matches is refused by its size alone, not scanned first. (Scanning
+        // 60 KB with the email pattern took seconds when the patterns ran first.)
+        const started = performance.now()
+        expect(await attempt({ note: 'x'.repeat(60_000) })).toContain('detail is 60011 bytes of JSON')
+        expect(performance.now() - started).toBeLessThan(1500)
     })
 
     test('bounds the JSON in bytes, not characters, and says by how much', async () => {
