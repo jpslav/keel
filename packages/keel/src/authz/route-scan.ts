@@ -809,8 +809,11 @@ function reassignedSymbols(sf: ts.SourceFile, checker: ts.TypeChecker): Set<ts.S
         } else if (ts.isObjectLiteralExpression(e)) {
             for (const property of e.properties) {
                 if (ts.isPropertyAssignment(property)) mark(property.initializer)
-                else if (ts.isShorthandPropertyAssignment(property)) mark(property.name)
-                else if (ts.isSpreadAssignment(property)) mark(property.expression)
+                else if (ts.isShorthandPropertyAssignment(property)) {
+                    // The name's own symbol is the object property; the variable written is this one.
+                    const symbol = checker.getShorthandAssignmentValueSymbol(property)
+                    if (symbol) out.add(symbol)
+                } else if (ts.isSpreadAssignment(property)) mark(property.expression)
             }
         } else if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
             mark(e.left) // a default inside a destructuring target: `[POST = x] = …`
