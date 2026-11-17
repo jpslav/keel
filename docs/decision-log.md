@@ -2522,7 +2522,7 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
 
 ## ADR-0014's open decisions, decided by JP (2026-11-17, `docs/adr-package-model`)
 
-ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, in a chat with the
+ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, and added an eighth, in a chat with the
 keel manager session, which relayed them to the session writing the ADR. The ADR records each with its reasons.
 
 - **D1, registry: public npm.** GitHub Packages was the alternative. It needs a classic personal access token to
@@ -2538,3 +2538,7 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
 - **D3, licence: unchanged**, MIT and "Copyright (c) 2026 JP Slavinsky".
 - **D4–D7, as the ADR recommended:** the showcase stays as the never-published reference app; Pages switches at
   the first release candidate; strake's own packages are exempt from `minimumReleaseAge`; no backports during 0.x.
+- **D8, added by JP the same day: per-app infra.** The root `infra/` was the showcase's deployment and nothing
+  else, and `init-app` rewrote its paths on every rename or eject. Each app's deployment now lives in the app
+  (`apps/<app>/infra/`), the reusable code in `@strake/cdk`, and nothing at the root names an app. The starter
+  gets one too. An adopter whose infrastructure spans several apps, as Pages' does, keeps its own root `infra/`.
