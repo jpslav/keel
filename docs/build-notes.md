@@ -1666,3 +1666,7 @@ the panel is the element that carries it.
   a `..` in a package specifier, a path through node_modules, a package by name) and holds each one; the list
   sits above `bareTraversalPattern` in `eslint.config.mjs`. A path is also judged through symlinks, or a checkout
   opened through a symlinked directory would resolve `../../apps/…` to somewhere that is not the repo.
+- **Cite a path in a gated doc in the spelling `pnpm init-app` rewrites.** `--eject-showcase` deletes
+  `packages/seed` and rewrites the citation `` `packages/seed` `` to the surviving app's seed directory
+  (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that
+  spelling: it passed the doc-path gate here, where the directory exists, and failed it in CI's adoption probe.
