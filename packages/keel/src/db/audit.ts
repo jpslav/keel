@@ -1,5 +1,5 @@
 import type { AppAuditAction } from '@app-config/audit'
-import type { SubjectType } from '../core/abilities'
+import { type Actor, type Credential, principalIdOf, type SubjectType } from '../core/abilities'
 import type { DbPort } from '../ports/db'
 
 /**
@@ -52,8 +52,16 @@ export interface AuditEventInput {
     tenantId: string
     /** The active org the action happened in (NOT NULL in the table). */
     orgId: string
-    /** The acting user's id (AuthUser.id). */
+    /**
+     * WHO acted: a person's user id (AuthUser.id), a machine's `<kind>:<id>`, or a `system:*` writer.
+     * From an actor, spread {@link auditActorOf} instead of writing this and `credential` by hand.
+     */
     actorUserId: string
+    /**
+     * HOW they proved it: the credential's kind and id, never a secret. Omitted, the row records NULL,
+     * which reads as "not recorded" (every row before migration 0014, and writers that don't say).
+     */
+    credential?: Credential | null
     /** The audited verb — a framework verb (e.g. `membership.invited`) or one the app registered. */
     action: AuditAction
     /** The ability subject the action targeted. */
@@ -73,7 +81,20 @@ export async function recordAuditEvent(db: DbPort, input: AuditEventInput): Prom
                 action: input.action,
                 subject_type: input.subjectType,
                 subject_id: input.subjectId ?? null,
+                credential_kind: input.credential?.kind ?? null,
+                credential_id: input.credential?.id ?? null,
             })
             .execute(),
     )
+}
+
+/**
+ * The audit fields for an actor: who it is (`principalIdOf`) and the credential it came with. A person
+ * actor that states no credential records none (NULL), never a guessed `session`.
+ */
+export function auditActorOf(actor: Actor): Pick<AuditEventInput, 'actorUserId' | 'credential'> {
+    return {
+        actorUserId: principalIdOf(actor),
+        credential: actor.credential ?? null,
+    }
 }

@@ -10,6 +10,7 @@ import * as m0010 from './0010_webhooks'
 import * as m0011 from './0011_notifications'
 import * as m0012 from './0012_inbound_email'
 import * as m0013 from './0013_agreements'
+import * as m0014 from './0014_audit_credential'
 
 /**
  * Static migration registry (no filesystem scanning — bundles cleanly into the Lambda migrator and
@@ -18,8 +19,15 @@ import * as m0013 from './0013_agreements'
  * the schema composes framework tables with AppTables (ADR-0012). Kysely runs the merged set
  * name-sorted, so framework tables exist before any app table references them. Add new framework
  * migrations here in order; never edit an applied one.
+ *
+ * ORDER INDEPENDENCE. A database that already ran app migrations applies a NEW framework migration
+ * AFTER them (../migrate.ts runs unordered for exactly that), while a fresh database runs it before
+ * them. So a framework migration must have the same effect in either position. It names the objects it
+ * touches, and never sweeps the catalog (`GRANT … ON ALL TABLES`, `ALTER DEFAULT PRIVILEGES`), which
+ * would reach app tables on one path and not the other. ../migrate.test.ts compares the two schemas, and
+ * it holds every app to its side of the numbering: ≥1001, colliding with no framework name.
  */
-const frameworkMigrations: Record<string, Migration> = {
+export const frameworkMigrations: Record<string, Migration> = {
     '0001_tenants': m0001,
     '0003_organizations': m0003,
     '0004_jobs': m0004,
@@ -30,6 +38,7 @@ const frameworkMigrations: Record<string, Migration> = {
     '0011_notifications': m0011,
     '0012_inbound_email': m0012,
     '0013_agreements': m0013,
+    '0014_audit_credential': m0014,
 }
 
 export const migrations: Record<string, Migration> = { ...frameworkMigrations, ...appMigrations }

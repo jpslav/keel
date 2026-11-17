@@ -1,13 +1,73 @@
-import type { Kysely } from 'kysely'
-import { Migrator } from 'kysely/migration'
+import { type Kysely, sql } from 'kysely'
+import { type Migration, Migrator } from 'kysely/migration'
 import { migrations } from './migrations/index'
 import type { DB } from './schema'
 
+/** Framework migrations are numbered 0001–0999 and the app's 1001 and up (ADR-0012). */
+const sequenceOf = (name: string): 'framework' | 'app' => (name < '1000' ? 'framework' : 'app')
+
+/**
+ * The pending migrations that would run out of order WITHIN their own sequence: a migration that sorts
+ * before one of the same sequence the database has already run. Unordered migration exists for the one
+ * case the two sequences create, a framework migration arriving after app migrations ran. Anything
+ * else out of order is still refused, such as two app branches whose 1006 ran before their 1005.
+ */
+export function outOfSequence(executed: readonly string[], pending: readonly string[]): string[] {
+    return pending.filter((name) => executed.some((ran) => sequenceOf(ran) === sequenceOf(name) && ran > name))
+}
+
 export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
+    await migrateRegistryToLatest(db, migrations)
+}
+
+/**
+ * {@link migrateToLatest} over an explicit registry, so a test can stand up a registry of its own (an app
+ * migration that builds on the newest framework one). Production code calls `migrateToLatest`.
+ */
+export async function migrateRegistryToLatest(db: Kysely<DB>, registry: Record<string, Migration>): Promise<void> {
     const migrator = new Migrator({
         db,
-        provider: { getMigrations: async () => migrations },
+        provider: { getMigrations: async () => registry },
+        // Framework migrations (0001–0999) and the app's (≥1001) are TWO sequences interleaved by name
+        // (ADR-0012). So a framework migration that arrives in a keel update sorts BEFORE app migrations
+        // the database already ran. Kysely's default strict ordering refuses that as "corrupted
+        // migrations", which made every new framework migration unappliable to any database that had
+        // run one app migration. Unordered still runs the PENDING migrations in name order, and still
+        // fails if a migration the database ran has disappeared, so a rename stays loud. Order WITHIN a
+        // sequence is still enforced, by the check below.
+        allowUnorderedMigrations: true,
     })
+    const state = await migrator.getMigrations()
+    const executed = state.filter((m) => m.executedAt !== undefined).map((m) => m.name)
+    const stray = outOfSequence(
+        executed,
+        state.filter((m) => m.executedAt === undefined).map((m) => m.name),
+    )
+    // A database that ran a migration this code no longer has (a rename) gets THAT error, as Kysely would
+    // raise it: getMigrations() lists only the registry, so the renamed one would otherwise look merely
+    // out of order here and the message would point at the wrong remedy.
+    if (stray.length > 0) {
+        const missing = await executedButUnknown(db, registry)
+        if (missing.length > 0) {
+            throw new Error(`corrupted migrations: previously executed migration ${missing.join(', ')} is missing`)
+        }
+    }
+    if (stray.length > 0) {
+        throw new Error(
+            `migrations out of order within their sequence: ${stray.join(', ')} would run after a later ` +
+                'migration of the same sequence already ran. Renumber them after the last one applied.',
+        )
+    }
     const { error } = await migrator.migrateToLatest()
     if (error) throw error instanceof Error ? error : new Error(String(error))
+}
+
+/**
+ * The migrations the database recorded that the registry no longer has, read straight from Kysely's
+ * own table, since `Migrator.getMigrations()` reports only the registry's names. Only consulted when
+ * something already looks out of order, so a fresh database never reaches it.
+ */
+async function executedButUnknown(db: Kysely<DB>, registry: Record<string, Migration>): Promise<string[]> {
+    const { rows } = await sql<{ name: string }>`SELECT name FROM kysely_migration`.execute(db)
+    return rows.map((row) => row.name).filter((name) => !Object.hasOwn(registry, name))
 }

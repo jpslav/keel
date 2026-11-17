@@ -1567,6 +1567,37 @@ the panel is the element that carries it.
   first hop is sound because that switch changes the tenant name. It was left alone: with the old
   `pickOrg` and the same 1.5 s latency, `tenancy.spec.ts` passed 10 of 10.
 
+## Actors that are not sessions, in `authorize()` (2026-11-16, `feat/authorize-non-session-actors`)
+
+- **An exemption justified "by construction" names a check that isn't there.** The scan's `service/`
+  entry was honest about its gate: `mustMatch` proved the route used `withServiceCaller`. The reason,
+  "org-scoped by construction", was the absence of a per-action check, and no rule said what a service
+  caller could do. So when a mechanism arrives that can make the check, retire the exemption. Leaving it
+  beside the new path keeps a second way through the gate.
+- **Don't hand a new kind of caller to rules written for an old kind.** The cheap version of this change
+  gave a machine a role and passed it to `appAbilityRules`. It would have compiled and passed every
+  existing test. It would also have handed every machine a member's authoring powers, because both
+  apps' person rules let any non-restricted member author the app's own subjects (the showcase's tickets and attachments, the starter's items). A separate
+  rule function with a `false` default is the version that fails closed.
+- **Make "decide this for every member" a type error.** `frameworkMachineRules` is a
+  `Record<BaseSubjectType, …>`, so adding a framework subject without a machine decision fails
+  `tsc` (seen: TS2741). The person rules' `switch` has no such check.
+- **A rule a caller must not break belongs in a signature or an evaluator, not in a docstring.** "Never
+  cache a role in a token" holds because `abilityActorFromCredential` has no role parameter: it reads
+  the standing itself, on every call. "Only a session wields `manageAll`" holds because
+  `defineAbilitiesFor` ignores the field for any other credential. Both started as advice to whoever
+  builds an actor, and an adopter had already built one with a placeholder role.
+- **Ask who the caller IS before giving it a shape.** The first cut of this work treated every
+  non-session caller as a machine. The adopter's token belongs to a person and acts as that person, so
+  it needed a person actor with a credential, not a principal of its own. The difference decides
+  which rules judge it.
+- **Two migration sequences interleaved by name need an unordered migrator, and CI cannot tell you.**
+  Framework migrations are 0001–0999 and app migrations 1001 and up, so a framework migration added in an
+  update sorts before app migrations a database already ran. Kysely's default refuses that. Every CI
+  database starts empty, so the gate was green; a reused local world (the starter's `.data`) was the only
+  place it showed. When a change adds a framework migration, run the e2e against an existing world, not
+  only a fresh one.
+
 ## Import fences outside declarations, and getDb deny-by-default (2026-11-16, `fix/lint-import-fences-getdb-default`)
 
 - **A ban that names directories leaves the ones nobody named.** The getDb ban covered routes and

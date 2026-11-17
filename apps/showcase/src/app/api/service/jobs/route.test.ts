@@ -12,6 +12,7 @@ vi.mock('keel/db/jobs', () => ({ listServiceJobs: h.list }))
 
 const identity: ServiceIdentity = {
     kind: 'org-service',
+    keyId: 'key-frontline',
     tenantId: 't1',
     tenantSlug: 'northwind',
     orgId: 'o1',

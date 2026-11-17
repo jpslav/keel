@@ -103,3 +103,36 @@ Folding it in would have made the port mean "anything that authenticates", which
   `resolutionPath` points at the Clerk enrollment flow, with no change to the evaluator or the layout
   hook. Clickwrap agreements are the worked example that shipped; email verification, onboarding,
   suspension and billing entitlements ride the same seam.
+
+## Addendum (2026-11-16): the port gains `getMember`
+
+The port grows by one method: `getMember(orgSlug, userId)`. It returns `MemberStanding`
+(`{ role, restricted }`), or `null` when the user is not an active member of that org. Its call site is
+`abilityActorFromCredential` (`packages/keel/src/authz/authorize.ts`). That function builds the person
+behind a credential that is not a session: an inbound email from a member's address, or a personal API
+token an adopter issues. It calls `getMember` on every request, so the person is judged by their
+current role, and a person removed from the org fails on the next call (ADR-0012 addendum of this
+date).
+
+`listMembers` could not do this job. `restricted` is a person-level flag: the fake keeps it on the
+person, and the real adapter reads it from the user's metadata, while `Membership` has only a role. A
+non-session actor built from `listMembers` would therefore have had to guess `restricted`. Inbound email
+used to guess it from the role. The real adapter answers `getMember` with the same two facts
+`getCurrentUser` reads for the caller: the org membership for the role, then the user's metadata. It
+returns null for an org Clerk doesn't have, rather than throwing its 404. It also returns null for a
+BANNED user. Banning ends their sessions but leaves their memberships, so without the check their
+tokens and email would keep their role. A LOCKED user keeps their standing on purpose: anyone can lock an
+account by failing its sign-ins, so treating that as "no standing" would let an attacker kill a victim's
+tokens. Each call costs three Clerk requests (the org, the membership, the user) on every non-session
+request; the `auth-dev` cutover row measures that against Clerk's rate limits.
+
+**Restriction now has one rule, in both adapters and for both methods.** `isRestricted(flag, role)` in
+`keel/core/roles` reads the user's flag OR the `restricted` role in the org in question. Before, the
+real `getCurrentUser` read the flag alone. Real-mode invites write only the role, so a `restricted`
+invitee was unrestricted in the product while the inbound-email path, reading the role, refused them.
+This is a real-mode SESSION change, and a conservative one. The fake world is unchanged, because its
+seed sets both. Like the rest of that adapter, it is unverified against a real Clerk instance
+(`auth-dev` in `docs/cutover-checklist.md`).
+
+"Machine callers are a sibling seam, not this port" still holds. `ServiceIdentity` and `AuthUser`
+remain different types. The two kinds of caller meet in `authorize()`'s actor, not in this port.
