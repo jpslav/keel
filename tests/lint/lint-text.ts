@@ -74,13 +74,13 @@ export const GET_DB_DESTRUCTURE: Fence = {
     fragment: 'Destructuring getDb out of the db port',
 }
 export const GET_DB_STRING: Fence = { rule: 'keel/no-raw-db-handle', fragment: 'Naming getDb as a string' }
-// A path into apps/ reports with its own sentence, through the same two rules as the app's aliases.
-export const APP_PATH_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a path into apps/' }
-export const APP_PATH_DYNAMIC: Fence = { rule: 'keel/no-dynamic-app-import', fragment: 'a path into apps/' }
-export const SEAM_TRAVERSAL_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a `..` out of @app-config/' }
-export const SEAM_TRAVERSAL_DYNAMIC: Fence = {
+// A path into app code is one rule, for every form; a `..` in a package or alias specifier is a pattern, so it
+// reports through the same two rules as the app's aliases.
+export const APP_CODE_PATH: Fence = { rule: 'keel/no-path-to-app-code', fragment: 'app content under another name' }
+export const BARE_TRAVERSAL_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a `..` in a package or alias' }
+export const BARE_TRAVERSAL_DYNAMIC: Fence = {
     rule: 'keel/no-dynamic-app-import',
-    fragment: 'a `..` out of @app-config/',
+    fragment: 'a `..` in a package or alias',
 }
 export const JSX_IN_CORE: Fence = {
     rule: 'keel/no-jsx-in-core',

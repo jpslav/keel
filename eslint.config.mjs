@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import js from '@eslint/js'
 import nextPlugin from '@next/eslint-plugin-next'
 import prettierConfig from 'eslint-config-prettier'
@@ -126,30 +126,21 @@ const appCodePattern = {
         'Framework code (packages/keel) must reach app content only through the seam — import from the ' +
         "@app-config/* alias (apps/*/src/app-config/*), never the app's @/* alias or @app/seed (ADR-0012).",
 }
-// The same app code by PATH: `../../../apps/showcase/src/domain/tickets` from keel's fixture names the file the
-// app's `@/*` alias would, and passed both halves of the fence until this pattern existed. It matches an
-// `apps` path segment followed by a separator, in a specifier that does not start with `@` (relative,
-// absolute or bare). A separator is `/` or `\`: TypeScript resolves `../apps//showcase/…` and
-// `..\apps\showcase\…` into apps/ as well. No keel directory and no package keel imports is called `apps`.
-// An `@` specifier is a scope or an alias, and is left alone: `@app-config/apps/registry` is the seam and
-// must stay open, and `@/…` and `@app/seed/…` are appCodePattern's (one finding, not two).
-const appPathPattern = {
-    regex: String.raw`^(?!@)(.*[\\/])?apps[\\/]`,
+// A package or alias specifier that climbs out of itself with `..`: `@app-config/../seed` resolves to the app's
+// seed through the one door the fence leaves open, `@scope/../../apps/showcase/…` and
+// `lodash/../../packages/seed/src/index` resolve (TypeScript, Node and webpack alike) out of node_modules into
+// app code, and no package specifier has a reason to say `..`. Banned in any specifier that is not a path (does
+// not start with `.`, `/` or `\`), bar `@/` and `@app/seed`, which appCodePattern already bans whole (one finding,
+// not two). A relative or absolute PATH is keelNoPathToAppCodeRule's: it resolves the path instead of reading it.
+const bareTraversalPattern = {
+    regex: String.raw`^(?![.\\/])(?!@[\\/])(?!@app[\\/]seed([\\/]|$))(.*[\\/])?\.\.([\\/]|$)`,
     message:
-        'Framework code (packages/keel) must reach app content only through the seam — a path into apps/ is the ' +
-        "app's code under another name. Import from the @app-config/* alias instead (ADR-0012).",
+        'Framework code (packages/keel) must reach app content only through the seam — a `..` in a package or ' +
+        'alias specifier climbs out of it, into app code the seam does not register. Import the module directly ' +
+        '(ADR-0012).',
 }
-// The seam itself is a door, not a base path: `@app-config/../seed` resolves to the app's seed (and, in keel's
-// own program, the fixture's), which is what the `@app/seed` ban keeps out. Any `..` segment after the alias
-// is banned, whatever it climbs to.
-const appSeamTraversalPattern = {
-    regex: String.raw`^@app-config[\\/](.*[\\/])?\.\.([\\/]|$)`,
-    message:
-        'Framework code (packages/keel) must reach app content only through the seam — a `..` out of ' +
-        '@app-config/ reaches app code the seam does not register. Import the seam module itself (ADR-0012).',
-}
-// Together, as the merge-trap rule for selectors asks: every block that fences app content lists all three.
-const appCodePatterns = [appCodePattern, appPathPattern, appSeamTraversalPattern]
+// Together, as the merge-trap rule for selectors asks: every block that fences app content lists both.
+const appCodePatterns = [appCodePattern, bareTraversalPattern]
 // keel/core is pure TypeScript (ADR-0006). Named once: the core block bans it in declarations and
 // `keel/no-dynamic-framework-import-in-core` everywhere else, from this one list.
 const coreFrameworkPattern = {
@@ -469,6 +460,23 @@ const isVendorSpecifier = (specifier) =>
 //
 // NOT covered: `vi.mock`/`vi.doMock` and jest's. A mock names a module and, given a factory, never loads it;
 // the module under test that imports it is what the declaration and declarationless bans catch.
+// The specifier a node holds: a string literal, or a template literal with no expressions. A computed one is
+// out of every import rule's reach.
+const literalSpecifier = (node) =>
+    node?.type === 'Literal'
+        ? node.value
+        : node?.type === 'TemplateLiteral' && node.expressions.length === 0
+          ? node.quasis[0].value.cooked
+          : undefined
+// Every place a specifier is named outside an import or export declaration, each handed to `check`.
+const declarationlessVisitors = (check) => ({
+    ImportExpression: (node) => check(node.source),
+    TSImportType: (node) => check(node.source),
+    'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
+    // A test inside the fence loads the real module with these, exactly as with import().
+    'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
+        (node) => check(node.arguments[0]),
+})
 // `what` names the thing the specifier is. `matches` returns the fence's own sentence for a banned specifier
 // (appended to the message, so a finding says which pattern it hit) and nothing for an allowed one.
 /** @returns {import('eslint').Rule.RuleModule} */
@@ -484,25 +492,12 @@ const declarationlessImportBan = ({ description, what, matches }) => ({
         },
     },
     create(context) {
-        const check = (node) => {
-            const specifier =
-                node?.type === 'Literal'
-                    ? node.value
-                    : node?.type === 'TemplateLiteral' && node.expressions.length === 0
-                      ? node.quasis[0].value.cooked
-                      : undefined
+        return declarationlessVisitors((node) => {
+            const specifier = literalSpecifier(node)
             const rule = typeof specifier === 'string' ? matches(specifier.trim()) : undefined
             if (!rule) return
             context.report({ node, messageId: 'banned', data: { specifier, rule } })
-        }
-        return {
-            ImportExpression: (node) => check(node.source),
-            TSImportType: (node) => check(node.source),
-            'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
-            // A test inside the fence loads the real module with these, exactly as with import().
-            'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
-                (node) => check(node.arguments[0]),
-        }
+        })
     },
 })
 
@@ -551,6 +546,51 @@ const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
     what: 'a framework',
     matches: matchesPatterns([coreFrameworkPattern]),
 })
+// THE FENCE BY PATH. A relative or absolute specifier names a FILE, so what matters is where it lands, not how
+// it is spelled: `../../../../apps/showcase/src/domain/tickets` from keel's server-lib, the same with `//` or `\`
+// separators, or `../../../../packages/seed/src/index`. Each names app content with no alias for a pattern to
+// see. This rule resolves the path against the importing file and reports it if it lands in an app (`apps/`) or
+// the app's seed package (`packages/seed/`, which `@app/seed` names). Every other path out of packages/keel stays
+// open: keel's tests reach the repo's `tests/support/` helpers that way. Matching ignores case, as macOS's file
+// system does. A specifier that is not a path is the pattern fence's (bareTraversalPattern for a `..` in one).
+// One rule, its own id, for declarations and everything else alike, so the merge trap has nothing to replace.
+const APP_CODE_DIRS = ['apps', 'packages/seed']
+const appCodeDirOfPath = (filename, specifier) => {
+    if (!/^(\.{1,2}([\\/]|$)|[\\/])/.test(specifier)) return undefined
+    const target = resolve(dirname(filename), specifier.replaceAll('\\', '/'))
+    const fromRoot = relative(import.meta.dirname, target)
+        .replaceAll('\\', '/')
+        .toLowerCase()
+    return APP_CODE_DIRS.find((dir) => fromRoot === dir || fromRoot.startsWith(`${dir}/`))
+}
+/** @type {import('eslint').Rule.RuleModule} */
+const keelNoPathToAppCodeRule = {
+    meta: {
+        type: 'problem',
+        docs: { description: 'Framework code does not reach app content by a relative or absolute path.' },
+        schema: [],
+        messages: {
+            path:
+                '`{{specifier}}` is a path into {{dir}}/: app content under another name. Framework code ' +
+                '(packages/keel) reaches app content only through the @app-config/* seam (ADR-0012).',
+        },
+    },
+    create(context) {
+        const check = (node) => {
+            const specifier = literalSpecifier(node)
+            const dir = typeof specifier === 'string' ? appCodeDirOfPath(context.filename, specifier.trim()) : undefined
+            if (!dir) return
+            context.report({ node, messageId: 'path', data: { specifier, dir } })
+        }
+        return {
+            ImportDeclaration: (node) => check(node.source),
+            ExportNamedDeclaration: (node) => check(node.source),
+            ExportAllDeclaration: (node) => check(node.source),
+            TSExternalModuleReference: (node) => check(node.expression),
+            ...declarationlessVisitors(check),
+        }
+    },
+}
 // JSX in keel/core is a framework import nobody writes: with `"jsx": "react-jsx"` (tsconfig.json) every
 // element compiles to an import of `react/jsx-runtime`. Neither half of core's ban can see an import that is
 // not in the source, so the JSX itself is the finding: each outermost element or fragment.
@@ -625,6 +665,7 @@ const keelPlugin = {
         'no-dynamic-app-import': keelNoDynamicAppImportRule,
         'no-dynamic-framework-import-in-core': keelNoDynamicFrameworkImportInCoreRule,
         'no-jsx-in-core': keelNoJsxInCoreRule,
+        'no-path-to-app-code': keelNoPathToAppCodeRule,
         'no-raw-db-handle': keelNoRawDbHandleRule,
     },
 }
@@ -968,7 +1009,7 @@ const eslintConfig = [
     {
         files: [FRAMEWORK_FILES_GLOB, FIXTURE_FILES_GLOB],
         plugins: { keel: keelPlugin },
-        rules: { 'keel/no-dynamic-app-import': 'error' },
+        rules: { 'keel/no-dynamic-app-import': 'error', 'keel/no-path-to-app-code': 'error' },
     },
     // The fixture's syntax bans, decided one at a time rather than by inheriting the app's set.
     // APPLIED: getDb (its api/ + domain/ files are the app-shaped request path this template teaches —

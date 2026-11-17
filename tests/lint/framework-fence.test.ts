@@ -1,12 +1,12 @@
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
     APP,
     APP_CODE_DYNAMIC,
+    APP_CODE_PATH,
     APP_CODE_STATIC,
-    APP_PATH_DYNAMIC,
-    APP_PATH_STATIC,
-    SEAM_TRAVERSAL_DYNAMIC,
-    SEAM_TRAVERSAL_STATIC,
+    BARE_TRAVERSAL_DYNAMIC,
+    BARE_TRAVERSAL_STATIC,
     CORE_DYNAMIC,
     CORE_STATIC,
     type Fence,
@@ -127,26 +127,19 @@ describe('the two halves of each fence read the group the same way', () => {
         '@app/seed/world',
         '@app/seedling',
         '@app-config/jobs',
-        // a path into apps/ is app content too (appPathPattern), in every spelling
-        '../../../apps/showcase/src/domain/tickets',
-        '/home/x/keel/apps/starter/src/seed',
-        'apps/showcase/src/domain/tickets',
-        // a regex pattern is case-insensitive too, as no-restricted-imports compiles it (`iu`)
-        '../../../Apps/showcase/src/domain/tickets',
-        // separators TypeScript also resolves: a doubled slash, and backslashes
-        '../../../apps//showcase/src/domain/tickets',
-        '..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
-        '../../mapps/x',
-        '../apps-config/x',
-        // an @ specifier is a scope or an alias: the seam stays open, a scope is not a path, and @/ is
-        // appCodePattern's alone (one finding in each half, not two in one)
-        '@app-config/apps/registry',
-        '@scope/apps/x',
-        '@/apps/x',
-        // a `..` out of the seam is a path into app code too
+        // a `..` in a package or alias specifier climbs out of it (bareTraversalPattern, a regex: compiled `iu`
+        // by no-restricted-imports, so by the declarationless half too)
         '@app-config/../seed',
         '@app-config/..\\proxy',
         '@app-config/x/../y',
+        '@scope/../../apps/showcase/src/domain/tickets',
+        '@SCOPE/../../apps/showcase/src/domain/tickets',
+        'lodash/../../packages/seed/src/index',
+        // ...but not one that does not climb, nor one appCodePattern already bans whole (one finding, not two)
+        '@app-config/apps/registry',
+        '@app-config/x..y',
+        '@/../domain/tickets',
+        '@app/seed/../world',
     ]
     const halves: [string, string, Fence, Fence][] = [
         ['keel/core', 'packages/keel/src/core/kv.ts', CORE_STATIC, CORE_DYNAMIC],
@@ -175,53 +168,81 @@ describe('the two halves of each fence read the group the same way', () => {
     })
 })
 
-// The same app code by PATH. `../../../apps/showcase/src/domain/tickets` from keel's fixture is the file the
-// app's `@/*` alias names, and passed both halves of the fence until appPathPattern existed.
-describe('a relative path into apps/ crosses the framework/app fence too', () => {
-    // TypeScript resolves all three into apps/showcase/src/domain/tickets.ts.
-    const spellings = [
-        '../../../apps/showcase/src/domain/tickets',
-        '../../../apps//showcase/src/domain/tickets',
-        '..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
+// The same app code by PATH: `../../../../apps/showcase/src/domain/tickets` from keel's server-lib is the file
+// the app's `@/*` alias names, and `../../../seed/src/index` is `@app/seed`. keel/no-path-to-app-code resolves a
+// relative or absolute path against the importing file and reports it if it lands in apps/ or packages/seed/,
+// in a declaration and everywhere else alike.
+describe('a path into app code crosses the framework/app fence too', () => {
+    // The path from `file` to `target`, as an importer would write it.
+    const pathFrom = (file: string, target: string) => path.relative(path.dirname(file), target)
+    // TypeScript resolves all of these to the same file; the rule ignores case, as macOS's file system does.
+    const spellings = (to: string): [string, string][] => [
+        ['posix', to],
+        ['a doubled slash', to.replace('/', '//')],
+        ['backslashes', to.replaceAll('/', '\\')],
+        ['another case', to.replace('apps', 'Apps').replace('seed', 'Seed')],
+    ]
+    const forms = (at: string): [string, string][] => [
+        ['a declaration', `import type { T } from ${at}\nexport type U = T\n`],
+        ['a re-export', `export { T } from ${at}\n`],
+        ['import()', `export const load = () => import(${at})\n`],
+        ['a type-position import()', `export type U = import(${at}).T\n`],
+        ['require()', `export const m = require(${at})\n`],
+        ['import = require()', `import m = require(${at})\nexport { m }\n`],
     ]
 
-    describe.each([...KEEL, FIXTURE])('%s', (file) => {
-        it.each(spellings)('may not import %s, in either half', async (intoApps) => {
-            const at = JSON.stringify(intoApps)
-            const declared = `import type { Ticket } from ${at}\nexport type T = Ticket\n`
-            expect(fired(await lint(file, declared), APP_PATH_STATIC)).toBe(1)
-            const loaded = `export const load = () => import(${at})\n`
-            expect(fired(await lint(file, loaded), APP_PATH_DYNAMIC)).toBe(1)
-            const typed = `export type T = import(${at}).Ticket\n`
-            expect(fired(await lint(file, typed), APP_PATH_DYNAMIC)).toBe(1)
+    describe.each([...KEEL, FIXTURE, 'packages/keel/src/server-lib/kv.test.ts'])('%s', (file) => {
+        describe.each([
+            ['an app', 'apps/showcase/src/domain/tickets'],
+            ['the seed package', 'packages/seed/src/index'],
+        ])('into %s', (_target, target) => {
+            it.each(spellings(pathFrom(file, target)))('spelled with %s, in every form', async (_spelling, to) => {
+                for (const [form, code] of forms(JSON.stringify(to))) {
+                    expect(fired(await lint(file, code), APP_CODE_PATH), form).toBe(1)
+                }
+            })
         })
     })
 
-    // `@app-config/../seed` resolves to the app's seed (keel's fixture's, in keel's own program): the module the
-    // @app/seed ban keeps out, through the one door the fence leaves open.
-    describe.each([...KEEL, FIXTURE])('%s', (file) => {
-        it.each(['@app-config/../seed', '@app-config/../domain/tickets', '@app-config/x/../../seed'])(
-            'may not climb out of the seam with %s, in either half',
-            async (specifier) => {
-                const at = JSON.stringify(specifier)
-                const declared = `import { seed } from ${at}\nexport { seed }\n`
-                expect(fired(await lint(file, declared), SEAM_TRAVERSAL_STATIC)).toBe(1)
-                const loaded = `export const load = () => import(${at})\n`
-                expect(fired(await lint(file, loaded), SEAM_TRAVERSAL_DYNAMIC)).toBe(1)
-            },
-        )
+    it('an absolute path into apps/ too', async () => {
+        const to = JSON.stringify(path.join(process.cwd(), 'apps/showcase/src/domain/tickets'))
+        expect(fired(await lint(FIXTURE, `export const load = () => import(${to})\n`), APP_CODE_PATH)).toBe(1)
     })
 
-    it('a directory merely named like it is not apps/', async () => {
-        const code = "import { a } from '../mapps/x'\nimport { b } from './apps-config/y'\nexport { a, b }\n"
-        const findings = await lint('packages/keel/src/server-lib/kv.ts', code)
-        expect(fired(findings, APP_PATH_STATIC)).toBe(0)
+    it('every other path out of keel stays open: its own modules, and the repo’s test helpers', async () => {
+        const file = 'packages/keel/src/server-lib/kv.test.ts'
+        const code = [
+            "import { a } from '../core/x'",
+            `import { b } from ${JSON.stringify(pathFrom(file, 'tests/support/tmp-dir'))}`,
+            "import { c } from '../../../apps-config/x'",
+            'export { a, b, c }',
+        ].join('\n')
+        expect(fired(await lint(file, code), APP_CODE_PATH)).toBe(0)
     })
 
     it('an app reaching another app by path is not this fence’s business', async () => {
-        // from apps/any-app/src/domain/, four levels up is the repo root: a path with an apps/ segment
-        const code = "export const load = () => import('../../../../apps/starter/src/seed')\n"
-        expect(fired(await lint(`${APP}/src/domain/kv.ts`, code), APP_PATH_DYNAMIC)).toBe(0)
+        const file = `${APP}/src/domain/kv.ts`
+        const code = `export const load = () => import(${JSON.stringify(pathFrom(file, 'apps/starter/src/seed'))})\n`
+        expect(fired(await lint(file, code), APP_CODE_PATH)).toBe(0)
+    })
+
+    // `@scope/../../apps/…` and `@app-config/../seed` are package and alias specifiers, not paths: Node, webpack
+    // and TypeScript resolve them out of node_modules or the seam into app code. bareTraversalPattern bans
+    // the `..`, in both halves (the parity table holds them together).
+    describe.each([...KEEL, FIXTURE])('%s', (file) => {
+        it.each([
+            '@app-config/../seed',
+            '@app-config/../domain/tickets',
+            '@app-config/x/../../seed',
+            '@scope/../../apps/showcase/src/domain/tickets',
+            'lodash/../../packages/seed/src/index',
+        ])('may not climb out of a package or alias with %s, in either half', async (specifier) => {
+            const at = JSON.stringify(specifier)
+            const declared = `import { seed } from ${at}\nexport { seed }\n`
+            expect(fired(await lint(file, declared), BARE_TRAVERSAL_STATIC)).toBe(1)
+            const loaded = `export const load = () => import(${at})\n`
+            expect(fired(await lint(file, loaded), BARE_TRAVERSAL_DYNAMIC)).toBe(1)
+        })
     })
 })
 
