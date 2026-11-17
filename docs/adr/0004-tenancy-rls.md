@@ -182,7 +182,8 @@ false:
 
 The grant takes SET because that is what `withTenant` uses. It takes INHERIT FALSE because the migrating
 role owns every table, so `app_user`'s privileges add nothing it needs, and inheriting them would quietly
-hand it every future grant to `app_user`.
+hand it every future grant to `app_user`. If the role already holds a membership it granted itself (an operator set
+`createrole_self_grant`), SET is added to that membership and its INHERIT is left alone.
 
 **A separate application role is a different case.** The `db-role-not-superuser` cutover row asks for one.
 It also reads the RLS-free infra tables (`tenants`, `organizations`, `service_keys`) before any tenant is
@@ -200,6 +201,8 @@ from `packages/keel/src/adapters/real/db.contract.test.ts`).
 - Inside `withTenant` it must be `app_user`, in the tenant it asked for.
 - Then the whole composed proof suite runs with every role switch made by that owner. The proof context
   gained `appDb` for this; seeding and the superuser negative control stay on `db`, unchanged.
+- The pass runs FIRST in its file. On the fresh cluster a local run starts, the owner's own 0001 is what
+  creates `app_user`. That is the genuine path.
 - `app_user` is cluster-wide, and CI's contract suites share one server. So the pass first MEASURES what
   this server gives a creator (the owner creates a throwaway role and reads its own membership back:
   ADMIN, no INHERIT, no SET). Where another pass already created `app_user`, it grants the owner exactly

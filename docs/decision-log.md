@@ -2172,3 +2172,11 @@ The design is in ADR-0004's addendum of the same date.
   too: the owner created `app_user`, failed without 0015, and passed with it.
 - **`down` is a no-op.** Revoking the switch would take every tenant query down with it, and keel never
   runs `down` migrations.
+- **A self-granted membership keeps its INHERIT.** If an operator set `createrole_self_grant`, the
+  creator already holds a membership it granted itself, and a plain GRANT would rewrite that row's
+  INHERIT. 0015 adds SET to that row instead (found in review; tested on real Postgres).
+- **A migrator with no ADMIN on `app_user` now fails at 0015, deliberately.** That happens on a shared
+  cluster where another role created `app_user`, or with a migrator that never runs the app. It used to
+  migrate cleanly. Now it stops with the one statement to run. The alternative, migrating anyway, would
+  leave a role that might be the app's unable to serve a single tenant query, discovered at the first
+  request instead of at deploy.
