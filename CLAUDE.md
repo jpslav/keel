@@ -178,7 +178,9 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `scripts/init-app.ts` so the gate and the adoption rewriter cannot disagree about scope. The dated
   records (`build-notes.md`, `decision-log.md`, ADR bodies and anything appended to them) are exempt — see
   `docs/README.md` for the split. If you move a directory, the gate is what tells you which docs you
-  just falsified.
+  just falsified. A citation of `apps/showcase` or `apps/starter` is checked strictly while that app
+  exists and passes where it does not (it then names keel's reference app, and a doc merged in from
+  upstream must not turn an adopter's gate red); write `apps/<app>/…` when you mean the reader's own app.
 - **The app's identity is a script, not a checklist**: `pnpm init-app <slug> [--repo <name>] [--eject-showcase]`
   (`scripts/init-app.ts`). Anything that names an app directory or the product's display name belongs
   in the surface that script covers — and **never hard-code the product name in a test**; specs read

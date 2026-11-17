@@ -2040,6 +2040,91 @@ the calls the work made that no plan anticipated.
     - `OrgIdentity` is branded: `orgIdentityForSlug` is its only producer, and tests cast deliberately. The
       inbound intake now gets `ctx.org` through it, at the cost of one more indexed read per email.
 
+## Nothing an upstream merge brings should need the adopter to edit keel's files (2026-11-16, `fix/adopter-merge-friction`)
+
+Two reports from the first adopter's second upstream merge, one bug class: keel depending on, or telling an
+adopter to edit, something a later merge (ADR-0013) will change. `init-app` runs once; a merge happens every
+update.
+
+- **A doc citing the reference apps no longer turns an adopter's path gate red.** Reproduced first: a tree
+  adopted from the commit before the app-owned-adapters work, then given that work's new docs verbatim as a
+  merge would, failed `doc-paths.test.ts` on `docs/recipes/app-owned-adapter.md:167`
+  (`apps/starter/src/app/[locale]/signin/page.tsx`). `resolves` in `tests/docs/doc-set.ts` now treats a
+  citation under `apps/showcase/` or `apps/starter/` as keel's whenever that app is not in the tree, and checks
+  it like any other wherever the app exists. "In the tree" is the app's `package.json`, not its directory: review
+  found that a merge brings back any new file upstream adds under `apps/showcase/` even after the adopter
+  deleted the app, and a directory holding one stray file had switched the rule off. The template stays strict (a broken one fails, watched
+  failing), a rename-only tree is strict about the showcase it kept, and the adopter's own app and
+  `packages/keel` are strict everywhere. Rejected: asking every doc to cite `apps/<app>/…` (it depends on
+  each future author, and the live docs hold 159 citations of the showcase in 46 files and 46 of the
+  starter in 17 (counted 2026-11-17), most of them pointing at keel's worked examples and not at the reader's own app), and a rule in the
+  test alone (`init-app` asks `resolves` which citations are gone before it generalizes them, so the rule
+  lives where both read it). The list is closed at two names: `init-app` reserves `showcase`, and an adopter
+  who keeps the name `starter` has the directory, so their own citations of it are still checked.
+- **keel's demo size script holds no number and no history.** Its header told an adopter to record every
+  budget change in it, and its default was the showcase's number, so changing either meant editing a file
+  upstream also edits. The budget is now a required argument from each app's `package.json` (the showcase
+  passes `840000` explicitly). The starter's history moved, split per app and lightly reworded (every number
+  checked), into `apps/starter/DEMO-SIZE.md` beside its number, and the script's header is generic. That file
+  keeps the adopter's "Changes" section above keel's history, so a later upstream addition to the history and
+  an adopter's own entries sit in different regions. The showcase's history is in this log, below, and NOT in a
+  file in `apps/showcase/`: an adopter deletes that app, and review showed a file keel adds there afterwards
+  comes back on the next merge (and two same-named new files in both app directories make git refuse to map
+  them for an adopter who ejected and renamed). Rejected: a comment in `package.json` (JSON has none), and a
+  `DEMO-SIZE.md` for the showcase. `init-app`'s bullet from the previous change lost its no-number branch and
+  its "the header still describes the showcase" sentence, since neither is true any more, and points at
+  `DEMO-SIZE.md` only when the app has one.
+- **The sweep for other instructions of this kind** fixed the one that was plainly wrong (`docs/adopting.md`
+  told adopters to promote a keel module "by adding one line" to `packages/keel/package.json`, which ADR-0013
+  says never to carry in a fork). The rest each need a decision and are in
+  `.claude/future-tasks/adopter-instructions-edit-keel-owned-files.md`, including the largest: `init-app`'s
+  day-one rewrite of about 60 docs, which is a conflict waiting at every later upstream edit.
+
+## The showcase's demo size budget history, moved out of `scripts/check-demo-size.mjs` (2026-11-16, `fix/adopter-merge-friction`)
+
+This was the HISTORY section of that script's header, and the showcase has no `DEMO-SIZE.md` of its own: an
+adopter deletes the showcase, and a file keel adds under `apps/showcase/` after that comes back on the next
+merge. The starter's history is in `apps/starter/DEMO-SIZE.md`, where an adopter inherits it. Moved, split per
+app, lightly reworded; every number was checked against the original.
+
+What the number is for: the showcase's budget is the framework's pace-setter: about 3% over what it measures, deliberately thin, so that
+growth is a decision someone makes on purpose. Every framework screen and twin is in the showcase, so a
+framework change that costs bytes costs them here first.
+
+**Re-based 2026-11-16, 950000 → 840000**
+
+Since the first commit (925623 bytes) the demo had grown 18787 bytes, to 99.4% of its budget. Per merge: demo
+presets (#26) +16924, the Simulator's people-and-orgs work (#15) +810, actors that start with the page (#16)
++855, the mechanical bundle (#19) +198. Two things were removed:
+
+- 493 bytes were incidental: keel's four preset operation definitions were module-level constants, so valibot
+  and four schemas rode in every app's bundle although the demo never validates a preset. They are built by
+  function now, and `tests/tooling/static-demo-bundle.test.ts` holds it. (An app's OWN definition is not
+  covered: the showcase's `ticket.assign` still carries about 2.8 KB, its definition and valibot's schema
+  functions.)
+- 129257 bytes were Mantine's stylesheet. The apps import `@mantine/core/styles.css` whole, 273 KB for ~100
+  components, of which the demo's bundle reaches 33. The static demo's build now drops every rule whose hashed
+  class is in no shipped file (`scripts/vite-prune-mantine-css.ts`, wired in each app's `vite.demo.config.ts`):
+  14-15% of the file.
+
+What stays is the presets themselves: net of the trim about 16.4 KB on the showcase, real code (the static
+twin's replay, the operation registry, the seam module with `extends`) plus its copy and its tour.
+
+`pnpm build:demo-static`, bytes: 925623 at the first commit, 944410 before the re-base, 814660 after it. The
+budget is 840000, which leaves 25340 bytes (3.0%).
+
+The budget went DOWN, so the bytes saved are not slack: they are the margin above, on purpose. If the pruning
+or the lazy definitions regress, the number turns red, which is the point of it.
+
+**Raised 2026-07-31, 920000 → 950000, for tours**
+
+The tour engine (ghost cursor driver, engine hook, narration bar, Tours tab) plus the showcase's 16-step
+walkthrough and its narration in both locales cost 25244 bytes, 2.8% of the artifact: 10932 of that is the
+engine (measured against the starter, which registers no tours and still passed its own unchanged budget) and
+about 14300 is the tour itself, most of it narration in two locales. That is the one feature whose whole point
+IS that file: a stakeholder who is emailed `dist-demo/index.html` can now press Start instead of reading a
+runbook and clicking fifteen things in the right order.
+
 ## The getDb ban is deny-by-default; two fences hold outside declarations (2026-11-16, `fix/lint-import-fences-getdb-default`)
 
 - **The getDb ban covers all of an app's `src/`, keel's screens (`components/`, `demo-static/`) and the

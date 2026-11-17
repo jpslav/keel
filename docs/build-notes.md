@@ -1598,6 +1598,22 @@ the panel is the element that carries it.
   place it showed. When a change adds a framework migration, run the e2e against an existing world, not
   only a fresh one.
 
+## A gate that is green at adoption time can be red at the next merge (2026-11-16, `fix/adopter-merge-friction`)
+
+- **Every adoption gate is checked on the day `init-app` runs, and the failure that matters comes later.**
+  `doc-paths.test.ts` passed in an ejected tree right after `init-app` and went red after the next upstream
+  merge, because the merge brought a doc that named `apps/starter`, and `init-app` had already finished. The
+  adoption probe (`pnpm init-app …` then `pnpm verify`) cannot see this class. A test of an adoption-time
+  tool needs a second step that plays an upstream merge into the adopted tree, which is what the identity
+  suite now does with a new doc laid into its real adopted probe trees. And the first version of the rule keyed
+  "the app is absent" on its directory, which the next merge falsifies: git silently brings back every NEW file
+  upstream adds under a directory you deleted, so a directory with one stray file looked like the app. Key on
+  what makes it the app (its `package.json`), and test the resurrected-directory state, not only the clean one.
+- **A number kept in a shared script is an "edit the shared file" instruction in disguise.** The demo size
+  script's default was the showcase's budget, and its header said to record changes there. Nothing about it
+  looked like an instruction to edit a keel-owned file until an adopter tried to follow it. Ask of any value
+  an adopter is told to change: whose file is it, and will an upstream merge touch it?
+
 ## Import fences outside declarations, and getDb deny-by-default (2026-11-16, `fix/lint-import-fences-getdb-default`)
 
 - **A ban that names directories leaves the ones nobody named.** The getDb ban covered routes and
