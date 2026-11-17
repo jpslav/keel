@@ -14,7 +14,8 @@ export interface StoredObjectInfo {
      * as `copy`'s `ifMatch`; never parse it or assume a format or a length. Heads of one key that give different
      * `etag`s mean its bytes changed in between. The same `etag` means the same BYTES, not that the object was
      * not rewritten: a rewrite with identical bytes and another content type keeps it on the fake, and on S3
-     * that depends on how the object is stored, so rely on neither. The real adapter returns S3's ETag exactly as S3 sent it (quotes included);
+     * that depends on how the object is stored, so rely on neither. Compare etags only between heads of the SAME
+     * key: the port does not promise that a copy has its source's etag (the fake's does). The real adapter returns S3's ETag exactly as S3 sent it (quotes included);
      * the fake returns a quoted SHA-256 of the bytes.
      */
     etag: string
@@ -96,8 +97,10 @@ export interface StoragePort {
      * fake renames it into place).
      *
      * With `options.ifMatch` it also throws `PreconditionFailedError` (`keel/ports/errors`) when the source is
-     * no longer the version that etag names, and copies nothing; the order of the checks is: same key, missing
-     * source, then the precondition.
+     * no longer the version that etag names, and copies nothing; an `ifMatch` that is empty or `*` is refused first of all, with a plain `Error`
+     * (HTTP's If-Match gives them meanings an etag never has). The order of the other checks is: same key, missing
+     * source, then the precondition; the real adapter leaves the last two to S3, whose order for a missing source
+     * with an `ifMatch` is unconfirmed (cutover row `storage-head`).
      *
      * A missing `from` throws `NotFoundError` (`keel/ports/errors`), on both adapters (the real one needs `s3:ListBucket`;
      * without it S3 answers a missing key with an access-denied error, which is not mapped). `from === to` throws

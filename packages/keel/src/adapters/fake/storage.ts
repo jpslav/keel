@@ -188,6 +188,10 @@ export const fakeStorage: StoragePort = {
     },
 
     async copy(from, to, options?: CopyOptions) {
+        // Refused first, as the real adapter refuses it (see there: S3 could read an empty or `*` as no condition).
+        if (options?.ifMatch !== undefined && (options.ifMatch.trim() === '' || options.ifMatch.trim() === '*')) {
+            throw new Error('storage copy: ifMatch must be the etag head returned, not empty and not "*"')
+        }
         // `to` is checked as `put` checks a key it writes; `from` as `get` checks one it reads (a reserved
         // name is never an object, so it is a missing source, not an invalid one). Either can still be an
         // escape, which resolveKey refuses with the same error as everywhere else.

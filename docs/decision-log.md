@@ -2183,7 +2183,11 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
   the new `PreconditionFailedError` and copies nothing. Real: S3's `CopySourceIfMatch`, which S3 evaluates with
   the copy. Fake: it compares the staged copy's hash, the very bytes about to be published, so the bytes that land
   are exactly the ones that matched even if a writer replaces the source mid-copy (a test races exactly that). The order
-  of the checks is same key, missing source, precondition. No route glue maps the new error; the caller says
+  of the other checks is same key, missing source, precondition (the real adapter leaves the last two to S3, whose order for a
+  missing source with an `ifMatch` is unconfirmed; the cutover row asks). An `ifMatch` that is empty or `*` is refused first of all, on both adapters, with a
+  plain `Error`: HTTP gives an empty If-Match no meaning and `*` the meaning "any version", so S3 could read either as no
+  condition and copy unchecked where the fake refuses (what S3 does with them is unverified, and no etag `head` returns is
+  either). No route glue maps the new error; the caller says
   409 or 412.
 - **412 is inferred, not read.** The CopyObject reference states 412 for its other conditional headers and gives no
   code for `x-amz-copy-source-if-match`, which is HTTP's rule for a failed If-Match. The adapter maps the name

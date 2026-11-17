@@ -123,6 +123,11 @@ export function createRealStorage(bucket: string, region: string): StoragePort {
         },
 
         async copy(from, to, options?: CopyOptions) {
+            // HTTP gives an empty If-Match no meaning and `*` the meaning "any version", so S3 could read either as
+            // "no condition" and copy unchecked, where the fake would refuse. No etag `head` returns is either.
+            if (options?.ifMatch !== undefined && (options.ifMatch.trim() === '' || options.ifMatch.trim() === '*')) {
+                throw new Error('storage copy: ifMatch must be the etag head returned, not empty and not "*"')
+            }
             // A copy onto itself changes nothing, and is nearly always two keys built the same way by mistake:
             // refuse it before spending a request, with the same error the fake gives.
             if (from === to) throw new Error(`storage copy: source and destination are the same key: ${from}`)
@@ -153,7 +158,7 @@ export function createRealStorage(bucket: string, region: string): StoragePort {
                 // failed If-Match; the cutover row asks to confirm it.) Nothing was copied.
                 if (name === 'PreconditionFailed' || $metadata?.httpStatusCode === 412) {
                     throw new PreconditionFailedError(
-                        `storage copy: ${from} is no longer the version ${options?.ifMatch}; nothing was copied`,
+                        `storage copy: ${from} is no longer the version ${options?.ifMatch ?? '(none given)'}; nothing was copied`,
                     )
                 }
                 // A missing SOURCE. (A missing bucket is NoSuchBucket, a misconfiguration, and is not mapped.)

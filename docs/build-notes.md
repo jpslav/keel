@@ -1641,9 +1641,11 @@ the panel is the element that carries it.
   `NoSuchKey`. The same bareness is why a missing bucket cannot be told from a missing key on a HEAD.
 - **The ETag is checked on the bytes about to be published.** The fake stages the copy, hashes the STAGED file and
   compares it with `ifMatch`, so no replacement of the source can put other bytes under the old etag. A mutation
-  that checks the source after staging instead survives, and should: it differs only when the source is replaced
-  with new bytes and then put back before the check (an ABA swap), which cannot be provoked. The staged check is
-  the strict form, so it stays.
+  that checks the source after staging instead survives, and should: it differs only when B is staged and the
+  source is back to A before the check (an ABA swap). A race with a writer that goes A, B, A did not catch it in 5
+  runs each at 9-byte and 1 MB bodies (the same test with 8 MB bodies failed even on the correct code, which was not
+  investigated), so the test's comment says what it does not pin. The staged check is the strict form by
+  construction, so it stays.
 - **Opening a directory read-only succeeds, and reading it fails.** `head` of a directory first passed its test by an
   accident, most likely because the sidecar's `ENOENT` won the `Promise.all` and the catch turned it into `null`. Removing the
   `isFile` guard survived until the test put a sidecar file beside the directory, so that only "not a regular file"

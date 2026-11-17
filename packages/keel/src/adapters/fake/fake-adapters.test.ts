@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
@@ -351,6 +351,21 @@ describe('fake storage', () => {
             await expect(fakeStorage.head('../outside.txt')).rejects.toThrow(/invalid storage key/)
         })
 
+        test('a body with no sidecar, or a sidecar that is not JSON, is corruption and throws, as get does: it is not "missing"', async () => {
+            const { fakeStorage } = await import('./storage')
+            const store = path.join(tmp, 'storage')
+            mkdirSync(path.join(store, sub('corrupt')), { recursive: true })
+            writeFileSync(path.join(store, sub('corrupt/no-sidecar')), 'bytes')
+            await fakeStorage.put(sub('corrupt/bad-json'), 'bytes', 'text/plain')
+            writeFileSync(path.join(store, `${sub('corrupt/bad-json')}.meta.json`), 'this is not json')
+
+            await expect(fakeStorage.head(sub('corrupt/no-sidecar'))).rejects.toThrow(/ENOENT/)
+            await expect(fakeStorage.head(sub('corrupt/bad-json'))).rejects.toThrow(SyntaxError)
+            // and `get` says the same of both, so the two reads agree about what is broken
+            await expect(fakeStorage.get(sub('corrupt/no-sidecar'))).rejects.toThrow(/ENOENT/)
+            await expect(fakeStorage.get(sub('corrupt/bad-json'))).rejects.toThrow(SyntaxError)
+        })
+
         test('the etag follows the bytes: same bytes, same etag; other bytes, another; a rewrite changes it', async () => {
             const { fakeStorage } = await import('./storage')
             await fakeStorage.put(sub('etag/a'), 'same bytes', 'text/plain')
@@ -382,7 +397,7 @@ describe('fake storage', () => {
             )
         })
 
-        test('a copy has the etag of its source, so a head after copy can be compared with the one before', async () => {
+        test('in the fake a copy has its source’s etag (the port does not promise that across keys)', async () => {
             const { fakeStorage } = await import('./storage')
             await fakeStorage.put(sub('same/from'), 'bytes', 'text/plain')
             await fakeStorage.copy(sub('same/from'), sub('same/to'))
@@ -453,6 +468,26 @@ describe('fake storage', () => {
             ).resolves.toBeUndefined()
         })
 
+        test.each(['', ' ', '*', ' * '])(
+            'an ifMatch of %j is refused first of all, and copies nothing',
+            async (ifMatch) => {
+                const { fakeStorage } = await import('./storage')
+                await fakeStorage.put(sub('blank/from'), 'x', 'text/plain')
+
+                await expect(fakeStorage.copy(sub('blank/from'), sub('blank/to'), { ifMatch })).rejects.toThrow(
+                    /not empty and not "\*"/,
+                )
+                // before the other checks too: a missing source or the same key would otherwise be reported first
+                await expect(fakeStorage.copy(sub('blank/gone'), sub('blank/to'), { ifMatch })).rejects.toThrow(
+                    /not empty/,
+                )
+                await expect(fakeStorage.copy(sub('blank/from'), sub('blank/from'), { ifMatch })).rejects.toThrow(
+                    /not empty/,
+                )
+                expect(await fakeStorage.get(sub('blank/to'))).toBeNull()
+            },
+        )
+
         test('the order of the checks: same key, then a missing source, then the precondition', async () => {
             const { fakeStorage } = await import('./storage')
             await fakeStorage.put(sub('order/k'), 'x', 'text/plain')
@@ -468,12 +503,16 @@ describe('fake storage', () => {
             ).rejects.toBeInstanceOf(PreconditionFailedError)
         })
 
-        test('what lands is exactly the version that matched, even when a writer replaces the source mid-copy', async () => {
+        test('what lands is exactly the version that matched, even when the source goes A, then B, then A again mid-copy', async () => {
             const { fakeStorage } = await import('./storage')
             let lost = 0
-            // A real in-process race: each round the source is replaced while a conditional copy of the old version
-            // runs. Either the copy won (the destination holds the OLD bytes the etag names) or it was refused (the
-            // destination does not exist). The destination must never hold the NEW bytes under the old etag.
+            // A real in-process race. The source is A ("old bytes") with a known etag; a writer makes it B and then A
+            // again while a conditional copy runs. Either the copy won (the destination holds A) or it was refused (the
+            // destination does not exist); it must never hold B, whose bytes the etag does not name. WHAT THIS DOES NOT
+            // PIN: that the hash is of the STAGED copy and not of the source after staging. Those differ only when B is
+            // staged and A is back before the check, a window this race did not hit in 5 runs at 3 body sizes; the staged
+            // hash is the strict form by construction (docs/build-notes.md, "The ETag is checked on the bytes about to be
+            // published"), not by this test.
             for (let round = 0; round < 1000 && lost < 3; round++) {
                 const from = sub(`race/${round}/from`)
                 const to = sub(`race/${round}/to`)
@@ -482,7 +521,10 @@ describe('fake storage', () => {
 
                 const [result] = await Promise.allSettled([
                     fakeStorage.copy(from, to, { ifMatch: etag }),
-                    fakeStorage.put(from, 'new bytes', 'text/plain'),
+                    (async () => {
+                        await fakeStorage.put(from, 'new bytes', 'text/plain')
+                        await fakeStorage.put(from, 'old bytes', 'text/plain')
+                    })(),
                 ])
 
                 if (result.status === 'rejected') {
@@ -493,8 +535,8 @@ describe('fake storage', () => {
                     expect(text((await fakeStorage.get(to))!.body)).toBe('old bytes')
                 }
             }
-            // Not vacuous: the write did land in the middle of a copy, and the precondition refused it. (That the
-            // copy succeeds when nothing changed is the test above; here only the invariant is raced.)
+            // Not vacuous: the writer did land in the middle of a copy, and the precondition refused it. (That the copy
+            // succeeds when nothing changed is the test above; here only the invariant is raced.)
             expect(lost).toBeGreaterThan(0)
         })
     })

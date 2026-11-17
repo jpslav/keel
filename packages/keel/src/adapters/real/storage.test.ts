@@ -308,6 +308,23 @@ describe('real storage copy with ifMatch', () => {
         await expect(storage().copy('a', 'b', { ifMatch: '"x"' })).rejects.toBe(denied)
     })
 
+    test.each(['', ' ', '*', ' * '])(
+        'an ifMatch of %j is refused before any request: HTTP gives it a meaning no etag has',
+        async (ifMatch) => {
+            await expect(storage().copy('a', 'b', { ifMatch })).rejects.toThrow(/not empty and not "\*"/)
+            // first of all: before the same-key check too, as in the fake
+            await expect(storage().copy('same', 'same', { ifMatch })).rejects.toThrow(/not empty and not "\*"/)
+            expect(send).not.toHaveBeenCalled()
+        },
+    )
+
+    test('the refusal names the version when there is one, and not "undefined" when a 412 comes back unasked', async () => {
+        send.mockRejectedValueOnce(s3Error('PreconditionFailed', 'x'))
+        await expect(storage().copy('staging/a', 'final/a')).rejects.toThrow(
+            /staging\/a is no longer the version \(none given\)/,
+        )
+    })
+
     test('a copy onto itself is refused before any request even with an ifMatch', async () => {
         await expect(storage().copy('same', 'same', { ifMatch: '"x"' })).rejects.toThrow(/same key/)
         expect(send).not.toHaveBeenCalled()
