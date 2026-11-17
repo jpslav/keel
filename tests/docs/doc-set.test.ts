@@ -1,8 +1,8 @@
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { makeTestTmpDir } from '../support/tmp-dir'
-import { citedPaths, generalizeAppCitations } from './doc-set'
+import { citedPaths, generalizeAppCitations, resolves } from './doc-set'
 
 /**
  * The citation parser's own tests, because `doc-paths.test.ts` can only ever prove that TODAY's docs
@@ -135,6 +135,66 @@ describe('generalizeAppCitations', () => {
     it('generalises a brace expansion at its static prefix, keeping the braces', () => {
         expect(generalizeAppCitations('`apps/showcase/messages/{en,es}.json`', gone)).toBe(
             '`apps/<app>/messages/{en,es}.json`',
+        )
+    })
+})
+
+/**
+ * `resolves` against real directory trees, because what it decides depends on which apps exist. Three trees,
+ * and the point is that the template is strict while an adopted tree is not strict about keel's two apps.
+ */
+describe('resolves', () => {
+    function tree(...dirs: string[]): string {
+        const root = makeTestTmpDir('doc-set-resolves-')
+        for (const dir of dirs) mkdirSync(path.join(root, dir), { recursive: true })
+        return root
+    }
+    const template = () => tree('apps/showcase/src/app-config', 'apps/starter/src', 'packages/keel/src')
+    const adopted = () => tree('apps/console/src', 'packages/keel/src') // ejected, starter renamed
+    const renamedOnly = () => tree('apps/showcase/src', 'apps/console/src', 'packages/keel/src')
+
+    it('is strict in the template: a broken citation of either reference app fails', () => {
+        const root = template()
+        expect(resolves('apps/showcase/src/app-config', root)).toBe(true)
+        expect(resolves('apps/showcase/src/no-such-dir', root)).toBe(false)
+        expect(resolves('apps/starter/src/no-such-dir', root)).toBe(false)
+        expect(resolves('apps/showcase', root)).toBe(true)
+    })
+
+    it("lets an adopted tree cite keel's reference apps, which are not in it", () => {
+        const root = adopted()
+        expect(resolves('apps/starter/src/app/[locale]/signin/page.tsx', root)).toBe(true)
+        expect(resolves('apps/showcase/src/domain/db/tickets.ts', root)).toBe(true)
+        expect(resolves('apps/showcase/src/no-such-dir', root)).toBe(true)
+        expect(resolves('apps/starter', root)).toBe(true)
+    })
+
+    it('stays strict for everything else in an adopted tree', () => {
+        const root = adopted()
+        expect(resolves('apps/console/src/no-such-dir', root), "the adopter's own app").toBe(false)
+        expect(resolves('packages/keel/src/no-such-dir', root)).toBe(false)
+        expect(resolves('docs/no-such-dir', root)).toBe(false)
+        expect(resolves('apps/showcase-extra/src', root), 'a lookalike prefix is not the showcase').toBe(false)
+    })
+
+    it('judges each reference app by whether IT is present', () => {
+        const root = renamedOnly() // the showcase kept, the starter renamed away
+        expect(resolves('apps/showcase/src/no-such-dir', root)).toBe(false)
+        expect(resolves('apps/starter/src/no-such-dir', root)).toBe(true)
+    })
+
+    it('keeps checking an app called starter that the adopter kept', () => {
+        const root = tree('apps/starter/src', 'packages/keel/src') // `pnpm init-app starter --eject-showcase`
+        expect(resolves('apps/starter/src/no-such-dir', root)).toBe(false)
+    })
+
+    it('agrees with the rewriter: init-app does not generalize a citation the gate accepts', () => {
+        // init-app asks `(cited) => !resolves(cited)`; a citation of a reference app that is not here is
+        // keel's, so it is left as written instead of becoming `apps/<app>/…`.
+        const root = adopted()
+        const text = 'see `apps/starter/src/app/[locale]/signin/page.tsx` and `apps/console/src/no-such-dir`'
+        expect(generalizeAppCitations(text, (cited) => !resolves(cited, root))).toBe(
+            'see `apps/starter/src/app/[locale]/signin/page.tsx` and `apps/<app>/src/no-such-dir`',
         )
     })
 })

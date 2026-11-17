@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { makeTestTmpDir } from '../support/tmp-dir'
+import { citedPaths, resolves } from './doc-set'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -415,6 +416,43 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
             expect(result.stdout).toContain('NOT change the contact links')
             expect(result.stdout).not.toContain(`github.com/${OWNER}/elsewhere`)
             expect(result.stdout).not.toContain('The repository name')
+        })
+    })
+
+    /**
+     * Adoption is not the last time keel's docs reach the adopter: `git merge upstream/main` (ADR-0013) brings
+     * NEW text, and `init-app` only repointed what it found on the day it ran. The first recipe to cite
+     * `apps/starter/…` turned the path gate red in an ejected adopter's tree, on a citation nobody there wrote.
+     * This lays such a doc into the real adopted probe trees and asks the gate's own functions about it.
+     */
+    describe('a doc that arrives from upstream after adoption still passes the path gate', () => {
+        const upstreamDoc = [
+            '# A recipe added upstream',
+            "The way the sign-in page loads keel's real form (`apps/starter/src/app/[locale]/signin/page.tsx`)",
+            'and the worked example (`apps/showcase/src/domain/db/tickets.ts`), copied with',
+            '`cp apps/showcase/src/domain/db/tickets.ts apps/starter/src/domain/db/mine.ts`.',
+            '',
+        ].join('\n')
+
+        function broken(probe: Probe, extra = ''): string[] {
+            const file = path.join(probe.dir, 'docs/recipes/upstream-new.md')
+            writeFileSync(file, upstreamDoc + extra)
+            return citedPaths(file)
+                .filter((citation) => !resolves(citation.path, probe.dir))
+                .map((citation) => citation.path)
+        }
+
+        it('passes in a tree that renamed the starter and ejected the showcase', () => {
+            expect(broken(ejected)).toEqual([])
+        })
+
+        it('passes in a tree that only renamed the starter, and still checks the showcase it kept', () => {
+            expect(broken(named)).toEqual([])
+            expect(broken(named, '`apps/showcase/src/no-such-dir`\n')).toEqual(['apps/showcase/src/no-such-dir'])
+        })
+
+        it("still fails on a citation of the adopter's own app that is not there", () => {
+            expect(broken(ejected, `\`apps/${SLUG}/src/no-such-dir\`\n`)).toEqual([`apps/${SLUG}/src/no-such-dir`])
         })
     })
 

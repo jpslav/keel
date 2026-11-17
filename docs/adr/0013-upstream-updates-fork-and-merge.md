@@ -147,3 +147,20 @@ question:
    cost assumed above is the cost of versioning something still moving.
 
 Until one of those happens, a registry entry would be a version number with nobody to tell.
+
+## Addendum — 2026-11-16: a merged-in doc may cite the reference apps
+
+The table of where conflicts land says `docs/**` conflicts because `init-app` rewrote path citations. It
+missed a second effect. A doc that arrives in a LATER merge can cite `apps/showcase/…` or `apps/starter/…`,
+which an adopted tree no longer has, and the path gate (`tests/docs/doc-paths.test.ts`) went red on a
+citation nobody in the adopter's repo wrote. The first instance was a recipe citing the starter's sign-in
+page, merged into a tree that had ejected the showcase and renamed the starter; the adopter fixed their own
+copy, and every later doc naming either app would have done the same. `init-app` could not prevent it: it
+runs once, and the merge brings new text after it has.
+
+`resolves` in `tests/docs/doc-set.ts` now treats a citation under `apps/showcase/` or `apps/starter/` as a
+reference to keel's own app whenever that app's directory is absent, and checks it like any other wherever the
+app exists. So the template's CI still fails on a broken one, a tree that renamed the starter but kept the
+showcase is still strict about the showcase, and citations of the adopter's own app or of `packages/keel` stay
+strict everywhere. The rule lives in the file the gate and `init-app` share, so the rewriter and the gate
+cannot disagree about it. A doc that means the reader's own app should still say `apps/<app>/…`.

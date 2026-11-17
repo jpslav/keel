@@ -436,6 +436,9 @@ exist), dated records, and future tasks. Two consequences for you on day one:
   the first time something behaves strangely.
 - **`.claude/future-tasks/`** carries designed-but-unbuilt work with the design written down. Keep the
   ones you want, delete the rest.
+- **Docs that arrive by `git merge upstream/main`** may cite `apps/showcase` or `apps/starter`, which you
+  no longer have. The gate passes those, since they name keel's reference apps, and still checks every citation
+  of your own app and of keel. (It used to fail on them.)
 
 The habits that keep the rest truthful, which you inherit: record unplanned decisions in
 `decision-log.md` and hard-won lessons in `build-notes.md` as they happen; amend an ADR by appending a
