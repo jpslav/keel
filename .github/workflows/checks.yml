@@ -19,7 +19,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v7
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v6
             - uses: actions/setup-node@v7
               with:
                   node-version-file: .nvmrc
@@ -57,7 +57,7 @@ jobs:
                     --health-retries 10
         steps:
             - uses: actions/checkout@v7
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v6
             - uses: actions/setup-node@v7
               with:
                   node-version-file: .nvmrc
@@ -127,7 +127,7 @@ jobs:
                 shard: ${{ fromJson(needs.e2e-shards.outputs.matrix) }}
         steps:
             - uses: actions/checkout@v7
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v6
             - uses: actions/setup-node@v7
               with:
                   node-version-file: .nvmrc
@@ -135,7 +135,7 @@ jobs:
             - run: pnpm install --frozen-lockfile
             # Browsers are ~150MB and were re-downloaded on every run. Keyed on the lockfile because
             # that is what pins the Playwright version the browser build must match.
-            - uses: actions/cache@v4
+            - uses: actions/cache@v6
               id: playwright-cache
               with:
                   path: ~/.cache/ms-playwright
@@ -169,13 +169,13 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v7
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v6
             - uses: actions/setup-node@v7
               with:
                   node-version-file: .nvmrc
                   cache: pnpm
             - run: pnpm install --frozen-lockfile
-            - uses: actions/cache@v4
+            - uses: actions/cache@v6
               id: playwright-cache
               with:
                   path: ~/.cache/ms-playwright
@@ -216,7 +216,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v7
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v6
             - uses: actions/setup-node@v7
               with:
                   node-version-file: .nvmrc
@@ -233,7 +233,7 @@ jobs:
               run: pnpm install
               working-directory: ${{ env.PROBE_DIR }}
             # Same cache the e2e/demo-static jobs use — `pnpm verify` below runs the full e2e suite.
-            - uses: actions/cache@v4
+            - uses: actions/cache@v6
               id: playwright-cache
               with:
                   path: ~/.cache/ms-playwright
