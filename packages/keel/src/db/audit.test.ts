@@ -160,7 +160,7 @@ describe('recordAuditEvent detail', () => {
         ])
     })
 
-    test('the type refuses what JSON cannot carry', async () => {
+    test('the type refuses a Date, a function and an explicit undefined', async () => {
         const ok: AuditDetail = { refusal: 'expired', removed: 0, ids: ['a'], nested: { flag: false, none: null } }
         // @ts-expect-error a Date is not JSON
         const date: AuditDetail = { at: new Date(0) }

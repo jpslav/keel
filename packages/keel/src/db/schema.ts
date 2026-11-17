@@ -60,7 +60,11 @@ interface AuditEventsTable {
     credential_kind: string | null
     /** WHICH credential (a token id, a key id), never a secret; NULL for a session or not recorded (0014). */
     credential_id: string | null
-    /** WHY, as codes and counts (keel/db/audit AuditDetail); jsonb, round-trips as a parsed object. NULL = none recorded (0016). */
+    /**
+     * WHY, as codes and counts; jsonb, round-trips as a parsed object; NULL = none recorded (0016). The
+     * shape `recordAuditEvent` writes after checking it (keel/db/audit AuditDetail). A row inserted any
+     * other way was not checked, so a reader renders it as text and trusts nothing in it.
+     */
     detail: AuditDetail | null
     at: Generated<string>
 }

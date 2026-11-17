@@ -749,16 +749,26 @@ on the table, so the app can never correct or redact a detail once written. Reco
 
 **The writer is the gate.** `recordAuditEvent` takes an optional `detail` (`AuditDetail`, `keel/db/audit`)
 and checks it before it opens a transaction. The type admits only JSON (strings, numbers, booleans, null,
-arrays and plain objects), so a Date, a function or `undefined` does not compile. At run time it refuses:
+arrays and plain objects), so a Date, a function or an explicit `undefined` does not compile. At run time
+the check goes in three steps:
 
-- anything that is not JSON, or a number that is not finite;
-- nesting deeper than four levels, or more than 1024 bytes of JSON;
-- a NUL or an unpaired surrogate in a string (Postgres's jsonb refuses both, and would fail the insert);
-- a key whose last word names a secret (`token`, `password`, `secret`, `cookie`, `apiKey` and the like;
-  `tokenId` and `tokensRemoved` pass);
-- any key or value shaped like an email address, a JWT or a `Bearer` credential.
+1. What the caller passed must be JSON: no non-finite number, no class instance, nothing nested deeper
+   than four levels, no `undefined` in an array. An object property left undefined is skipped, as JSON
+   writes it.
+2. It is serialized once, and that text must be at most 1024 bytes. The bound comes before any pattern
+   reads a string: scanning a 60 KB string with the email pattern first took seconds.
+3. The parsed text is checked again, and it is what gets written. A `toJSON`, a getter or a Proxy can make
+   what is serialized differ from what was passed, so the rules below read the serialized form:
+    - no NUL or unpaired surrogate in a string (Postgres's jsonb refuses both, and would fail the insert);
+    - no key whose last word, or last two words joined, names a secret (`token`, `password`, `secret`,
+      `cookie`, `pin`, `apiKey`, `accessKey`, `cardNumber`, `ssn` and the like; a trailing number or `v2`
+      is ignored). A boolean or null under such a key passes (`missingToken: true`). A plural passes only as
+      a number under a qualifying word (`revokedTokens: 3`), since a bare `otps: 482913` may be the code
+      itself;
+    - no key or string value shaped like an email address (in any script), a JWT or a `Bearer` credential.
 
-The error names the rule and the path, never the value, which may be the secret it refused.
+The error names the rule and the path, never the value, which may be the secret it refused. A key in the
+path that is long or fails a shape check is withheld too.
 
 These checks catch the likely accident, which is spreading a request, a member or an error into the detail.
 They are not a scrubber: a secret under an innocent key, in an innocent shape, passes. The rule above is the
@@ -780,8 +790,13 @@ it was, in a closed vocabulary (`InboundReceivedDetail`, `keel/core/inbound-emai
 - `{ outcome: 'unmatched', cause: 'no-handler' }` or `{ outcome: 'unmatched', cause: 'declined' }`;
 - `{ outcome: 'failed', cause: 'handler-threw' }`.
 
-The static twin records the same. The handler's own reason never goes in: it is free text, and keel's
+The static twin records the same. A fourth cause, `{ outcome: 'failed', cause: 'intake-threw' }`, is the
+server's alone: the handler returned, and intake's own recording of its result then threw, so the handler's
+effect may already have happened. The handler's own reason never goes in: it is free text, and keel's
 handlers write the sender's address into it. It stays on the `inbound_emails` row.
+
+Intake now finds a handler only as an own entry of the registry. Before, `<org>+constructor@…` found
+`Object.prototype.constructor` and was filed as a message its handler declined.
 
 **Reading it.** The Simulator's Events tab shows `detail` inside the expanded row's JSON, as a React text
 child, so it is escaped and never parsed as HTML. An adopter's own audit screen must do the same: render it

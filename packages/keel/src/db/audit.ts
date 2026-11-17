@@ -78,7 +78,10 @@ export interface AuditEventInput {
     detail?: AuditDetail | null
 }
 
-/** A value inside an {@link AuditDetail}: JSON, with no `undefined`, function, Date or class instance. */
+/**
+ * A value inside an {@link AuditDetail}: JSON. A function, a Date, a class instance or an explicit
+ * `undefined` does not compile; an optional property left undefined does, and is written absent.
+ */
 export type AuditDetailValue =
     string | number | boolean | null | readonly AuditDetailValue[] | { readonly [key: string]: AuditDetailValue }
 
@@ -87,20 +90,29 @@ export type AuditDetailValue =
  * `{ refusal: 'revoked' }` or `{ removed: 42 }`. The row's other columns already say who, what and when.
  *
  * `recordAuditEvent` checks it before it opens a transaction, and refuses it with an error that names
- * the rule and the path, never the value:
+ * the rule and the path, never the value (a key that is long or fails a shape check is withheld from the
+ * path too). In order:
  *
- * - a plain object at the top, holding only strings, finite numbers, booleans, null, arrays and plain
- *   objects, nested at most {@link AUDIT_DETAIL_MAX_DEPTH} deep;
- * - at most {@link AUDIT_DETAIL_MAX_BYTES} bytes as JSON. A list that grows with your data does not
- *   belong here;
- * - no NUL character and no unpaired surrogate in any string (Postgres's jsonb refuses both);
- * - no key that NAMES a secret: its last word is `token`, `password`, `secret`, `cookie`, `apiKey` and
- *   the like (`tokenId` and `tokensRemoved` are fine);
- * - no string, key or value, shaped like an email address, a JWT or a `Bearer` credential.
+ * 1. What you pass must be JSON: a plain object at the top, holding strings, finite numbers, booleans,
+ *    null, arrays and plain objects, nested at most {@link AUDIT_DETAIL_MAX_DEPTH} deep. An object
+ *    property left undefined is skipped; `undefined` in an array is refused.
+ * 2. It is serialized once, and that text must be at most {@link AUDIT_DETAIL_MAX_BYTES} bytes (UTF-8).
+ *    A list that grows with your data does not belong here.
+ * 3. The serialized detail, which is what gets written, must hold:
+ *    - no NUL character and no unpaired surrogate in any string (Postgres's jsonb refuses both);
+ *    - no key that NAMES a secret, judged by its last word or last two (`token`, `password`, `secret`,
+ *      `cookie`, `pin`, `apiKey`, `accessKey`, `cardNumber`, `ssn` and the like; a number or `v2` on
+ *      the end is ignored). A boolean or null under such a key passes (`missingToken: true`). A plural
+ *      passes only as a number under a qualifying word, which counts them (`revokedTokens: 3`); a bare
+ *      `otps: 482913` may be the code itself. `tokenId` and `tokenCount` pass;
+ *    - no key or string value shaped like an email address (any script), a JWT or a `Bearer` credential.
  *
- * The last two are a backstop for the likely accident (spreading a request, a member or an error into
- * the detail), not a scrubber: a secret under an innocent key in an innocent shape passes. The rule is
- * the contract. Record a code or a count, never what a person typed, and never a credential.
+ * The key and shape rules are a backstop for the likely accident (spreading a request, a member or an
+ * error into the detail), not a scrubber: a secret under an innocent key, in an innocent shape, passes.
+ * The rule is the contract. Record a code or a count, never what a person typed, and never a credential.
+ *
+ * Use a `type` alias for your detail's shape, not an `interface`: TypeScript gives an interface no index
+ * signature, so it does not assign to this type (spread it, `{ ...detail }`, if it already is one).
  */
 export type AuditDetail = { readonly [key: string]: AuditDetailValue }
 
@@ -111,9 +123,9 @@ export const AUDIT_DETAIL_MAX_BYTES = 1024
 const AUDIT_DETAIL_MAX_DEPTH = 4
 
 /**
- * A key whose LAST word (or last two words, joined) is one of these names a secret. Words split on
- * camelCase and on anything not a letter or digit, lower-cased. A plural (`tokens`, `apiKeys`) names
- * secrets too, unless its value is a number, which counts them (`revokedTokens: 3`).
+ * A key whose LAST word, or last two words joined, is one of these names a secret (`secretNamed`). Words
+ * split on camelCase and on anything not a letter or digit, lower-cased, with a trailing number or
+ * version dropped.
  */
 const SECRET_KEY_WORDS = new Set([
     'password',

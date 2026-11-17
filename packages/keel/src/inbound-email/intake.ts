@@ -41,8 +41,9 @@ import { inboundHandlers } from './handlers'
  * AUDIT. Every STORED row records an `inbound-email.received` event (subject 'InboundEmail'); an app's
  * handler additionally records its own domain verb, so what it produced appears in the audit trail exactly as
  * a UI-created one would. The event's `detail` says why the email was filed as it was
- * (`InboundReceivedDetail`, keel/core/inbound-email): handled, no handler, declined by its handler, or the
- * handler threw. Never the handler's free-text reason, which names the sender.
+ * (`InboundReceivedDetail`, keel/core/inbound-email): handled, no handler, declined by its handler, the
+ * handler threw, or intake's own recording threw after the handler returned. Never the handler's
+ * free-text reason, which names the sender.
  */
 
 const SYSTEM_ACTOR = 'system:inbound-email'
