@@ -71,9 +71,12 @@ never to a vendor's API. `/new-port` (Claude command) scaffolds the layout.
 - Screens are router-agnostic (props in, callbacks out; no Next imports) — framework ones in
   `packages/keel/src/components`, app ones in `apps/showcase/src/components`; route files under `apps/showcase/src/app` are
   thin wrappers plus fetch-glue.
-- Tenant-scoped data access only through `db.withTenant()` — `getDb()` is banned in request paths
-  (lint-enforced), and every tenant table carries the RLS policy pattern from
-  `apps/showcase/src/app-config/db/migrations/1001_tickets.ts`.
+- Tenant-scoped data access only through `db.withTenant()` — `getDb()` is banned in every module under
+  `apps/*/src`, in keel's screens and in keel's fixture (lint-enforced by `keel/no-raw-db-handle`; only tests
+  outside routes, screens and the fixture are exempt), and every tenant table carries the RLS policy pattern from
+  `apps/showcase/src/app-config/db/migrations/1001_tickets.ts`. A `'use server'` action is an app module like any
+  other, wherever you put it. If one module truly needs the raw client, add a named exception for that module,
+  with its reason, in `eslint.config.mjs`; never exempt a directory.
 - New migrations: app tables go under `apps/showcase/src/app-config/db/migrations/` (numbered ≥ 1001) and extend
   `AppTables`; framework tables go under `packages/keel/src/db/migrations/` (0001–0999). Register
   in the neighbouring `index.ts` either way. The same migration code must pass `pnpm test:unit`
