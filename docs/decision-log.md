@@ -1775,7 +1775,8 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   between its own two files, and this is a fake.
 - **No static-demo twin:** the static demo implements no storage port, so there is nothing to mirror. **No
   IAM change:** the app role's `grantReadWrite` already covers `s3:GetObject*` on the source and `s3:PutObject`
-  on the destination, plus the `s3:List*` that makes a missing key a 404 and not a 403. Cutover row
+  on the destination, plus the `s3:List*` that (per AWS's GetObject reference) makes a missing key a 404 and not
+  a 403. Cutover row
   `storage-copy` carries what only a real bucket can prove.
 - **How an app calls it** (stage, then finalize):
 

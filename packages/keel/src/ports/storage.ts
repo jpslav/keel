@@ -63,7 +63,8 @@ export interface StoragePort {
      * complete: neither adapter ever shows a half-copied `to` (S3 publishes it when the copy finishes; the
      * fake renames it into place).
      *
-     * A missing `from` throws `NotFoundError` (`keel/ports/errors`), on both adapters. `from === to` throws
+     * A missing `from` throws `NotFoundError` (`keel/ports/errors`), on both adapters (the real one needs `s3:ListBucket`;
+     * without it S3 answers a missing key with an access-denied error, which is not mapped). `from === to` throws
      * a plain `Error` on both, whether or not the key exists: a copy onto itself changes nothing, and is nearly always a caller that built
      * its two keys the same way. The real adapter has one limit the fake does not: a single `CopyObject`
      * copies at most 5 GB (AWS's CopyObject reference), and a larger object throws an `Error` saying so.

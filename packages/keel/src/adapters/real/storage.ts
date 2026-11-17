@@ -17,8 +17,9 @@ const DELETE_BATCH_SIZE = 1000
 /**
  * `CopySource` for an object in `bucket`: `<bucket>/<key>`, with each key SEGMENT percent-encoded and the
  * slashes between them left alone (the shape AWS documents: `awsexamplebucket/reports/january.pdf`). The
- * SDK does not encode it for you, and S3 decodes it, so an unencoded `+` becomes a space, a `?` starts a
- * `?versionId=` suffix and a `%` starts an escape. The bucket is always the adapter's own, so a key can
+ * SDK sends the string as given and AWS says "The value must be URL-encoded", so a `?` left in a key would
+ * start the `?versionId=` suffix AWS documents and a `%` would start an escape; a `+` is ambiguous in URL
+ * decoding, so it is encoded too. The bucket is always the adapter's own, so a key can
  * never name another bucket: `other-bucket/x` is the key `other-bucket/x` of THIS one.
  */
 function copySourceFor(bucket: string, key: string): string {

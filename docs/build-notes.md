@@ -1411,12 +1411,15 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
 ## Storage `copy` (2026-11-16, `storage-copy`)
 
 - **`CopySource` is not encoded for you, and the obvious encoders are wrong.** The SDK sends the string as
-  given and S3 decodes it, so an unencoded `+` reads back as a space, a `?` starts a `?versionId=` suffix and a
-  `%` starts an escape. `encodeURI` leaves `+`, `?` and `#` alone; `encodeURIComponent` on the whole key turns every
+  given (`@aws-sdk/client-s3` 3.1096.0 binds `CopySource` to the `x-amz-copy-source` header and its S3 middleware handles it only for endpoint resolution and the SSE-C copy-source keys; nothing encodes it) and AWS says "The value
+  must be URL-encoded", so a `?` left in a key would start the `?versionId=` suffix AWS documents and a `%`
+  would start an escape; a `+` is ambiguous in URL decoding. `encodeURI` leaves `+`, `?` and `#` alone; `encodeURIComponent` on the whole key turns every
   `/` into `%2F`, away from AWS's own example (`awsexamplebucket/reports/january.pdf`). Each segment encoded and the
   slashes kept was the one that held for every row of the test, and each of those encoders was seen failing it.
-- **A missing key is a 404 only if the caller may list the bucket.** Without `s3:ListBucket` S3 answers a missing
-  key with `AccessDenied`, so `copy`'s `NoSuchKey` to `NotFoundError` mapping rests on the grant. CDK's
+- **A missing key is a 404 only if the caller may list the bucket.** AWS's GetObject reference says a missing
+  object is a `404 Not Found` with `s3:ListBucket` and a `403 Access Denied` without it. The CopyObject
+  reference does not repeat it for a missing copy source, so `copy`'s `NoSuchKey` to `NotFoundError` mapping
+  rests on that rule holding there too, which the cutover row asks to confirm. CDK's
   `grantReadWrite` includes `s3:List*` (aws-cdk-lib `BUCKET_READ_ACTIONS`: `s3:GetObject*`, `s3:GetBucket*`,
   `s3:List*`), and the cutover row asks to confirm it on the deployed policy.
 - **A 200 from `CopyObject` can carry an error in its body**; the SDK handles it. `CopyObjectCommand` is built

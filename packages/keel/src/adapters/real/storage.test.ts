@@ -96,7 +96,7 @@ describe('real storage copy', () => {
     test.each([
         ['a space', 'reports/Q1 2026/summary.pdf', 'reports/Q1%202026/summary.pdf'],
         [
-            'a plus, which S3 would read back as a space',
+            'a plus, which URL decoding can read as a space',
             'files/c++ notes+draft.txt',
             'files/c%2B%2B%20notes%2Bdraft.txt',
         ],
