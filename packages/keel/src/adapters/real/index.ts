@@ -9,6 +9,7 @@ import type { StoragePort } from '../../ports/storage'
 import { fakeAnalytics } from '../fake/analytics'
 import { createRealAnalytics } from './analytics'
 import { realAuth } from './auth'
+import { DATABASE_ENV, databaseTransport } from './database-transport'
 import { createRealDb } from './db'
 import { createRealEmail } from './email'
 import { createRealJobs } from './jobs'
@@ -29,7 +30,6 @@ interface RealPorts {
 const REQUIRED_ENV: Record<string, string> = {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'auth-dev',
     CLERK_SECRET_KEY: 'auth-dev',
-    DATABASE_URL: 'cloud-accounts',
     STORAGE_BUCKET: 'cloud-accounts',
     AWS_REGION: 'cloud-accounts',
     JOBS_CODEBUILD_PROJECT: 'job-runner',
@@ -44,9 +44,10 @@ const REQUIRED_ENV: Record<string, string> = {
 }
 
 export function assertRealEnv(): void {
-    const missing = Object.keys(REQUIRED_ENV).filter((name) => !process.env[name])
+    const required = { ...REQUIRED_ENV, ...DATABASE_ENV[databaseTransport()] }
+    const missing = Object.keys(required).filter((name) => !process.env[name])
     if (missing.length > 0) {
-        const rows = [...new Set(missing.map((name) => REQUIRED_ENV[name]))]
+        const rows = [...new Set(missing.map((name) => required[name]))]
         throw new CutoverPendingError(
             rows as string[],
             `Missing env: ${missing.join(', ')}. See docs/cutover-checklist.md.`,
@@ -54,12 +55,22 @@ export function assertRealEnv(): void {
     }
 }
 
-export function createRealPorts(): RealPorts {
+export async function createRealPorts(): Promise<RealPorts> {
     assertRealEnv()
     const env = process.env as Record<string, string>
+    // The Data API transport is a dynamic import, so a `pg` deployment never loads the RDS Data SDK.
+    const db =
+        databaseTransport() === 'data-api'
+            ? (await import('./db-data-api')).createRealDataApiDb({
+                  resourceArn: env.DATABASE_CLUSTER_ARN,
+                  secretArn: env.DATABASE_SECRET_ARN,
+                  database: env.DATABASE_NAME,
+                  region: env.AWS_REGION,
+              })
+            : createRealDb(env.DATABASE_URL)
     return {
         auth: realAuth,
-        db: createRealDb(env.DATABASE_URL),
+        db,
         storage: createRealStorage(env.STORAGE_BUCKET, env.AWS_REGION),
         llm: createRealLlm(env.ANTHROPIC_API_KEY),
         email: createRealEmail(env.MAILGUN_DOMAIN, env.MAILGUN_API_KEY, env.EMAIL_FROM),

@@ -44,8 +44,10 @@ export default defineConfig({
             },
             {
                 // The framework's OWN seam (packages/keel/test-fixture), as vitest.config.ts's `keel`
-                // project uses — names no app, so ejecting or renaming one never touches it. Its harness
-                // makes its own database (see packages/keel/src/adapters/real/db.contract.test.ts).
+                // project uses — names no app, so ejecting or renaming one never touches it. Each of its
+                // harnesses makes its own database: db.contract.test.ts (the `pg` driver) and
+                // rds-data.contract.test.ts (the RDS Data API driver, through its emulator), both in
+                // packages/keel/src/adapters/real.
                 resolve: {
                     alias: {
                         '@app-config': at('./packages/keel/test-fixture/app-config'),

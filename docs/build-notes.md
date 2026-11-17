@@ -1653,6 +1653,46 @@ the panel is the element that carries it.
   `pg_roles.rolname = current_user` instead, and quote any role name you print for someone to run
   (`quote_ident`). A test role with a mixed-case name is what found it.
 
+## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
+
+- **An untyped string parameter is `varchar` on the real Data API.** So `uuid_column = :id` fails on
+  Aurora with "operator does not exist: uuid = character varying" unless the SQL casts or the parameter
+  carries `typeHint: 'UUID'`. Two things hide this:
+    - node-postgres sends parameters with no type at all, so every query in this repo was written relying
+      on inference;
+    - the popular community emulator sets PgJDBC's `stringtype=unspecified`, so code tested against it
+      passes and then fails in AWS.
+
+    A test double for a wire protocol is only worth having if it is as strict as the real thing where the
+    real thing is strict.
+
+- **`PREPARE` plus `pg_prepared_statements.parameter_types` is a way to ask Postgres what it would infer
+  for each `$n`,** without running the statement. It needs one connection for both steps, which over the
+  Data API means one transaction. Cast the result to `text[]` before reading it: `regtype[]` is not
+  among the result types the Data API documents, and `text[]` is.
+- **Kysely's `Driver` can be built on a stateless transport, with one exception.** A "connection" can
+  be a handle holding an optional transaction id. Queries and transactions map onto BeginTransaction,
+  ExecuteStatement with `transactionId`, and Commit/Rollback, savepoints included, as plain SQL inside the
+  transaction. What cannot map is session state outside a transaction, so refuse it before the call
+  rather than let it vanish.
+
+    The exception is Kysely's own Migrator. It takes a session-level advisory lock on `db.connection()`,
+    outside its transaction, and creates its bookkeeping tables before locking. Hand it a `Transaction`
+    that opens with `pg_advisory_xact_lock`. Two migrators that race into `CREATE TABLE IF NOT EXISTS` in
+    two open transactions do not tolerate each other the way autocommit does: the loser's transaction
+    aborts, and the next statement reports "current transaction is aborted", not the real cause.
+
+- **When Kysely's commit fails, it calls rollback.** A driver that clears the transaction handle before
+  committing turns that rollback into a "no transaction" error that replaces the commit's own error.
+- **A rollback that finds its transaction gone has already happened.** The Data API rolls back on its
+  own after three idle minutes. Treating `TransactionNotFoundException` on rollback as success keeps the
+  error that caused the rollback from being replaced by one about the rollback.
+- **A hoisted `vi.mock` factory runs once per file, not once per `vi.resetModules()`.** A test that
+  counts module loads with a counter in the factory sees only the FIRST load in the file. Every later
+  "this never loads" assertion then passes vacuously, depending on test order. Register counting mocks
+  with `vi.doMock` in `beforeEach`, after the reset, and prove it by mutation in both test orders (as
+  `packages/keel/src/adapters/real/index.test.ts` was).
+
 ## JSX in core, paths into apps/, and getDb as a string (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
 
 - **An import the source never names is invisible to every import rule.** With `"jsx": "react-jsx"`, JSX in
