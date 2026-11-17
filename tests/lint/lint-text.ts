@@ -74,5 +74,9 @@ export const GET_DB_DESTRUCTURE: Fence = {
     fragment: 'Destructuring getDb out of the db port',
 }
 
+// The vendor import every gate here uses, statically and with import().
+export const IMPORTS_VENDOR = "import { S3Client } from '@aws-sdk/client-s3'\nexport const client = S3Client\n"
+export const LOADS_VENDOR = "export const load = () => import('@aws-sdk/client-s3')\n"
+
 export const fired = (findings: Finding[], fence: Fence) =>
     findings.filter((f) => f.rule === fence.rule && f.message.includes(fence.fragment)).length

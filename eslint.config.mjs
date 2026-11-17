@@ -10,11 +10,12 @@ import typescriptEslint from 'typescript-eslint'
 
 // EVERY extension a fence below names. ESLint lints all eight in this repo (its own defaults are .js,
 // .mjs and .cjs, typescript-eslint's recommended config adds .ts, .tsx, .mts and .cts, and the react
-// block below adds .jsx), so a fence that names a DIRECTORY has to hold for each of them. The fences used to say `*.{ts,tsx}`, which let a `.mjs` file in apps/*/src or
-// packages/keel/src import a vendor SDK, read process.env or take the raw db handle with a green
-// `pnpm lint`; nothing in the tree did, and nothing would have said so if something had. Every fence glob
-// takes its extensions from here. The test and story carve-outs do NOT (TEST_FILES and STORY_FILES):
-// a carve-out names what a runner actually picks up, and a file it does not pick up keeps every ban.
+// block below adds .jsx), so a fence that names a DIRECTORY has to hold for each of them. The fences
+// used to say `*.{ts,tsx}`, which let a `.mjs` file in apps/*/src or packages/keel/src import a vendor
+// SDK, read process.env or take the raw db handle with a green `pnpm lint`; nothing in the tree did, and
+// nothing would have said so if something had. Every fence glob takes its extensions from here. The
+// carve-outs do NOT (TEST_FILES and STORY_FILES below, the next.config and instrumentation ones further
+// down): a carve-out names what a runner actually picks up, and a file it does not pick up keeps every ban.
 const SRC_EXT = '{ts,tsx,mts,cts,js,jsx,mjs,cjs}'
 // vitest's include globs (vitest.config.ts) name `*.test.{ts,tsx}` and nothing else, so a `.test.mjs`
 // under src/ is an ordinary module that a route can import, and it stays fenced.
@@ -547,9 +548,10 @@ const eslintConfig = [
             'packages/keel/src/components/**',
             KEEL_ADAPTERS_GLOB,
             APP_REAL_ADAPTERS_GLOB,
-            // Next's instrumentation hooks, under the default pageExtensions Next looks for them with
-            // (neither app sets its own).
-            'apps/*/src/instrumentation*.{ts,tsx,js,jsx}',
+            // Next's two instrumentation hooks, under the default pageExtensions Next looks for them with
+            // (neither app sets its own), and no other name: `instrumentation-helpers.ts` is an ordinary
+            // module, as the `*` this used to carry let it pretend not to be.
+            'apps/*/src/instrumentation{,-client}.{ts,tsx,js,jsx}',
             'packages/keel/src/service-auth/webhook.ts',
             'packages/keel/src/service-auth/mailgun.ts',
             TEST_FILES,

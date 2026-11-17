@@ -3,9 +3,11 @@ import {
     A11Y_LITERAL,
     APP,
     fired,
+    IMPORTS_VENDOR,
     JSX_LITERAL,
     KEEL_REAL_ADAPTER,
     lint,
+    LOADS_VENDOR,
     NEXT_FONT,
     PROCESS_ENV,
     REAL_ADAPTER,
@@ -22,9 +24,7 @@ import {
  * Every case here is a `.ts` or `.tsx` file; ./extensions.test.ts holds the same fences for the other
  * six extensions ESLint lints.
  */
-const IMPORTS_VENDOR = "import { S3Client } from '@aws-sdk/client-s3'\nexport const client = S3Client\n"
 const IMPORTS_VENDOR_SUBPATH = "import { auth } from '@clerk/nextjs/server'\nexport const current = auth\n"
-const LOADS_VENDOR = "export const load = () => import('@aws-sdk/client-s3')\n"
 const LOADS_VENDOR_TEMPLATE = 'export const load = () => import(`pg`)\n'
 
 /** The only two places a vendor SDK may be imported. */

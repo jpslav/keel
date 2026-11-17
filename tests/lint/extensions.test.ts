@@ -4,9 +4,11 @@ import {
     APP,
     fired,
     GET_DB_COMPUTED,
+    IMPORTS_VENDOR,
     isIgnored,
     JSX_LITERAL,
     lint,
+    LOADS_VENDOR,
     NEXT_FONT,
     PROCESS_ENV,
     REAL_ADAPTER_DYNAMIC,
@@ -29,13 +31,9 @@ const EXTENSIONS = ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs']
 // its import, and keel/no-dynamic-vendor-import sees that.
 const isCjs = (file: string) => file.endsWith('.cjs')
 const importsVendor = (file: string) =>
-    isCjs(file)
-        ? "const { S3Client } = require('@aws-sdk/client-s3')\nmodule.exports = S3Client\n"
-        : "import { S3Client } from '@aws-sdk/client-s3'\nexport const client = S3Client\n"
+    isCjs(file) ? "const { S3Client } = require('@aws-sdk/client-s3')\nmodule.exports = S3Client\n" : IMPORTS_VENDOR
 const loadsVendor = (file: string) =>
-    isCjs(file)
-        ? "module.exports = () => import('@aws-sdk/client-s3')\n"
-        : "export const load = () => import('@aws-sdk/client-s3')\n"
+    isCjs(file) ? "module.exports = () => import('@aws-sdk/client-s3')\n" : LOADS_VENDOR
 const readsEnv = (file: string) =>
     isCjs(file) ? 'module.exports = process.env.KVS_ARN\n' : 'export const storeArn = process.env.KVS_ARN\n'
 const takesRawDb = (file: string) =>
@@ -98,16 +96,16 @@ describe('every fence holds for every extension ESLint lints', () => {
 describe('the carve-outs still let through what they were made for, in every spelling it comes in', () => {
     // Next loads its config from these four names and no other (CONFIG_FILES in next's constants), and
     // the config composes the Sentry build plugin.
+    const composesSentry = "import { withSentryConfig } from '@sentry/nextjs'\nexport default withSentryConfig({})\n"
+
     it.each(['ts', 'mts', 'js', 'mjs'])('next.config.%s may import the Sentry build plugin', async (ext) => {
-        const code = "import { withSentryConfig } from '@sentry/nextjs'\nexport default withSentryConfig({})\n"
-        const findings = await lint(`${APP}/next.config.${ext}`, code)
+        const findings = await lint(`${APP}/next.config.${ext}`, composesSentry)
         expect(fired(findings, VENDOR_STATIC) + fired(findings, VENDOR_DYNAMIC)).toBe(0)
     })
 
     it('a root config Next does not load is fenced like the rest of the app', async () => {
-        const code = "import { withSentryConfig } from '@sentry/nextjs'\nexport default withSentryConfig({})\n"
-        expect(fired(await lint(`${APP}/next.config.cts`, code), VENDOR_STATIC)).toBe(1)
-        expect(fired(await lint(`${APP}/vite.demo.config.mjs`, code), VENDOR_STATIC)).toBe(1)
+        expect(fired(await lint(`${APP}/next.config.cts`, composesSentry), VENDOR_STATIC)).toBe(1)
+        expect(fired(await lint(`${APP}/vite.demo.config.mjs`, composesSentry), VENDOR_STATIC)).toBe(1)
     })
 
     // The app-root tool configs read the environment for ports and modes, and the process.env ban
@@ -157,10 +155,12 @@ describe('the carve-outs still let through what they were made for, in every spe
         },
     )
 
-    it('instrumentation.mjs is not an instrumentation hook, so it may not', async () => {
-        const file = `${APP}/src/instrumentation.mjs`
-        expect(fired(await lint(file, readsEnv(file)), PROCESS_ENV)).toBe(1)
-    })
+    it.each(['instrumentation.mjs', 'instrumentation-helpers.ts', 'instrumentation-helpers.tsx'])(
+        '%s is not an instrumentation hook, so it may not',
+        async (name) => {
+            expect(fired(await lint(`${APP}/src/${name}`, readsEnv(name)), PROCESS_ENV)).toBe(1)
+        },
+    )
 
     // The two secret readers are exempt by exact file, and a sibling with their name stays fenced.
     it('keel’s two secret readers may read process.env, by exact file', async () => {
