@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { openSimulatorPanel } from './support/simulator'
 import { pickOrg } from './support/org-switcher'
-import { signInAs } from './support/people'
+import { untilNewDocument } from './support/new-document'
+import { reachDashboard, signInAs } from './support/people'
 
 /**
  * Cross-org escalations, end to end. An escalation is TWO-SIDED: the org that raised it sees it under
@@ -11,7 +12,11 @@ import { signInAs } from './support/people'
  * A bystander tenant sees nothing and a forced POST 404s. All backed by real routes + RLS on pglite.
  */
 
-/** Switch org (team) within the same tenant via the header OrgSwitcher; the switch reloads the page. */
+/**
+ * Switch org (team) within the same tenant via the header OrgSwitcher; the switch reloads the page.
+ * `pickOrg` returns once the NEW document is showing that org, so the card check below is about the
+ * switched page and not the one being torn down.
+ */
 async function switchOrg(page: Page, slug: string) {
     await pickOrg(page, slug)
     await expect(page.getByTestId('escalations-card')).toBeVisible()
@@ -21,26 +26,41 @@ async function switchOrg(page: Page, slug: string) {
  * Switch to another person MID-SESSION via Simulator People (a real server-side session switch in
  * simulated mode) — re-visiting /signin while already authenticated just bounces to the dashboard, so
  * this is how the tenancy suite crosses people too. Lands on the dashboard deterministically.
+ *
+ * The switch is a full document load, and nothing the page shows can be awaited in its place: Dana and
+ * Sam are in the SAME tenant, so `active-tenant` reads the same before and after, and the URL is already
+ * `/dashboard`. Waiting on those let this helper return while Dana's page was still up — the next
+ * steps then ran as Dana and the "member is read-only" assertions saw her manager buttons. So it waits
+ * for a new document, and the identity is asserted on it: `signed-in-as` names who the session is.
  */
-async function switchPerson(page: Page, personId: string, expectedTenant: string) {
+async function switchPerson(page: Page, personId: string, personName: string, expectedTenant: string) {
     await openSimulatorPanel(page)
-    await page.getByTestId(`people-${personId}`).click()
-    await page.waitForURL(/\/en\/(dashboard|org)(\?.*)?$/)
+    await untilNewDocument(page, () => page.getByTestId(`people-${personId}`).click())
+    // The switch lands on the person's remembered route (/dashboard or /org); get to the dashboard.
+    await reachDashboard(page)
+    await expect(page.getByTestId('signed-in-as')).toContainText(personName)
     await expect(page.getByTestId('active-tenant')).toHaveText(expectedTenant)
-    await page.getByTestId('nav-dashboard').click()
-    await page.waitForURL('**/dashboard')
     await expect(page.getByTestId('escalations-card')).toBeVisible()
 }
 
-/** Raise an escalation to `targetName`, hydration-safe (fill until the create button enables). */
+/**
+ * Raise an escalation to `targetName`, hydration-safe (fill until the create button enables).
+ *
+ * Every step inside the retry loop carries its own short timeout. A bare `click()` has none, so a step
+ * that can never succeed on the page it is stuck on — the option is not in a dropdown that never opened,
+ * the page was reloaded under it — blocks until the 60s TEST timeout, and `toPass` never gets to run its
+ * next attempt: the retry loop exists to retry, which a step that does not throw cannot let it do. The
+ * trigger TOGGLES the dropdown, so it is only clicked when the option is not already on screen.
+ */
 async function createRequest(page: Page, targetName: string, subject: string, body: string) {
+    const option = page.getByRole('option', { name: targetName })
     await expect(async () => {
-        await page.getByTestId('escalation-target').click()
-        await page.getByRole('option', { name: targetName }).click()
-        await page.getByTestId('escalation-subject').fill(subject)
-        await page.getByTestId('escalation-body').fill(body)
+        if (!(await option.isVisible())) await page.getByTestId('escalation-target').click({ timeout: 2_000 })
+        await option.click({ timeout: 2_000 })
+        await page.getByTestId('escalation-subject').fill(subject, { timeout: 2_000 })
+        await page.getByTestId('escalation-body').fill(body, { timeout: 2_000 })
         await expect(page.getByTestId('escalation-create')).toBeEnabled({ timeout: 1_000 })
-    }).toPass()
+    }).toPass({ timeout: 30_000 })
     await page.getByTestId('escalation-create').click()
     await expect(page.getByTestId('escalations-sent-list')).toContainText(subject)
 }
@@ -99,7 +119,7 @@ test('a platform MEMBER sees the escalation read-only and is denied respond at t
     const id = await escalationId(page, 'sent', subject)
 
     // Sam is a plain MEMBER of platform: he can read the received escalation but gets no accept/reject.
-    await switchPerson(page, 'person-staff', 'Northwind Support')
+    await switchPerson(page, 'person-staff', 'Sam Rivera', 'Northwind Support')
     await switchOrg(page, 'platform')
     await expect(page.getByTestId(`escalation-received-${id}`)).toBeVisible()
     await expect(page.getByTestId(`escalation-accept-${id}`)).toHaveCount(0)
@@ -119,7 +139,7 @@ test('a bystander tenant cannot see the escalation and a forced respond 404s', a
     const id = await escalationId(page, 'sent', subject)
 
     // Gale lives in a different tenant (pinebrook): the Northwind escalation is invisible to her.
-    await switchPerson(page, 'person-guest', 'Pinebrook Desk')
+    await switchPerson(page, 'person-guest', 'Gale Bennett', 'Pinebrook Desk')
     await expect(page.getByTestId('escalations-card')).not.toContainText(subject)
 
     // A forced respond on the Northwind escalation id is indistinguishable from a missing one (404).
