@@ -213,6 +213,54 @@ describe('defineAbilitiesFor', () => {
         expect(defineAbilitiesFor(actor({ role: 'member' })).can('create', { type: 'Job', orgId: ORG_A })).toBe(true)
     })
 
+    test('an actor whose fields live on a prototype is judged by those fields, not by an empty copy of it', () => {
+        // A restricted admin, three ways. The plain object is refused authoring; the same person as a
+        // class with getters, or built with Object.create, must be refused too. A spread copies own
+        // enumerable fields only, so judging `{ ...actor }` saw neither `restricted` nor `userId`.
+        const fields = {
+            credential: { kind: 'session', id: null },
+            userId: 'user-1',
+            role: 'admin',
+            restricted: true,
+            activeOrgId: ORG_A,
+            manageAll: false,
+        } as const
+        class Getters {
+            get credential() {
+                return fields.credential
+            }
+            get userId() {
+                return fields.userId
+            }
+            get role() {
+                return fields.role
+            }
+            get restricted() {
+                return fields.restricted
+            }
+            get activeOrgId() {
+                return fields.activeOrgId
+            }
+            get manageAll() {
+                return fields.manageAll
+            }
+        }
+        const shapes: [string, AbilityActor][] = [
+            ['plain', { ...fields }],
+            ['class with getters', new Getters()],
+            ['Object.create', Object.create(fields) as AbilityActor],
+        ]
+        for (const [name, shape] of shapes) {
+            const ability = defineAbilitiesFor(shape)
+            expect(ability.can('create', { type: 'Job', orgId: ORG_A }), `${name}: create Job`).toBe(false)
+            expect(ability.can('create', { type: 'Docket', orgId: ORG_A }), `${name}: create Docket`).toBe(false)
+            // Self-only, with no ownerId: an undefined owner must not equal an unread userId.
+            expect(ability.can('update', { type: 'User' }), `${name}: update User, no owner`).toBe(false)
+            // ...and each is still the person it is: reading its own team's jobs is allowed.
+            expect(ability.can('read', { type: 'Job', orgId: ORG_A }), `${name}: read Job`).toBe(true)
+        }
+    })
+
     // A PERSON who came through a credential other than a session (an inbound email, a personal token):
     // the same rules as a session, except that the staff superpower is a session's alone, and
     // administration takes a session unless the app widens it.
@@ -274,6 +322,18 @@ describe('defineAbilitiesFor', () => {
             ).toBe(false)
             // Reads are not administration.
             expect(viaEmail.can('read', { type: 'Membership', orgId: ORG_A })).toBe(true)
+        })
+
+        test('accepting terms takes a session: a legal act a person makes in a browser', () => {
+            const own = { type: 'AgreementAcceptance', ownerId: 'user-1' } as const
+            const as = (credential?: Credential<PersonCredentialKind>) =>
+                defineAbilitiesFor(actor({ role: 'member', credential }))
+            expect(as({ kind: 'session', id: null }).can('create', own)).toBe(true)
+            expect(as(badge).can('create', own)).toBe(false)
+            expect(as({ kind: 'inbound-email', id: 'email-1' }).can('create', own)).toBe(false)
+            expect(as(undefined).can('create', own)).toBe(false)
+            // Reading one's own acceptance is not the act.
+            expect(as(badge).can('read', own)).toBe(true)
         })
 
         test("the app's rules see the credential kind, which is where narrowing by kind lives", () => {

@@ -84,26 +84,35 @@ export type PersonCredentialKind = 'session' | 'inbound-email' | AppPersonCreden
 export type MachineCredentialKind = 'service-key' | AppMachineCredentialKind
 
 /**
- * The framework subjects whose non-read actions are ADMINISTRATIVE: inviting and managing members,
- * changing the org, registering and managing outbound webhook endpoints. A person may take them only
- * through a stated SESSION, unless the app widens one to a non-session kind on the seam
- * (`nonSessionAdministration`). Reads are not administrative.
+ * The framework subjects whose non-read actions take a browser SESSION:
+ * - ADMINISTRATION: inviting and managing members (Membership), changing the org (Org), registering and
+ *   managing outbound webhook endpoints (WebhookEndpoint);
+ * - ACCEPTING TERMS (AgreementAcceptance): a legal act a person makes in a browser, not by token or email.
+ * A person may take these only through a stated session, unless the app widens one to a non-session
+ * kind on the seam (`nonSessionAdministration`). Reads are not gated.
  *
- * Not listed: service keys (no route mints one, and they are no ability subject), self-only subjects
- * (User, Notification, NotificationPref, AgreementAcceptance: a person acting on their own things), the
+ * Not listed: service keys (no route mints one, and they are no ability subject), the other self-only
+ * subjects (User, Notification, NotificationPref: a person acting on their own things), the
  * system-managed subjects (JobSchedule, WebhookDelivery, InboundEmail: denied to everyone), and Job (a
  * product action).
  */
-export const ADMINISTRATIVE_SUBJECTS = ['Membership', 'Org', 'WebhookEndpoint'] as const
+export const ADMINISTRATIVE_SUBJECTS = ['Membership', 'Org', 'WebhookEndpoint', 'AgreementAcceptance'] as const
 export type AdministrativeSubjectType = (typeof ADMINISTRATIVE_SUBJECTS)[number]
 
 /**
+ * The non-session person credentials an app may widen a session-only subject to. Never `inbound-email`:
+ * an email's From line is the weakest credential keel has, so nothing it sends may administer anything.
+ * (`defineAbilitiesFor` refuses it at run time too, against a cast.)
+ */
+export type WidenableCredentialKind = Exclude<PersonCredentialKind, 'session' | 'inbound-email'>
+
+/**
  * The contract for the app's `nonSessionAdministration` (src/app-config/abilities.ts): for each
- * administrative subject, the non-session person credential kinds that may administer it too. Empty, the
- * default, means administration takes a browser session.
+ * session-only subject, the non-session person credential kinds that may act on it too. Empty, the
+ * default, means each takes a browser session.
  */
 export type NonSessionAdministration = {
-    readonly [Subject in AdministrativeSubjectType]?: readonly Exclude<PersonCredentialKind, 'session'>[]
+    readonly [Subject in AdministrativeSubjectType]?: readonly WidenableCredentialKind[]
 }
 
 /**
@@ -296,22 +305,30 @@ export function defineAbilitiesFor(actor: Actor): Ability {
                 : appMachineRules(machine, action, subject, { sameOrg })
         return { can: machineCan, cannot: (action, subject) => !machineCan(action, subject) }
     }
+    // The person is judged as a COPY made by naming each field the rules read, never as `{ ...actor }`:
+    // a spread copies own enumerable fields only, so an actor whose fields are getters on a class, or
+    // live on a prototype, would arrive with no `restricted` and no `userId`. What is copied is what is
+    // validated, and what is validated is all that is judged.
+    const fields = personFieldsOf(actor)
     // Anything that is not a well-formed person is denied everything. A machine-shaped object that lost
     // its `kind` (a cast, a value rehydrated from storage) would otherwise be judged as a person with no
     // role, and `!restricted` holds for an undefined flag.
-    if (!isWellFormedPerson(actor)) return { can: () => false, cannot: () => true }
+    if (!isWellFormedPerson(fields)) return { can: () => false, cannot: () => true }
+    const copy = fields as AbilityActor
 
     // The staff superpower belongs to a SESSION acting as the operator org. Enforced here rather than
     // trusted to whoever built the actor: a person who came through any other credential (an email, a
     // token), or who states none, never wields it, even acting in the staff org. The app's rules are
     // handed the same effective value.
-    const session = actor.credential?.kind === 'session'
+    const session = copy.credential?.kind === 'session'
     // Read at call time, like the app's machine rules (see the machine branch above).
     const widening: NonSessionAdministration = nonSessionAdministration
     const person: AbilityActor =
-        actor.manageAll && session
-            ? { ...actor, manageAll: true, credential: { kind: 'session', id: actor.credential?.id ?? null } }
-            : { ...actor, manageAll: false }
+        copy.manageAll && session
+            ? { ...copy, manageAll: true, credential: { kind: 'session', id: copy.credential?.id ?? null } }
+            : { ...copy, manageAll: false }
+    // sameOrg for the person reads the COPY's org, like every other person rule.
+    const personSameOrg: SameOrg = (subject) => subject.orgId != null && subject.orgId === person.activeOrgId
 
     function can(action: AbilityAction, subject: AbilitySubject): boolean {
         // The staff-org superpower. manageAll precedes
@@ -320,26 +337,30 @@ export function defineAbilitiesFor(actor: Actor): Ability {
         // becomes a real configuration, gate authoring verbs here first.
         if (person.manageAll) return true
 
-        // Administration takes a stated session, unless the app widened this subject to this credential.
+        // Administration, and accepting terms, take a stated session, unless the app widened this subject
+        // to this credential.
         // A refusal here is final; a pass falls through to the subject's own rule below.
         if (action !== 'read' && (ADMINISTRATIVE_SUBJECTS as readonly string[]).includes(subject.type) && !session) {
             const widenedTo: readonly string[] = widening[subject.type as AdministrativeSubjectType] ?? []
             const kind = person.credential?.kind
-            if (kind === undefined || !widenedTo.includes(kind)) return false
+            // `inbound-email` is refused even if a cast put it in the list (WidenableCredentialKind).
+            if (kind === undefined || kind === 'inbound-email' || !widenedTo.includes(kind)) return false
         }
 
         switch (subject.type) {
             case 'Job':
-                if (action === 'read') return sameOrg(subject)
-                if (action === 'create') return !person.restricted && sameOrg(subject)
+                if (action === 'read') return personSameOrg(subject)
+                if (action === 'create') return !person.restricted && personSameOrg(subject)
                 return false
             case 'Membership':
-                if (action === 'read') return sameOrg(subject)
-                if (action === 'create' || action === 'manage') return canManageOrg(person.role) && sameOrg(subject)
+                if (action === 'read') return personSameOrg(subject)
+                if (action === 'create' || action === 'manage')
+                    return canManageOrg(person.role) && personSameOrg(subject)
                 return false
             case 'Org':
-                if (action === 'read') return sameOrg(subject)
-                if (action === 'update' || action === 'manage') return canManageOrg(person.role) && sameOrg(subject)
+                if (action === 'read') return personSameOrg(subject)
+                if (action === 'update' || action === 'manage')
+                    return canManageOrg(person.role) && personSameOrg(subject)
                 return false
             case 'User':
                 if (action === 'update') return subject.ownerId === person.userId
@@ -363,9 +384,9 @@ export function defineAbilitiesFor(actor: Actor): Ability {
                 return false
             case 'WebhookEndpoint':
                 // Registering/managing an egress endpoint is an administrative act, gated like Org.
-                if (action === 'read') return sameOrg(subject)
+                if (action === 'read') return personSameOrg(subject)
                 if (action === 'create' || action === 'update' || action === 'delete') {
-                    return canManageOrg(person.role) && sameOrg(subject)
+                    return canManageOrg(person.role) && personSameOrg(subject)
                 }
                 return false
             case 'JobSchedule':
@@ -377,7 +398,7 @@ export function defineAbilitiesFor(actor: Actor): Ability {
             default:
                 // App subjects register through the seam (src/app-config/abilities.ts). Deny by default:
                 // appAbilityRules returns false for anything it does not explicitly allow.
-                return appAbilityRules(person, action, subject, { sameOrg })
+                return appAbilityRules(person, action, subject, { sameOrg: personSameOrg })
         }
     }
 
@@ -387,24 +408,52 @@ export function defineAbilitiesFor(actor: Actor): Ability {
     }
 }
 
+/** The loose record {@link personFieldsOf} copies into, before it is validated. */
+interface PersonFieldsCopy {
+    kind: unknown
+    credential: unknown
+    userId: unknown
+    role: unknown
+    restricted: unknown
+    activeOrgId: unknown
+    manageAll: unknown
+}
+
 /**
- * The shape the person rules can judge: `kind` is 'person' or absent, `role` is a real role, and
- * `restricted` is a boolean. The type promises this; the check is for values that arrive around it.
+ * Copy, by NAME, every field the person rules read, reading through getters and prototypes exactly
+ * once. The credential is copied too, so a getter cannot answer `session` to the check and something
+ * else to the rule.
  */
-function isWellFormedPerson(actor: AbilityActor): boolean {
-    const loose = actor as {
-        kind?: unknown
-        role?: unknown
-        restricted?: unknown
-        userId?: unknown
-        activeOrgId?: unknown
+function personFieldsOf(actor: AbilityActor): PersonFieldsCopy {
+    const loose = actor as unknown as Record<string, unknown>
+    const credential = loose.credential as { kind?: unknown; id?: unknown } | undefined | null
+    return {
+        kind: loose.kind,
+        credential: credential == null ? undefined : { kind: credential.kind, id: credential.id },
+        userId: loose.userId,
+        role: loose.role,
+        restricted: loose.restricted,
+        activeOrgId: loose.activeOrgId,
+        manageAll: loose.manageAll,
     }
+}
+
+/**
+ * The shape the person rules can judge: `kind` is 'person' or absent, `role` is a real role,
+ * `restricted` and `manageAll` are booleans, and a credential, if any, has a string kind. The type
+ * promises this; the check is for values that arrive around it.
+ */
+function isWellFormedPerson(loose: PersonFieldsCopy): boolean {
+    const credential = loose.credential as { kind?: unknown; id?: unknown } | undefined
     return (
         (loose.kind === undefined || loose.kind === 'person') &&
         typeof loose.role === 'string' &&
         isRole(loose.role) &&
         typeof loose.restricted === 'boolean' &&
         typeof loose.userId === 'string' &&
-        typeof loose.activeOrgId === 'string'
+        typeof loose.activeOrgId === 'string' &&
+        typeof loose.manageAll === 'boolean' &&
+        (credential === undefined ||
+            (typeof credential.kind === 'string' && (credential.id === null || typeof credential.id === 'string')))
     )
 }
