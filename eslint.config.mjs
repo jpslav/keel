@@ -14,8 +14,9 @@ import typescriptEslint from 'typescript-eslint'
 // used to say `*.{ts,tsx}`, which let a `.mjs` file in apps/*/src or packages/keel/src import a vendor
 // SDK, read process.env or take the raw db handle with a green `pnpm lint`; nothing in the tree did, and
 // nothing would have said so if something had. Every fence glob takes its extensions from here. The
-// carve-outs do NOT (TEST_FILES and STORY_FILES below, the next.config and instrumentation ones further
-// down): a carve-out names what a runner actually picks up, and a file it does not pick up keeps every ban.
+// runner-shaped carve-outs do NOT (TEST_FILES and STORY_FILES below, the next.config and instrumentation
+// ones further down): each names what its runner actually picks up, and a file the runner does not pick up
+// keeps every ban.
 const SRC_EXT = '{ts,tsx,mts,cts,js,jsx,mjs,cjs}'
 // vitest's include globs (vitest.config.ts) name `*.test.{ts,tsx}` and nothing else, so a `.test.mjs`
 // under src/ is an ordinary module that a route can import, and it stays fenced.
@@ -144,11 +145,15 @@ const appCodePattern = {
 // is the last no-restricted-syntax block for those files, so its list was the one that counted), and
 // `db['getDb']()` passed lint in a route handler although the two blocks before it listed the selector.
 //
-// A KEY can name something three ways, and every selector here that aims at a name (getDb, `env` on
-// `process`, a run-mode variable) accepts all three: an identifier (`.name`, `{ name }`), a string
-// (`['name']`, `{ 'name': x }`), or a template literal with no expressions. `path` is the esquery path to
-// the key; `name` is a quoted string or a regex. `quotedKey` leaves out the identifier because in a
-// computed access an identifier is a VARIABLE (`db[k]`), not the name.
+// A KEY can name something three ways: an identifier (`.name`, `{ name }`), a string (`['name']`,
+// `{ 'name': x }`), or a template literal with no expressions. Every name these selectors aim at (getDb,
+// `env` on `process` or imported from it, a run-mode variable) is matched in all three: through anyKey, or,
+// for getDb's member access, the dot selector for the identifier and quotedKey for the other two. `path`
+// is the esquery path to the key; `name` is a quoted string or a regex. quotedKey leaves out the
+// identifier because in a computed access an identifier is a VARIABLE (`db[k]`), not the name. The anyKey
+// selectors on `process` keep it, as main's `[property.name="env"]` did, so `process[env]` with `env` a
+// variable is reported too. A key wrapped in a TypeScript assertion (`db['getDb' as const]`) is out of
+// reach, as an alias is.
 const quotedKey = (path, name) =>
     `:matches([${path}.value=${name}], [${path}.expressions.length=0][${path}.quasis.0.value.cooked=${name}])`
 const anyKey = (path, name) =>
@@ -455,8 +460,9 @@ const eslintConfig = [
             '!.ladle',
             '!.ladle/**',
             '**/.ladle/dist/**',
-            // What Panda's codegen writes there, and nothing else: a hand-written module in that directory
-            // is fenced like any other.
+            // What Panda's codegen writes there (`.mjs` and `.d.ts`): a hand-written `.ts` or `.js` in that
+            // directory is fenced like any other module. A hand-written `.mjs` is not, since it has the
+            // extension of Panda's own output.
             'apps/*/src/styles/generated/**/*.{mjs,d.ts}',
             '**/test-results/**',
             '**/playwright-report/**',

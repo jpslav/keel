@@ -54,8 +54,9 @@ describe('getDb: request-path code may not take the raw db handle, in any form',
         })
     })
 
-    // A server action is a request path with no route file in front of it: Next calls it straight from a
-    // form post. It lives in the route tree here, so the ban the tree's other files get is its ban too.
+    // A server action is a request path with no route file in front of it: Next runs it on a POST to the
+    // page that renders it. It lives in the route tree here, so the ban the tree's other files get is its
+    // ban too. (One kept outside app/, components/, domain/ and jobs/ would get no getDb ban at all.)
     it.each(FORMS)("a 'use server' action may not reach it either (%s)", async (_form, code, fence) => {
         expect(fired(await lint(`${APP}/src/app/[locale]/kv/actions.ts`, `'use server'\n${code}`), fence)).toBe(1)
     })
@@ -81,7 +82,7 @@ describe('getDb: request-path code may not take the raw db handle, in any form',
         expect(fired(findings, GET_DB)).toBe(1)
     })
 
-    it('keel’s own db helpers may: they are what opens withTenant', async () => {
+    it('keel’s own db helpers may: they are the keel/db helper the ban’s message sends request paths to', async () => {
         expect(
             fired(await lint('packages/keel/src/db/kv.ts', 'export const load = (db) => db.getDb()\n'), GET_DB),
         ).toBe(0)

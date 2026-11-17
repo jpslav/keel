@@ -503,7 +503,7 @@ Rejected alternatives:
 
 ## Addendum (2026-11-16, later): the fences cover every extension, and selectors travel as sets
 
-The trap named under "The fence" bit a third time, on `no-restricted-syntax` rather than
+The trap named under "The fence" bit again, on `no-restricted-syntax` rather than
 `no-restricted-imports`: the last block for routes, pages and components re-listed two of the three
 `getDb` selectors, so `db['getDb']()` passed lint in a route handler. Selectors that implement one rule now
 travel as one array (`getDbSelectors`, `runModeEnvSelectors`), so a block can drop a whole rule but not one

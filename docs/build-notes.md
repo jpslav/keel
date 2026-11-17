@@ -1410,7 +1410,7 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
 
 ## Lint fence gaps (2026-11-16, `fix/lint-fence-gaps`)
 
-- **The merge trap struck a third time, and re-listing was the mechanism that failed.** Every
+- **The merge trap struck again, and re-listing was the mechanism that failed.** Every
   `no-restricted-syntax` block for routes, pages and components re-listed the getDb selectors by hand, and
   the last of them, the one that added the a11y-attribute ban, listed two of the three. ESLint keeps only the
   last block's list for a file, so `db['getDb']()` passed lint in a route handler while
@@ -1429,7 +1429,14 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   `keel/public-surface` had missed those two as well. The globs now take their extensions from one constant (`SRC_EXT`). Carve-outs do NOT: a test
   carve-out names what vitest runs (`*.test.{ts,tsx}`), a story carve-out what Ladle loads, and
   `next.config.*` the four names Next reads, so a `.test.mjs` or a `next.config.cjs` stays fenced.
-- **`.cjs` is linted as CommonJS**, where `import` does not parse, and `react/jsx-no-literals` can only be
-  configured for a file the block that registers the react plugin also matches. Widening one fence's glob
-  can therefore mean widening a plugin block's too; the lint gate fails with a config error, not a pass,
-  when it doesn't.
+- **`react/jsx-no-literals` can only be configured for a file that the block registering the react plugin
+  also matches.** Widening one fence's glob can therefore mean widening a plugin block's too. When it
+  doesn't, the lint gate fails with a config error (`Could not find plugin "react"`), not a pass.
+- **typescript-eslint's parser accepts `import` in a `.cjs` file**, even though the config sets
+  `sourceType: 'commonjs'` for them and Node rejects the syntax. A lint case for a `.cjs` file should use
+  `require()`, the way a real one is written, or it tests a file that could never run.
+- **A selector that aims at a name has to accept the name in each spelling a key can take**: an
+  identifier, a string, or a template literal with no expressions (`anyKey` in `eslint.config.mjs`). On
+  main the computed getDb selector matched `db['getDb']` but not ``db[`getDb`]``, and `process['env']`
+  passed the `process.env` ban outright. A key wrapped in a TypeScript assertion (`['getDb' as const]`) is still out
+  of reach.

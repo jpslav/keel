@@ -26,9 +26,9 @@ import {
  */
 const EXTENSIONS = ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs']
 
-// `.cjs` is linted as CommonJS (eslint.config.mjs), where `import`/`export` do not parse, so each act has
-// a CommonJS spelling. A `.cjs` file has no static import for no-restricted-imports to see; require() is
-// its import, and keel/no-dynamic-vendor-import sees that.
+// A `.cjs` file is CommonJS: Node rejects `import`/`export` in one, though typescript-eslint's parser
+// would accept them. So each act is spelled the way a real `.cjs` file can contain it. Its import is
+// require(), which keel/no-dynamic-vendor-import sees; no-restricted-imports sees declarations only.
 const isCjs = (file: string) => file.endsWith('.cjs')
 const importsVendor = (file: string) =>
     isCjs(file) ? "const { S3Client } = require('@aws-sdk/client-s3')\nmodule.exports = S3Client\n" : IMPORTS_VENDOR
@@ -39,7 +39,7 @@ const readsEnv = (file: string) =>
 const takesRawDb = (file: string) =>
     isCjs(file) ? "module.exports = (db) => db['getDb']()\n" : "export const load = (db) => db['getDb']()\n"
 
-/** Every zone the vendor and process.env bans hold in: an app's src/ and config/, keel's src/, keel's fixture. */
+/** Zones both the vendor and process.env bans hold in: an app's src/ and config/, keel's src/, keel's fixture. */
 const ZONES = [
     `${APP}/src/app/api/kv/route`,
     `${APP}/src/components/kv-card`,
@@ -108,8 +108,8 @@ describe('the carve-outs still let through what they were made for, in every spe
         expect(fired(await lint(`${APP}/vite.demo.config.mjs`, composesSentry), VENDOR_STATIC)).toBe(1)
     })
 
-    // The app-root tool configs read the environment for ports and modes, and the process.env ban
-    // covers src/ and config/ only.
+    // The app-root tool configs may read the environment (the Playwright configs do, for ports and modes):
+    // the process.env ban covers src/ and config/ only.
     it.each([
         `${APP}/playwright.config.ts`,
         `${APP}/playwright.config.mjs`,
@@ -198,9 +198,10 @@ describe('the carve-outs still let through what they were made for, in every spe
     })
 })
 
-// Gaps of the merge trap's own class, found by printing the effective config for every zone: a block
-// that took a file set over from an earlier one and dropped part of what the earlier one enforced.
-describe('what a later block used to drop', () => {
+// What printing the effective config for every zone found besides the two reported holes: blocks that took
+// a file set over from an earlier one and dropped part of what it enforced (the merge trap), the registry
+// exemption's reach, and two rules whose globs named fewer extensions than ESLint lints.
+describe('what the effective-config audit found', () => {
     // The fakes block ignores stories (for the a11y ban), and stories fell back to the process.env block,
     // which never carried the dynamic real/ ban. The static form was banned there all along.
     it.each(['tsx', 'jsx'])('a story beside a fake (.%s) may not load real/ dynamically', async (ext) => {

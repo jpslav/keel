@@ -212,7 +212,12 @@ the extensions other than `.ts` and `.tsx`).
   `@/adapters/fake/../real/kv` gets past the static real-adapter fences (the dynamic one, inside the
   adapters directory, still catches it).
 - `process.env` reached through an alias is out of reach too: `const env = process.env`,
-  `const { env } = process`, or `env` re-exported from `node:process`. A direct `import { env }` from
-  `node:process` is caught.
+  `const { env } = process`, `globalThis.process.env`, or `env` re-exported from `node:process`. The same
+  name spelled as a key is caught: `process['env']`, ``process[`env`]``, and `import { env }` or
+  `import { 'env' as e }` from `node:process`.
+- So is a key or object wrapped in a TypeScript assertion: `process.env['APP_MODE' as const]`, or
+  `(process.env as Record<string, string>).APP_MODE`.
+- A hand-written `.mjs` file in `apps/<app>/src/styles/generated/` is not linted at all: the `.mjs` and
+  `.d.ts` files there are Panda's output, and ignored. Anything else in that directory is fenced.
 - To the fence, a vendor SDK is whatever `vendorSdkPattern` lists. A package missing from the list is
   ordinary code to it.
