@@ -1,5 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
+import type { DbPort } from '../ports/db'
+import type { AuditEventInput } from './audit'
 import { orgIdForSlug } from './org-lookup'
 import { tenantIdForSlug } from './tenant-lookup'
 
@@ -111,6 +113,111 @@ describe('recordAuditEvent', () => {
             { subject_id: byBadge, credential_kind: 'fixture-badge', credential_id: 'badge-7' },
             { subject_id: unsaid, credential_kind: null, credential_id: null },
         ])
+    })
+})
+
+/**
+ * THE TIME AN AUDIT EVENT CARRIES. The column defaulted to the database's `now()` and nothing set it, so a demo
+ * that advanced the Simulator's world clock still recorded events in real time, and anything that compares an
+ * event's age with that clock (a retention demo, an "older than 90 days" screen) never lined up. In a simulated
+ * world the event now takes the world clock's time, through the database port; in real mode it is the database's
+ * own `now()` and there is nothing a caller could pass to change it.
+ */
+describe('the time an audit event carries', () => {
+    const DAY_MS = 86_400_000
+
+    afterEach(async () => {
+        const { resetClock } = await import('../adapters/fake/clock')
+        resetClock()
+    })
+
+    /** Records one event through `port` and returns the instant stored on its row, in ms. */
+    async function recordedAt(port: DbPort, extra: Record<string, unknown> = {}): Promise<number> {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { recordAuditEvent } = await import('./audit')
+        const { tenantId, orgId } = await ids('harbor', 'depot')
+        const subjectId = `when-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        await recordAuditEvent(port, {
+            tenantId,
+            orgId,
+            actorUserId: 'user-ada',
+            action: 'membership.invited',
+            subjectType: 'Membership',
+            subjectId,
+            ...extra,
+        })
+        const row = await fakeDb.withTenant(tenantId, (trx) =>
+            trx.selectFrom('audit_events').select('at').where('subject_id', '=', subjectId).executeTakeFirstOrThrow(),
+        )
+        return new Date(row.at).getTime()
+    }
+
+    test("in a simulated world the event takes the WORLD CLOCK's time, a day on after the clock advanced a day", async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { advanceClockMs } = await import('../adapters/fake/clock')
+        advanceClockMs(DAY_MS)
+
+        const before = Date.now()
+        const at = await recordedAt(fakeDb)
+        const after = Date.now()
+
+        expect(at).toBeGreaterThanOrEqual(before + DAY_MS)
+        expect(at).toBeLessThanOrEqual(after + DAY_MS)
+    })
+
+    test('resetting the clock returns new events to real time', async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { advanceClockMs, resetClock } = await import('../adapters/fake/clock')
+        advanceClockMs(DAY_MS)
+        resetClock()
+
+        const before = Date.now()
+        const at = await recordedAt(fakeDb)
+
+        expect(at).toBeGreaterThanOrEqual(before - 2000)
+        expect(at).toBeLessThan(before + DAY_MS / 2)
+    })
+
+    test("a database with no clock (what real mode has) stamps the database's own now(), world clock or not", async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { advanceClockMs } = await import('../adapters/fake/clock')
+        advanceClockMs(DAY_MS)
+        // The fake's pglite, minus the one thing only a simulated world adds: its clock.
+        const realLike: DbPort = { ...fakeDb, now: undefined }
+
+        const before = Date.now()
+        const at = await recordedAt(realLike)
+        const after = Date.now()
+
+        expect(at).toBeGreaterThanOrEqual(before - 2000)
+        expect(at).toBeLessThanOrEqual(after + 2000)
+    })
+
+    test('a caller cannot set it: there is no `at` to pass, and one smuggled past the types is ignored', async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        // Compile-time: `at` is not a key of the input at all. (If someone adds one, this line stops compiling.)
+        const noAtKey: 'at' extends keyof AuditEventInput ? never : true = true
+        expect(noAtKey).toBe(true)
+
+        // Run-time: forced through anyway, on a database with no world clock, the forged 1970 never reaches the row.
+        const realLike: DbPort = { ...fakeDb, now: undefined }
+        const before = Date.now()
+        const at = await recordedAt(realLike, { at: new Date(0).toISOString() })
+
+        expect(at, 'a forged 1970 time must not reach the row').toBeGreaterThanOrEqual(before - 2000)
+    })
+
+    test('the real database adapter never defines a clock of its own', async () => {
+        // Constructing the pool connects to nothing; it is destroyed at once. The only simulated-world thing a
+        // DbPort may add is `now`, and a real adapter that did would make an audit row's time caller-influenced.
+        const { createRealDb } = await import('../adapters/real/db')
+        const real = createRealDb('postgres://nobody:nothing@127.0.0.1:1/none')
+        try {
+            expect(real.now).toBeUndefined()
+            expect('now' in real).toBe(false)
+        } finally {
+            await real.getDb().destroy()
+        }
     })
 })
 

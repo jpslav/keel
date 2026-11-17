@@ -5,6 +5,7 @@ import type { DB } from '../../db/schema'
 import { seedDb } from '../../db/seed'
 import { runWithTenant } from '../../db/with-tenant'
 import type { DbPort } from '../../ports/db'
+import { worldNow } from './clock'
 import { dataDir } from './data-dir'
 import { fakeEmail } from './email'
 import { openPglite, PGliteDialect } from './pglite-dialect'
@@ -65,5 +66,9 @@ export const fakeDb: DbPort = {
     },
     async migrateToLatest() {
         await instance().ready
+    },
+    /** The Simulator's world clock (real time plus the offset a demo advanced), so audit rows follow it. */
+    now() {
+        return worldNow()
     },
 }
