@@ -20,8 +20,9 @@ export interface InboundContext {
     tenantId: string
     orgId: string
     orgSlug: string
-    /** The same org as `orgId` + `orgSlug`, as one value from the one row intake resolved: what
-     *  `abilityActorFromCredential` takes, so a handler cannot pair one org's id with another's slug. */
+    /** The same org as `orgId` + `orgSlug`, as one value from `orgIdentityForSlug`'s one row, read in the
+     *  tenant intake resolved: what `abilityActorFromCredential` takes, so a handler cannot pair one org's
+     *  id with another's slug. */
     org: OrgIdentity
     /** Normalized sender addr-spec (lowercased, display name stripped). */
     fromEmail: string
