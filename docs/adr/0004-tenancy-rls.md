@@ -226,3 +226,26 @@ from `packages/keel/src/adapters/real/db.contract.test.ts`).
 - Without 0015 the pass fails with the production error.
 - The pass reaches the server only through injected `admin` and `connect` handles, so another transport
   (the Data API, #46) could run it. It does not yet.
+
+## Addendum (2026-11-16): `withTenant` sets the role and the tenant in one statement
+
+The Decision lists two statements: `SET LOCAL ROLE app_user`, then
+`SELECT set_config('app.current_tenant', $1, true)`. `runWithTenant` now sends them as one:
+
+```sql
+SELECT set_config('role', 'app_user', true), set_config('app.current_tenant', $1, true)
+```
+
+`SET ROLE` is a setting of the `role` parameter. `set_config('role', …, true)` sets that same parameter,
+transaction-locally, through the same membership check. So the first call is `SET LOCAL ROLE` in a form
+that can sit in a `SELECT`. The tenant id stays a bound parameter, and the role name stays a literal.
+
+The reason is the RDS Data API transport (ADR-0002, addendum of the same date): each statement there is
+its own HTTPS call, so the setup was costing two calls per `withTenant`. On `pg` and pglite it is one
+round trip fewer.
+
+The same proofs hold on all three engines. Pointing the first `set_config` at a different parameter name
+was watched turning the pglite RLS suite red, so the role really is set by it. The proofs' own
+fail-closed case and their privilege-layer cases (the append-only tables, `service_keys`, and DELETE on
+`agreements`) still write `SET LOCAL ROLE` directly; that form stays valid, and those cases are about
+the policies and grants, not about `runWithTenant`.
