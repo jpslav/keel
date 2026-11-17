@@ -2472,4 +2472,5 @@ or as a package: the logic is in `packages/keel`, and the app holds thin wrapper
   demos see digests fire, so `docs/adopting.md` ("The scheduled tick") says how to tick by hand with the dev
   secret instead. A `pnpm tick` helper or an opt-in ticker is the next step if it is wanted.
 - **Corrected figure:** the adopter guide said the starter imports 32 of keel's published subpaths; it was 33 before
-  this change (every counting rule gives 33) and is 35 of 131 now.
+  this change (every counting rule gives 33) and is 35 of 131 now from the starter's source, 37 counting its tests (the new cron route test imports
+  `keel/adapters/fake/db` and `keel/adapters/fake/service-auth`), so from here on the figure depends on the rule: say which.

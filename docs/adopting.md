@@ -280,8 +280,8 @@ want it.
 
 One gate is relaxed on the way out. keel's knip workspace carries `includeEntryExports: true`, which
 means "every symbol keel PUBLISHES must have a consumer" — an invariant the showcase made true by using
-nearly all of it. A one-entity app does not: `apps/starter` imports 35 of keel's 131 published subpaths,
-so the same setting would start demanding you delete the other 96 — capabilities you merely have not
+nearly all of it. A one-entity app does not: `apps/starter` imports 35 of keel's 131 published subpaths from its source (37
+counting its tests), so the same setting would start demanding you delete the other 96 — capabilities you merely have not
 reached yet, not dead code. `--eject-showcase` therefore turns it off. knip keeps reporting unused
 files, and the declared `exports` surface goes back to being what it is without a rich consumer: a
 declaration.
@@ -443,8 +443,9 @@ the showcase carries the same route over the same function.
   `withWebhookSecret(`, so if you edit the route keep that call, and keep the logic in keel's function.
 - **In a deployment** nothing calls it until you set up the scheduler: that is the `scheduled-tick` row of the
   [cutover checklist](cutover-checklist.md).
-- **In `pnpm dev`** nothing ticks it for you. The dev server runs no scheduler, and the starter has no Simulator panel
-  (the showcase does: its Jobs tab advances the world clock and runs what is due). To tick by hand, POST the route
+- **In `pnpm dev`** nothing ticks it for you. The dev server runs no scheduler, and the starter's server app has no Simulator panel
+  (its `file://` demo has one, in the browser; the showcase's server app has one too, and its Jobs tab advances the world clock
+  and runs what is due). To tick by hand, POST the route
   with the per-checkout dev secret. The first request, even with a wrong bearer, creates the secret at
   `apps/<app>/.data/auth/webhook-secret`:
 
