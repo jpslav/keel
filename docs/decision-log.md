@@ -2147,3 +2147,28 @@ runbook and clicking fifteen things in the right order.
   its own change.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
+
+## The migrating role may switch to `app_user` (2026-11-16, `fix/grant-app-user-to-owner`)
+
+The design is in ADR-0004's addendum of the same date.
+
+- **A framework migration, not a deploy step.** The grant has to exist before the first tenant query on
+  any database keel migrates, and the migrator is the one role every deployment runs. A runbook line
+  would be forgotten exactly once, and that once is every request failing.
+- **Guarded by `pg_has_role(current_user, 'app_user', 'SET')`, not a bare GRANT.** The guard makes it a
+  no-op for a superuser and on a re-run. It also means a role that cannot grant the switch to itself fails
+  with the statement to run, instead of a bare `permission denied to grant role`.
+- **INHERIT FALSE for the migrator, INHERIT TRUE for a separate app role.** The migrator owns every table,
+  so it needs only the switch. A separate app role owns nothing and reads `tenants`, `organizations` and
+  `service_keys` before any tenant is set, and those grants are `app_user`'s.
+- **The non-superuser pass runs the existing proofs, not a new suite.** `RlsProofContext` gained
+  `appDb`: every `runWithTenant` and every `SET LOCAL ROLE app_user` in the framework's and all three
+  seams' proofs moved to it. Seeding and the negative control stay on the superuser. So every isolation
+  claim is now proved for the connection a deployment actually uses, and an adopter's own proof half that
+  still switches on `db` keeps passing, just less strictly.
+- **The shared-server problem is measured, not assumed.** `app_user` is cluster-wide, and CI's suites
+  share one Postgres. The pass measures what this server gives a role's creator, then gives the owner
+  exactly that where `app_user` already exists. A scratch run on a fresh cluster checked the genuine path
+  too: the owner created `app_user`, failed without 0015, and passed with it.
+- **`down` is a no-op.** Revoking the switch would take every tenant query down with it, and keel never
+  runs `down` migrations.

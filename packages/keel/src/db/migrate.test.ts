@@ -49,6 +49,11 @@ async function schemaOf(db: Kysely<DB>) {
         triggers: await rows(sql`
             SELECT event_object_table, trigger_name, event_manipulation, action_timing, action_statement
             FROM information_schema.triggers WHERE trigger_schema = 'public' ORDER BY 1, 2, 3`),
+        // Role memberships in app_user: what a migration like 0015 changes, and what withTenant relies on.
+        memberships: await rows(sql`
+            SELECT m.member::regrole::text AS member, m.admin_option, m.inherit_option, m.set_option
+            FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+            WHERE r.rolname = 'app_user' ORDER BY 1, 2, 3, 4`),
         functions: await rows(sql`
             SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args FROM pg_proc p
             JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' ORDER BY 1, 2`),

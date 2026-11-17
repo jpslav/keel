@@ -4,6 +4,11 @@ import { createRealDb } from './db'
 /**
  * Migrator Lambda handler (ADR-0001): runs the same migration registry the app, unit tests, and
  * contract tests use. Invoked by the CD pipeline before each release shifts traffic.
+ *
+ * ROLES. The credentials here are the migrator's, and migration 0015 grants that role the switch to
+ * `app_user`. If the application connects as a DIFFERENT role, that role needs the switch too, granted by
+ * this role:  GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE;
+ * (the `db-role-not-superuser` row in docs/cutover-checklist.md; ADR-0004, 2026-11-16 addendum).
  * AUTHORED — CUTOVER (`cloud-accounts`).
  *
  * @public
