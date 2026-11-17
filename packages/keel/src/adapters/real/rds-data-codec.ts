@@ -456,6 +456,18 @@ export class RdsDataDatabaseError extends Error {
     }
 }
 
+/**
+ * What CommitTransaction's `transactionStatus` says happened. The API reference lists no values; AWS's
+ * own CLI example answers a commit with "Transaction Committed", and step 1 of docs/runbooks/data-api.md
+ * records what a live cluster sends. Anything else is not taken for a commit.
+ */
+export function commitOutcome(status: string | undefined): 'committed' | 'rolled back' | 'unknown' {
+    const said = status?.trim().toLowerCase()
+    if (said === 'transaction committed') return 'committed'
+    if (said !== undefined && /\brollback\b|\brolled back\b/.test(said)) return 'rolled back'
+    return 'unknown'
+}
+
 /** Raised before a call is made, for something the Data API cannot do (see unsupportedStatement). */
 export class RdsDataUnsupportedError extends Error {
     constructor(message: string) {

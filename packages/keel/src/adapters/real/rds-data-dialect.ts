@@ -5,6 +5,7 @@ import {
     ExecuteStatementCommand,
     RollbackTransactionCommand,
     type BeginTransactionCommandOutput,
+    type CommitTransactionCommandOutput,
     type ExecuteStatementCommandOutput,
 } from '@aws-sdk/client-rds-data'
 import {
@@ -23,6 +24,7 @@ import {
 } from 'kysely'
 import {
     castPlaceholder,
+    commitOutcome,
     decodeRow,
     describableSql,
     leadingKeyword,
@@ -49,6 +51,8 @@ export interface RdsDataDialectConfig {
     /** The Secrets Manager secret holding the database user's credentials. */
     secretArn: string
     database: string
+    /** How long a SQL shape's inferred parameter types are trusted; `TYPE_CACHE_TTL_MS` when omitted. */
+    typeCacheTtlMs?: number
 }
 
 /**
@@ -131,6 +135,17 @@ export async function lockMigrations(db: Kysely<any>): Promise<void> {
 const TYPE_CACHE_LIMIT = 2000
 
 /**
+ * How long a SQL shape's inferred types are trusted: five minutes. A cached type outlives a schema change
+ * SILENTLY — a `date` column changed to `timestamptz` goes on receiving midnight through a warm cache,
+ * where node-postgres stores the instant (ADR-0002's addendum of 2026-11-16 states the limit) — so the
+ * cache must forget. Five minutes bounds that window to about the time a deploy's migration takes to
+ * settle, and costs one describe per shape per five minutes per warm process (three extra calls inside a
+ * transaction, five outside): for a few hundred shapes, well under one extra call a second. Shorter buys
+ * little and spends round trips on every request; longer leaves an out-of-band migration's mismatch live.
+ */
+const TYPE_CACHE_TTL_MS = 5 * 60 * 1000
+
+/**
  * A paused Aurora Serverless v2 (min capacity 0, as keel's non-production stack runs) answers the first
  * call with DatabaseResumingException: the request was cancelled, not run, so retrying it is safe. Every
  * other failure is NOT retried — the SDK's own retries are off (`maxAttempts: 1` in ./db-data-api.ts) because AWS
@@ -139,7 +154,7 @@ const TYPE_CACHE_LIMIT = 2000
 const RESUME_DELAYS_MS = [1000, 2000, 4000, 8000]
 
 class RdsDataDriver implements Driver {
-    readonly #types = new Map<string, readonly string[]>()
+    readonly #types = new Map<string, { readonly types: readonly string[]; readonly at: number }>()
 
     constructor(private readonly config: RdsDataDialectConfig) {}
 
@@ -201,8 +216,19 @@ class RdsDataDriver implements Driver {
             throw new AbortedTransactionError()
         }
         const { resourceArn, secretArn } = this.config
-        await this.call(new CommitTransactionCommand({ resourceArn, secretArn, transactionId }))
+        const answer = (await this.call(
+            new CommitTransactionCommand({ resourceArn, secretArn, transactionId }),
+        )) as CommitTransactionCommandOutput
         conn.transactionId = undefined
+        // The call returning is not the transaction committing: the answer says which it did. Either way the
+        // transaction is over, so the id is cleared first and Kysely's follow-up rollback is a no-op.
+        const outcome = commitOutcome(answer.transactionStatus)
+        if (outcome === 'rolled back') throw new AbortedTransactionError()
+        if (outcome === 'unknown') {
+            throw new Error(
+                `RDS Data API: CommitTransaction answered ${JSON.stringify(answer.transactionStatus)}, not "Transaction Committed" — the transaction's writes may not be saved`,
+            )
+        }
     }
 
     async rollbackTransaction(connection: DatabaseConnection): Promise<void> {
@@ -275,7 +301,7 @@ class RdsDataDriver implements Driver {
     /**
      * The types Postgres infers for `sql`'s `$n` placeholders — the same inference node-postgres relies
      * on — read back from `pg_prepared_statements` after a PREPARE, and cached by SQL text (Kysely
-     * compiles one text per query shape, so a warm process asks once per shape).
+     * compiles one text per query shape, so a warm process asks once per shape) for `TYPE_CACHE_TTL_MS`.
      *
      * Inside a transaction it asks there, so a table the transaction has just created is visible to the
      * PREPARE; a PREPARE that fails has found the same error the statement would have, and aborts the
@@ -284,7 +310,8 @@ class RdsDataDriver implements Driver {
      */
     private async parameterTypes(sql: string, transactionId: string | undefined): Promise<readonly string[]> {
         const cached = this.#types.get(sql)
-        if (cached) return cached
+        const ttl = this.config.typeCacheTtlMs ?? TYPE_CACHE_TTL_MS
+        if (cached && Date.now() - cached.at < ttl) return cached.types
 
         const name = `keel_describe_${randomUUID().replace(/-/g, '')}`
         const describe = async (txId: string): Promise<readonly string[]> => {
@@ -337,7 +364,7 @@ class RdsDataDriver implements Driver {
         }
 
         if (this.#types.size >= TYPE_CACHE_LIMIT) this.#types.clear()
-        this.#types.set(sql, types)
+        this.#types.set(sql, { types, at: Date.now() })
         return types
     }
 

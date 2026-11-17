@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
     castPlaceholder,
+    commitOutcome,
     decodeField,
     describableSql,
     isMultistatement,
@@ -72,6 +73,20 @@ describe('leadingKeyword', () => {
         ['', ''],
     ])('%j -> %s', (sql, keyword) => {
         expect(leadingKeyword(sql)).toBe(keyword)
+    })
+})
+
+describe('commitOutcome: only "Transaction Committed" is a commit', () => {
+    it.each([
+        ['Transaction Committed', 'committed'],
+        [' transaction committed ', 'committed'],
+        ['Rollback Complete', 'rolled back'],
+        ['Transaction rolled back', 'rolled back'],
+        ['Transaction not committed', 'unknown'],
+        ['', 'unknown'],
+        [undefined, 'unknown'],
+    ] as const)('%j -> %s', (status, outcome) => {
+        expect(commitOutcome(status)).toBe(outcome)
     })
 })
 

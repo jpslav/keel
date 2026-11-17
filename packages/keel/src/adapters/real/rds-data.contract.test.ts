@@ -1,4 +1,4 @@
-import { ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
+import { CommitTransactionCommand, ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
 import EmbeddedPostgres from 'embedded-postgres'
 import { AbortedTransactionError, sql, type Kysely } from 'kysely'
 import { Migrator } from 'kysely/migration'
@@ -233,6 +233,87 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         ).rejects.toThrow('undo')
         const rows = await db().selectFrom('tenants').select('id').where('slug', '=', slug).execute()
         expect(rows).toEqual([])
+    })
+
+    test('a cached parameter type expires, so a schema change stops being answered with the old type', async () => {
+        // The accepted limit (ADR-0002's addendum): within the cache's lifetime a type change is silent. A
+        // date column turned timestamptz keeps receiving midnight through a warm cache, where pg (and an
+        // expired cache) stores the instant.
+        await sql`drop table if exists data_api_retype`.execute(viaPg.getDb())
+        await sql`create table data_api_retype (k text primary key, v date)`.execute(viaPg.getDb())
+        const expiring = createRealDataApiDb({
+            resourceArn: RESOURCE_ARN,
+            secretArn: SECRET_ARN,
+            database: DATABASE,
+            client: emulator,
+            typeCacheTtlMs: 0,
+        })
+        const write = (port: DbPort, k: string) =>
+            sql`insert into data_api_retype (k, v) values (${k}, ${'2026-11-16T15:30:00Z'})`.execute(port.getDb())
+        try {
+            for (const [k, port] of [
+                ['warm-before', dataApi],
+                ['expiring-before', expiring],
+            ] as const) {
+                await write(port, k)
+            }
+            await sql`alter table data_api_retype alter column v type timestamptz`.execute(viaPg.getDb())
+            for (const [k, port] of [
+                ['pg', viaPg],
+                ['warm', dataApi],
+                ['expiring', expiring],
+            ] as const) {
+                await write(port, k)
+            }
+            const stored = await sql<{ k: string; v: Date }>`
+                select k, v from data_api_retype where k in ('pg', 'warm', 'expiring')`.execute(viaPg.getDb())
+            const at = Object.fromEntries(stored.rows.map((row) => [row.k, row.v.toISOString()]))
+            expect(at.pg).toBe('2026-11-16T15:30:00.000Z')
+            expect(at.expiring).toBe(at.pg)
+            expect(at.warm).not.toBe(at.pg)
+        } finally {
+            await expiring.getDb().destroy()
+        }
+    })
+
+    test('a commit the Data API does not confirm is not reported as committed', async () => {
+        // The transaction's fate is CommitTransaction's answer, not the call's success.
+        for (const [status, expected] of [
+            ['Rollback Complete', AbortedTransactionError],
+            [undefined, Error],
+        ] as const) {
+            const lying = createRealDataApiDb({
+                resourceArn: RESOURCE_ARN,
+                secretArn: SECRET_ARN,
+                database: DATABASE,
+                client: {
+                    send: async (command) => {
+                        const answer = await emulator.send(command)
+                        return command instanceof CommitTransactionCommand
+                            ? { ...(answer as object), transactionStatus: status }
+                            : answer
+                    },
+                },
+            })
+            try {
+                const outcome = await lying
+                    .getDb()
+                    .transaction()
+                    .execute(async (trx) => {
+                        await sql`select 1`.execute(trx)
+                    })
+                    .then(
+                        () => 'reported as committed',
+                        (e: unknown) => e,
+                    )
+                expect(outcome, String(status)).toBeInstanceOf(expected)
+                expect(String(outcome), String(status)).toMatch(
+                    status ? /aborted|rolled back/i : /Transaction Committed/,
+                )
+            } finally {
+                await lying.getDb().destroy()
+            }
+        }
     })
 
     test('a parameterised statement outside a transaction asks Postgres for its types once, then reuses them', async () => {
