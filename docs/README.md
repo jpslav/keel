@@ -31,7 +31,8 @@ would be revisionist — so their paths are corrected opportunistically, never g
   (e-sign, SMS, web push, per-person cloud workspaces) and generic UI it has no invariant to encode (the list/table kit); copy one
   when an instance needs the capability
 - [runbooks/](runbooks/) — [demo.md](runbooks/demo.md), the guided tour of everything the scaffold does,
-  and [deploy.md](runbooks/deploy.md), the deploy shape
+  [deploy.md](runbooks/deploy.md), the deploy shape, and [data-api.md](runbooks/data-api.md), the live proof
+  that closes the RDS Data API driver's cutover row
 - [cutover-checklist.md](cutover-checklist.md) — your instance's live list of deferred credential-needing
   items and what unlocks each
 

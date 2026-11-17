@@ -70,3 +70,89 @@ rejected by `WITH CHECK`; and scoped writes visible. Two of its findings are loa
    `NULLIF(current_setting('app.current_tenant', true), '')::uuid`, which makes an unset tenant context
    mean zero rows rather than an error. Getting that backwards turns a fail-closed design into a
    500-on-every-request design, and only a real transaction sequence reveals it.
+
+## Addendum (2026-11-16): a second real driver, the RDS Data API
+
+Production can now reach Aurora two ways, chosen per deployment by `DATABASE_DRIVER`: `pg` (the default,
+node-postgres over a socket from a Lambda inside the database's VPC) or `data-api` (the Amazon RDS Data
+API over HTTPS, from a Lambda outside any VPC and with no NAT gateway). Both are behind the same `db` port
+and run the same migrations, `withTenant` and RLS policies. The trigger was an adopter's decision to run
+its console Lambda outside any VPC. Reaching Postgres from such a Lambda is a general shape of this
+template's hosting (ADR-0001), not one app's, so the driver is keel's:
+`packages/keel/src/adapters/real/rds-data-dialect.ts`, built through `createRealDataApiDb`.
+
+**Tenant context through the Data API — what is known, and how.** `runWithTenant` sets `SET LOCAL ROLE
+app_user` and `set_config('app.current_tenant', $1, true)`, then runs the caller's queries. Through the Data
+API those are separate `ExecuteStatement` calls sharing one `transactionId`.
+
+- **AWS documents** that the Data API pools connections and resets each one with `DISCARD ALL` before
+  reusing it (Aurora User Guide, "Session management with Amazon RDS Data API"). So nothing session-level
+  survives between calls outside a transaction.
+- **AWS states** that an explicit transaction is what keeps session state between calls: "If the
+  transaction is not used, there is no guarantee these API calls will use the same connection, and the
+  session state changes would be cleared" (AWS Database Blog, "Enforce row-level security with the RDS
+  Data API", 15 May 2024).
+- **Postgres guarantees** the rest. A transaction lives on one backend, transaction-scoped settings last
+  until COMMIT or ROLLBACK, and `DISCARD ALL` cannot run inside a transaction block.
+
+So the settings `withTenant` relies on persist across every statement of one Data API transaction, and
+are gone after it. That is documented and inferred, **not yet observed on a live cluster**. The cutover
+row `data-api` is the exact procedure that proves it.
+
+**The dialect is hand-written, as the pglite one is.** The community `kysely-data-api` (MIT, last
+published March 2025) declares `kysely ^0.27` against keel's 0.29. More decisively, it sends parameters
+untyped and returns `date` as a `Date`. Those two choices break keel's queries and its dates-are-strings
+rule respectively.
+
+**Parameters are typed by asking Postgres.** keel's SQL relies on node-postgres sending every parameter
+untyped, so Postgres infers `$1` from context. The Data API cannot do that: an untyped string arrives as
+`varchar`, and `uuid = varchar` is an error on Aurora. A per-value guess at a type hint would break
+`set_config`'s text argument the moment a tenant id looked like a uuid. So the dialect PREPAREs each SQL
+shape once per process and reads Postgres's own inference from `pg_prepared_statements.parameter_types`.
+It then sends every value as a string inside an explicit `CAST(:name AS <type>)`. That reproduces
+node-postgres's semantics rather than approximating them. It is also how arrays get through at all: the
+Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. A warm process pays
+nothing extra, and a new SQL shape costs one PREPARE round trip.
+
+**What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
+
+- transaction control written in SQL;
+- session state outside a transaction (`SET`, `SET ROLE`, `PREPARE`, temporary tables,
+  `set_config(…, false)`);
+- streaming.
+
+AWS's own limits surface as errors, never as truncation:
+
+- a 1 MiB response cap;
+- a 45-second call timeout;
+- a transaction that ends after three idle minutes or one hour;
+- SQL of at most 65,536 characters.
+
+The Data API returns database errors as a message, sometimes ending `; SQLState: 23505` and sometimes
+not. So the dialect sets `code` and `constraint` the way node-postgres does. It reads them from the
+stated SQLSTATE, or else from Postgres's own wording for the errors code acts on. The showcase's
+ticket-reference retry keys on `23505`.
+
+**Proof without AWS.** `pnpm test:contract` gains a third run,
+`packages/keel/src/adapters/real/rds-data.contract.test.ts`. It runs the migrations and the full RLS proof
+suite through the dialect, against `packages/keel/src/adapters/real/rds-data-emulator.ts`. The emulator is
+a test-only stand-in that executes each call on real Postgres with the Data API's documented semantics,
+and it is deliberately strict:
+
+- an untyped string binds as `varchar`;
+- array parameters are refused;
+- connections are reset with `DISCARD ALL`;
+- errors carry no SQLSTATE.
+
+Two negative controls prove that strictness, so the dialect's casts are what make the proofs pass. A
+battery reads every column type keel uses through both drivers and requires identical rows. Nothing in
+`pnpm dev` changes: dev, the e2e suite and the static demo still run on pglite fakes. The emulator is a
+contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
+emulators".
+
+**Not proven, and owed by the `data-api` cutover row:**
+
+- AWS's exact wire format, which the emulator takes from PgJDBC conventions (column type names, the
+  `timestamptz` string, error wording);
+- that PREPARE and `pg_prepared_statements` work through the Data API;
+- the retry on a paused Serverless v2's `DatabaseResumingException`.

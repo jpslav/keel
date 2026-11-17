@@ -80,7 +80,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
 - `pnpm verify` does NOT run `test:contract`, jscpd, coverage, or gitleaks — CI runs those
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
   same RLS proofs on real Postgres, for the contract app AND keel's fixture seam, each in its own
-  database); after renumbering/renaming a migration, wipe local `.data` first.
+  database — keel's twice, once through the `pg` driver and once through the RDS Data API driver and its
+  emulator); after renumbering/renaming a migration, wipe local `.data` first.
   **Also wipe `apps/*/.data` after changing `packages/seed`** — the app seeder is guarded by "does this
   world have any rows yet", so new seed rows are invisible on an existing world and only CI sees them.
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The

@@ -1729,3 +1729,32 @@ worth keeping.
 - **Recipes that predate this** (`e-sign.md`, `workspace-coder.md`) still put their ports in keel's tree.
   Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
   (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).
+
+## The RDS Data API driver (2026-11-16, `feat/rds-data-api-dialect`)
+
+- **keel's, not an app's.** Reaching Postgres from a Lambda outside any VPC is a general shape of this
+  template's hosting (ADR-0001), so it passes universality. The driver is
+  `packages/keel/src/adapters/real/rds-data-dialect.ts`, beside the `pg` one, behind the same `db` port.
+- **An explicit switch, `DATABASE_DRIVER=pg|data-api`.** It is never inferred from which variables are
+  set; an unknown value throws. The Data API's three variables replace `DATABASE_URL` in `REQUIRED_ENV`
+  only when the switch says so.
+- **Hand-written, not `kysely-data-api`.** That package peers on `kysely ^0.27`, sends parameters untyped
+  and turns `date` into a `Date`. ADR-0002 hand-rolled the pglite dialect for the same kind of reason.
+- **Parameters typed by PREPARE, not by guessing.** Guessing a `UUID` type hint from the value breaks
+  `set_config`'s text argument as soon as a tenant id is passed to it. Postgres's own inference, read back
+  once per SQL shape, gives node-postgres's semantics exactly. Rejected as well: inlining escaped literals.
+  It would be safe if escaped correctly, but ADR-0004 keeps the tenant id a real parameter on purpose.
+- **SDK retries off (`maxAttempts: 1`), resume retried by hand.** AWS warns that retrying a statement
+  whose call timed out can write twice. A paused Serverless v2's `DatabaseResumingException` means the
+  request never ran, so the dialect retries that one alone, for about 15 seconds.
+- **Errors carry `code` and `constraint`.** They are read from a stated SQLSTATE when the Data API gives
+  one, and otherwise from Postgres's wording. Reports differ on whether the Data API includes the
+  SQLSTATE, and the showcase's ticket-reference retry keys on `23505`.
+- **Proven through a strict emulator, live proof deferred.** `pnpm test:contract` runs the migrations, the
+  full RLS suite and a pg-parity battery through the dialect against
+  `packages/keel/src/adapters/real/rds-data-emulator.ts`. The live check is `docs/runbooks/data-api.md`,
+  the `data-api` cutover row. The community `local-data-api` emulator was rejected: it binds untyped
+  strings as `unknown`, so it passes exactly the queries Aurora rejects.
+- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. A single
+  statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs on the
+  `pg` driver from inside the VPC.

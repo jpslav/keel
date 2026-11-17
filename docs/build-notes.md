@@ -1407,3 +1407,29 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   the registry's dynamic imports, keel's registry and pglite: 54 MB for the starter. `check:demo-size` is
   what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
   registries).
+
+## The RDS Data API driver (2026-11-16, `feat/rds-data-api-dialect`)
+
+- **An untyped string parameter is `varchar` on the real Data API.** So `uuid_column = :id` fails on
+  Aurora with "operator does not exist: uuid = character varying" unless the SQL casts or the parameter
+  carries `typeHint: 'UUID'`. Two things hide this:
+    - node-postgres sends parameters with no type at all, so every query in this repo was written relying
+      on inference;
+    - the popular community emulator sets PgJDBC's `stringtype=unspecified`, so code tested against it
+      passes and then fails in AWS.
+
+    A test double for a wire protocol is only worth having if it is as strict as the real thing where the
+    real thing is strict.
+
+- **`PREPARE` plus `pg_prepared_statements.parameter_types` is a way to ask Postgres what it would infer
+  for each `$n`,** without running the statement. It needs one connection for both steps, which over the
+  Data API means one transaction. Cast the result to `text[]` before reading it: `regtype[]` is not
+  among the result types the Data API documents, and `text[]` is.
+- **Kysely's `Driver` can be built on a stateless transport.** A "connection" can be a handle holding an
+  optional transaction id. Everything Kysely needs maps onto BeginTransaction, ExecuteStatement with
+  `transactionId`, and Commit/Rollback, savepoints included, as plain SQL inside the transaction. What
+  cannot map is session state outside a transaction, so refuse it before the call rather than let it
+  vanish.
+- **A rollback that finds its transaction gone has already happened.** The Data API rolls back on its
+  own after three idle minutes. Treating `TransactionNotFoundException` on rollback as success keeps the
+  error that caused the rollback from being replaced by one about the rollback.
