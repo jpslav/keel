@@ -37,7 +37,8 @@ two-implementations split. Adding Twilio doesn't touch the fake side of this sea
 
 ## 3. Cutover rows
 
-Add a `twilio` block to `apps/showcase/config/params.ts` next to `mailgun`, following the existing shape (plain values
+Add a `twilio` block to `apps/<app>/config/params.ts` next to `mailgun`, in every app that has one (the keys must
+match across apps: `tests/tooling/app-scaffold.test.ts`), following the existing shape (plain values
 for non-secret identifiers, `*Name` for the name of a secret — never a secret value):
 
 ```ts
@@ -53,9 +54,9 @@ twilio: {
 
 And a row in `docs/cutover-checklist.md`, copying the `email-outbound` row's format exactly:
 
-| Status | Item         | What it is                                                                                                         | What unlocks it                           | Deferred verification                                                                                                                                           |
-| ------ | ------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⬜     | `twilio-sms` | Twilio account SID/auth token + a from-number or Messaging Service SID (names in `apps/showcase/config/params.ts`) | you provision a Twilio account and number | Real send through `packages/keel/src/adapters/real/sms.ts`; a live message received on a real phone; delivery-status callback handling if the instance needs it |
+| Status | Item         | What it is                                                                                                      | What unlocks it                           | Deferred verification                                                                                                                                           |
+| ------ | ------------ | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⬜     | `twilio-sms` | Twilio account SID/auth token + a from-number or Messaging Service SID (names in `apps/<app>/config/params.ts`) | you provision a Twilio account and number | Real send through `packages/keel/src/adapters/real/sms.ts`; a live message received on a real phone; delivery-status callback handling if the instance needs it |
 
 Secret values (auth token) never enter the repo — only the Secrets Manager entry name does, same as
 `mailgun.apiKeyName` and `anthropic.apiKeyName` today.

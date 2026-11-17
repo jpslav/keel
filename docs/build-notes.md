@@ -1852,10 +1852,12 @@ the panel is the element that carries it.
   (bar `apps/*/tests/contract/**`) and `packages/*/src/**`, so the shared helper sits at `tests/support`, and
   `pg`, `kysely` and `embedded-postgres` are the ROOT's devDependencies: from that path they resolve from the
   root, and an app that lists them itself is an app an `init-app` has to remember to give them to.
-- **Publishing a module is a count in four places.** Adding `./db/owner-pass` to `exports` moved the
-  published-subpath count in `CLAUDE.md` (130 to 131) and the internal-module count in `docs/adopting.md` (46
-  to 45). `public-surface.test.ts` pins both, and only a run of the whole unit suite on the ejected copy
-  showed the second one.
+- **Publishing a module moves counts in several places, and the unpinned ones drift.** Adding `./db/owner-pass`
+  to `exports` moved the published-subpath count in `CLAUDE.md` and the internal-module count in
+  `docs/adopting.md` (46 to 45), which `public-surface.test.ts` pins. Two more counts in `docs/adopting.md`
+  (the "lists the N subpaths" sentence and the knip paragraph's "N of keel's") nothing pins, and a doc review
+  found them stale after main published a subpath of its own. A run of the whole unit suite on the ejected copy
+  showed the pinned internal-module count.
 - **The ejected copy found three things the main tree could not.** An assertion that named `starter` (the
   app's name is whatever `init-app` made it), the doc count above, and knip's unused-devDependency finding on
   the package whose tests had stopped importing `embedded-postgres`. A gate or a test in `tests/` or

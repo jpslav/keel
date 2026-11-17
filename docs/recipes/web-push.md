@@ -83,9 +83,9 @@ webPush: {
 },
 ```
 
-| Status | Item             | What it is                                                                                            | What unlocks it                                             | Deferred verification                                                                                                                                              |
-| ------ | ---------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ⬜     | `web-push-vapid` | VAPID keypair (public/private) + subject for browser push (names in `apps/showcase/config/params.ts`) | you generate a keypair (`npx web-push generate-vapid-keys`) | Real push through `packages/keel/src/adapters/real/web-push.ts`; a subscription registered by a real Service Worker; a push received and clicked in a real browser |
+| Status | Item             | What it is                                                                                         | What unlocks it                                             | Deferred verification                                                                                                                                              |
+| ------ | ---------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ⬜     | `web-push-vapid` | VAPID keypair (public/private) + subject for browser push (names in `apps/<app>/config/params.ts`) | you generate a keypair (`npx web-push generate-vapid-keys`) | Real push through `packages/keel/src/adapters/real/web-push.ts`; a subscription registered by a real Service Worker; a push received and clicked in a real browser |
 
 ## 3. Where the vendor SDK goes
 

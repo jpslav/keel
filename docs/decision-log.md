@@ -2531,13 +2531,13 @@ every app plus keel's fixture, each in a database of its own.
 - **One suite, written once, in `tests/support`.** `contract-suite.ts` is `defineContractSuite({ database })`:
   a non-superuser owner pass, the same again where `app_user` already exists, then the full proof suite as a
   superuser. It names no app and no table. The two apps' `tests/contract/rls-contract.test.ts` files are the
-  same eight lines, and the conformance kit (P5) takes the suite over as it is. It lives at the repo's
+  same four lines of code, and the conformance kit (P5) takes the suite over as it is. It lives at the repo's
   `tests/support`, not in `keel/testing`, because P5 is where `keel/testing` is designed; until then it is
   the one place both apps and keel's fixture already reach. The server helper (`contract-postgres.ts`) holds
   the "embedded-postgres, or CI's service container" choice that `db.contract.test.ts` and
   `rds-data.contract.test.ts` each carried their own copy of; both now call it.
 - **`keel/db/owner-pass` is published.** The suite imports it, so it needed an `exports` line, and the line is
-  the only way to widen the map (the count went from 130 to 131 and the internal-module count from 46 to 45,
+  the only way to widen the map (the count went up by one, to 132 once main's own addition merged, and the internal-module count from 46 to 45,
   both pinned in `public-surface.test.ts` and read from `CLAUDE.md` and `docs/adopting.md`).
 - **Discovery, not a literal.** `vitest.contract.config.ts` builds one project per `apps/*` directory that has
   a `tests/contract` (`contractApps`), plus keel's fixture. `init-app` renames the app and the discovery

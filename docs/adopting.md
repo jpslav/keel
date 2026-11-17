@@ -114,7 +114,7 @@ files that name the app's directory:
 | `apps/<app>/src/demo-static/index.html`                                                | the static demo's `<title>`                                                                      |
 | `package.json` (root)                                                                  | `name` (`<slug>-workspace`), `description`, `--filter` scripts                                   |
 | `knip.json`, `vitest.config.ts`                                                        | the workspace key; the app list (`APPS`)                                                         |
-| `vitest.contract.config.ts`, `tsconfig.json`, `infra/*.ts`                             | the single app each one names                                                                    |
+| `infra/*.ts`                                                                           | the single app each one names                                                                    |
 | `apps/<app>/` itself                                                                   | the directory, renamed last                                                                      |
 | `docs/`, `.claude/`, README, CLAUDE, CONTRIBUTING                                      | every backticked `apps/<app>/…` citation the path gate checks                                    |
 | `CODEOWNERS`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/config.yml`, `CODE_OF_CONDUCT.md` | the maintainer's handle and links → `PLACEHOLDER_GITHUB_OWNER` and `--repo` (or its placeholder) |
@@ -324,7 +324,7 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 ### What you may import from keel
 
-`packages/keel/package.json`'s `exports` map is the contract: it lists the 131 subpaths your app may
+`packages/keel/package.json`'s `exports` map is the contract: it lists the 132 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
 other 45 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails

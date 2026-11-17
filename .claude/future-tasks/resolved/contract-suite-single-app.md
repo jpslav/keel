@@ -34,7 +34,7 @@ part first.
   (`startContractServer`, `createDatabase`, `contractDatabaseName(slug)`, which folds the slug to `<slug>_contract`);
   `tests/support/contract-suite.ts` is `defineContractSuite({ database })`: a non-superuser owner migrates and runs the proofs
   (`keel/db/owner-pass`, now published so a suite outside keel can call it), the same again where `app_user` already exists,
-  and the full proof suite as a superuser. An app's contract test is three lines. keel's two fixture harnesses
+  and the full proof suite as a superuser. An app's contract test is four lines of code. keel's two fixture harnesses
   (`db.contract.test.ts`, `rds-data.contract.test.ts`) use the same server helper instead of their own copies.
 - **Discovered, not named.** `vitest.contract.config.ts` makes one project per `apps/*` that has a `tests/contract`
   (`tests/support/contract-apps.ts`), so it no longer carries a `CONTRACT_APP` literal and `init-app` rewrites nothing in it.

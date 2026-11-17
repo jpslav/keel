@@ -15,7 +15,7 @@ import { contractApps } from './tests/support/contract-apps'
  *
  * The apps are DISCOVERED (every `apps/*` with a `tests/contract`, tests/support/contract-apps.ts), not named
  * here, so renaming an app or ejecting the showcase needs no edit to this file. An app that registers
- * migrations and has no contract suite is a failure of tests/tooling/contract-coverage.test.ts, not a silent gap.
+ * migrations and has no contract suite is a failure of tests/tooling/app-scaffold.test.ts, not a silent gap.
  */
 const at = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
 
