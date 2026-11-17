@@ -36,8 +36,9 @@ CIDRs and rolls back. Changing shape later means a new stack and a snapshot rest
 
 `pnpm --filter infra synth` builds both shapes offline: `cdk synth` builds the one the params choose, then
 `check-shapes.ts` builds both and checks each against the runtime's list of required variables. It also
-checks the way in: every Secrets Manager grant names this database's secret alone, every `rds-data` grant
-names this cluster alone, and on `data-api` the database's security group admits nothing.
+checks the way in. In every IAM policy, managed policy and role's inline policy the stack defines, each
+Secrets Manager grant names the cluster's own secret alone and each `rds-data` grant names this cluster
+alone. On `data-api` the database's security group admits nothing.
 
 ## Deploys — checks in CI, deploys in your own pipeline
 

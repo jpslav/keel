@@ -42,23 +42,43 @@ function lambda(all: Record<string, Resource>, name: 'Server' | 'Migrator') {
 
 const count = (all: Record<string, Resource>, type: string) => Object.values(all).filter((r) => r.Type === type).length
 
-const idsOf = (all: Record<string, Resource>, ...types: string[]) =>
-    Object.entries(all)
-        .filter(([, r]) => types.includes(r.Type))
-        .map(([id]) => id)
-
 type Statement = { Action?: unknown; Resource?: unknown }
 
-/** Every IAM policy statement in the stack whose actions name `service`'s (`rds-data:`, `secretsmanager:`). */
+/** The permission documents a resource carries: a policy's, a managed policy's, or a role's inline ones. */
+function policyDocuments(resource: Resource): unknown[] {
+    if (resource.Type === 'AWS::IAM::Policy' || resource.Type === 'AWS::IAM::ManagedPolicy') {
+        return [resource.Properties?.PolicyDocument]
+    }
+    if (resource.Type === 'AWS::IAM::Role') {
+        const inline = (resource.Properties?.Policies as { PolicyDocument?: unknown }[] | undefined) ?? []
+        return inline.map((policy) => policy.PolicyDocument)
+    }
+    return []
+}
+
+/**
+ * Every statement in the stack's IAM policies, managed policies and roles' inline policies whose actions
+ * name `service`'s (`rds-data:`, `secretsmanager:`). Roles' trust policies grant nothing and are not read.
+ */
 function grantsOf(all: Record<string, Resource>, service: string): Statement[] {
     return Object.values(all)
-        .filter((r) => r.Type === 'AWS::IAM::Policy')
-        .flatMap(
-            (r) =>
-                ((r.Properties?.PolicyDocument as { Statement?: unknown[] } | undefined)?.Statement ??
-                    []) as Statement[],
-        )
+        .flatMap(policyDocuments)
+        .flatMap((document) => ((document as { Statement?: unknown[] } | undefined)?.Statement ?? []) as Statement[])
         .filter((s) => JSON.stringify(s.Action ?? '').includes(service))
+}
+
+/** The cluster's own secret: the attachment CDK makes for the cluster, and the secret it attaches. */
+function databaseSecretIds(all: Record<string, Resource>, clusterId: string): string[] {
+    return Object.entries(all)
+        .filter(
+            ([, r]) =>
+                r.Type === 'AWS::SecretsManager::SecretTargetAttachment' &&
+                JSON.stringify(r.Properties?.TargetId) === JSON.stringify({ Ref: clusterId }),
+        )
+        .flatMap(([id, r]) => {
+            const secret = (r.Properties?.SecretId as { Ref?: string } | undefined)?.Ref
+            return secret ? [id, secret] : [id]
+        })
 }
 
 /** Whether every resource `statement` grants refers to one of `ids`, and none is a wildcard. */
@@ -82,11 +102,11 @@ for (const transport of ['pg', 'data-api'] as const) {
     check(migrator.env.DATABASE_TRANSPORT === transport, label('the migrator says which transport it runs'))
 
     // The database secret is read by name, on both shapes: never a wildcard, never another secret.
-    const secretIds = idsOf(all, 'AWS::SecretsManager::Secret', 'AWS::SecretsManager::SecretTargetAttachment')
+    const secretIds = databaseSecretIds(all, clusterId)
     const secretGrants = grantsOf(all, 'secretsmanager:')
     check(
-        secretGrants.length > 0 && secretGrants.every((s) => namesOnly(s, secretIds)),
-        label('every Secrets Manager grant names this database secret alone'),
+        secretIds.length > 0 && secretGrants.length > 0 && secretGrants.every((s) => namesOnly(s, secretIds)),
+        label('every Secrets Manager grant names the cluster’s own secret alone'),
     )
 
     if (transport === 'data-api') {
@@ -100,8 +120,8 @@ for (const transport of ['pg', 'data-api'] as const) {
         check(cluster.EnableHttpEndpoint === true, label('the cluster has the Data API enabled'))
         check(count(all, 'AWS::EC2::NatGateway') === 0, label('no NAT gateway'))
         check(count(all, 'AWS::EC2::InternetGateway') === 0, label('no internet gateway'))
-        // Every statement granting a Data API action names this cluster, and nothing wider: the grant plus the
-        // secret is the whole way in on this shape.
+        // Every statement granting a Data API action (in an `AWS::IAM::Policy`, see grantsOf) names this
+        // cluster, and nothing wider: the grant plus the secret is the whole way in on this shape.
         const dataApiGrants = grantsOf(all, 'rds-data:')
         check(
             dataApiGrants.some((s) => JSON.stringify(s.Action).includes('rds-data:ExecuteStatement')),
