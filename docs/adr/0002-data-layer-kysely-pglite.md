@@ -200,8 +200,9 @@ emulators".
   `${value}::code3`, where `code3` is a domain over `char(3)`, the value reaches that cast already
   converted to the base type. The cast is explicit, so it truncates, where node-postgres refuses the value.
   Storing the value in a domain column, or passing it to a function, refuses it on both transports.
-- **A colon directly before a name, outside a literal, is read by the Data API as a parameter.** The
-  dialect parenthesizes its own placeholders, so `a[1:$1]` works, but an array slice bounded by a column,
+- **A colon directly before a name, outside a literal, is read as a parameter.** That is how the
+  emulator models the Data API, and step 2 of `docs/runbooks/data-api.md` checks it on AWS. The dialect
+  parenthesizes its own placeholders, so `a[1:$1]` works, but an array slice bounded by a column,
   `a[lo:hi]`, fails loudly. Write `a[lo : hi]`.
 - **A statement PREPARE cannot take, such as `CALL proc($1)`,** cannot be described, so with parameters
   it fails loudly. An EXPLAIN is described by the statement it explains.

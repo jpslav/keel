@@ -73,6 +73,17 @@ rds execute-statement --database "$DB" --sql "SELECT ':not_a_parameter' AS liter
 
 Pass when the call succeeds and returns the literal unchanged.
 
+And check the other side of that rule, an accepted limit in ADR-0002's addendum: a colon directly before
+a name outside a literal IS read as a parameter, and a space after the colon stops it:
+
+```bash
+rds execute-statement --database "$DB" --sql "SELECT (ARRAY[10,20,30])[1:hi] FROM (SELECT 2 AS hi) AS s"
+rds execute-statement --database "$DB" --sql "SELECT (ARRAY[10,20,30])[1 : hi] FROM (SELECT 2 AS hi) AS s"
+```
+
+Pass when the first call fails for want of a parameter `hi` and the second returns the elements 10 and 20. If the
+first succeeds, AWS's parser is more forgiving than the emulator; correct the addendum's limit.
+
 ## 3. The wire format matches the emulator's
 
 ```bash
