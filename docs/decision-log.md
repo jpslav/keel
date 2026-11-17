@@ -1730,6 +1730,66 @@ worth keeping.
   Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
   (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).
 
+## Storage port: `copy(from, to)` (2026-11-16, `storage-copy`)
+
+Requested by an app that stages uploads and finalizes them by copying into place. Without a copy it reads
+and re-`put`s every file, which in a deployment streams each one through the app's Lambda. It is a generic
+primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes the universality test.
+
+- **The port has no tenant scoping of its own, so `copy` has none.** Keys are full keys the CALLER builds
+  server-side (`attachments/<tenantId>/<uuid>/<name>`, `apps/showcase/src/app/api/attachments/route.ts`);
+  `put`, `get`, `list` and `delete` never look inside one. `copy(from, to)` takes two keys of the same kind
+  and likewise inspects neither: a stage-then-finalize flow builds both from the same tenant. What the
+  port DOES guarantee is that a copy never leaves the store: the real adapter's source bucket is always its
+  own (`other-bucket/x` is the key `other-bucket/x` of THIS bucket), and the fake resolves both keys inside
+  its store directory and refuses an escape in either.
+- **A missing source throws `NotFoundError`, where `get` returns `null`.** `get` has a natural "nothing"
+  to return; `copy` has none, and a silent no-op would let a finalize step carry on and report success for
+  a file that was never put in place. Both adapters throw it; the real one maps only S3's `NoSuchKey` to it (a
+  missing bucket is a misconfiguration and is not reported as a missing object).
+- **An existing destination is overwritten**, as `put` does and as S3's `CopyObject` does, so a retried
+  finalize converges. `copy` does not delete the source; "move" is `copy` then `delete`, and there is no
+  `move` method because S3 has no atomic move and a method of that name would hide the gap between the two.
+- **`from === to` is refused on both**, before any request on the real adapter: a copy onto itself changes
+  nothing, and is nearly always two keys built the same way by mistake. (The fake compares resolved paths, so
+  `a/../a` is the same key there; S3 would see two keys. That is the fake's existing quirk for every method.)
+- **The real adapter encodes `CopySource` per path segment**, with `encodeURIComponent` on each and the
+  slashes left alone, and sends `MetadataDirective: 'COPY'` so the content type and user metadata carry
+  over. The SDK does not encode `CopySource`; `encodeURI` leaves `+`, `?` and `#` alone, and encoding the whole
+  key turns every `/` into `%2F`. The test asserts the exact input for a space, a `+`, non-ASCII, `?`, `%`,
+  `#`, `&`, `;` and empty segments.
+- **Over 5 GB it fails with a clear error; multipart copy is not implemented.** AWS's CopyObject reference
+  gives 5 GB for one call and `UploadPartCopy` above it. A multipart copy (parts, plus carrying the content
+  type and metadata by hand and aborting on failure) is a real feature with its own failure modes. The port's
+  upload ceiling, `UploadConstraints.maxBytes`, is the app's own, so an app that accepts uploads above 5 GB
+  cannot copy them with this method and should keep `maxBytes` below it. The error is mapped from S3's
+  wording, which has not been seen from a real bucket (the cutover row says how to prove it).
+- **The fake stages both copies, then publishes.** Each file is copied to a temp name beside its destination;
+  only when both exist whole are they renamed in, the sidecar first and the body last, so a key exists (to
+  `get` and `list`) only once complete and with its content type in place, and a failure or a source deleted
+  mid-copy leaves nothing behind. A directory is not an object, so it is a missing source.
+  Known gaps, all of the fake: over an existing destination the content type changes a moment before the
+  bytes; a body that cannot be published after its sidecar was (a destination that is an existing directory)
+  leaves a stray sidecar, invisible to `get` and `list`; and a source rewritten while it is copied can pair
+  one version's bytes with another's content type, where S3 snapshots an object. `put` has the same gap
+  between its own two files, and this is a fake.
+- **No static-demo twin:** the static demo implements no storage port, so there is nothing to mirror. **No
+  IAM change:** the app role's `grantReadWrite` already covers `s3:GetObject*` on the source and `s3:PutObject`
+  on the destination, plus the `s3:List*` that (per AWS's GetObject reference) makes a missing key a 404 and not
+  a 403. Cutover row
+  `storage-copy` carries what only a real bucket can prove.
+- **How an app calls it** (stage, then finalize):
+
+    ```ts
+    // at finalize, with both keys built server-side from the same tenant:
+    await storage.copy(stagedKey, finalKey) // NotFoundError if the staged file is gone
+    await storage.delete([stagedKey]) // idempotent, so a retry after this line is harmless
+    ```
+
+    A retry after a finalize that failed between the two calls re-copies over `finalKey` and converges; a retry
+    after both succeeded gets `NotFoundError` from `copy` (the staged file is gone), which the caller reads as
+    "already finalized" by checking `finalKey` exists.
+
 ## `init-app` says the demo size budget is the adopter's (2026-11-16, `fix/init-app-demo-budget`)
 
 - **"WHAT THIS DID NOT TOUCH" gains a bullet, after the cutover checklist.** It is the line the demo-size
@@ -1881,3 +1941,22 @@ worth keeping.
 - **Declined: invalidating the type cache.** A statement that fails inside a transaction has already
   aborted it, so a retry with fresh types could only help outside one. It is an accepted limit (ADR-0002
   addendum): deploys replace processes.
+
+## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
+
+- **Three packages raised past their advisories, staying on their current majors.** `@sentry/nextjs`
+  `^10.75.2` (resolves 10.78.0) clears GHSA-mchm-gjx6-7h55, a critical middleware bypass through the
+  tunnel route. keel configures no `tunnelRoute`, but the version is raised anyway rather than relying on
+  that. `vitest` and `@vitest/coverage-v8` `^4.1.12` (resolve 4.1.12) clear GHSA-82fw-gwwq-j7x9 (fixed in
+  4.1.11) and two `@vitest/mocker` advisories fixed only in 4.1.12, GHSA-qxg6-89mg-rqv8 and
+  GHSA-xp26-3454-mjgp. Review caught that the first floor, `^4.1.11`, still admitted both.
+  `happy-dom` `^21.0.4` clears GHSA-5fpq-26gf-qwcr, GHSA-c8p4-j97h-3vg8 and GHSA-834v-8h66-3h79. The
+  last two have no fix on 20.x, so this is a major bump. 21.0.0's one breaking change turns off CSS-file
+  and iframe loading by default, its fix for the SSRF; no keel test configures happy-dom or loads either.
+  GitHub's advisory database lists nothing against any of the four resolved versions. Not taken: Sentry 11
+  and vitest 5 (new majors, no advisory requiring them).
+- **`withSentryConfig` stays imported from `@sentry/nextjs`.** Since 10.73.0 Sentry also exports it from
+  `@sentry/nextjs/config`, its v11 path, and calling the old export logs a deprecation warning once.
+  `apps/showcase/next.config.ts` imports it on every `next dev` and build, but calls it only when a DSN is
+  set (cutover row `errors`), so no run here prints the warning. Moving it belongs with the Sentry 11
+  upgrade.
