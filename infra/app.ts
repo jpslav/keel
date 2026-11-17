@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib'
 // Infra deploys ONE app; it names the one this repo ships (ADR-0007 — the apps/ tree). An adopter
-// with a different app repoints these imports at their own `apps/<app>/config/app`.
+// with a different app repoints these imports at their own `apps/<app>/config/app` and `config/params`.
 import { APP_SLUG } from '../apps/showcase/config/app'
 import { params } from '../apps/showcase/config/params'
 import { AppStack } from './stack'

@@ -45,7 +45,8 @@ const count = (all: Record<string, Resource>, type: string) => Object.values(all
 for (const transport of ['pg', 'data-api'] as const) {
     const all = resources(transport)
     const label = (what: string) => `[${transport}] ${what}`
-    const cluster = Object.values(all).find((r) => r.Type === 'AWS::RDS::DBCluster')!.Properties ?? {}
+    const [clusterId, clusterResource] = Object.entries(all).find(([, r]) => r.Type === 'AWS::RDS::DBCluster')!
+    const cluster = clusterResource.Properties ?? {}
     const server = lambda(all, 'Server')
     const migrator = lambda(all, 'Migrator')
 
@@ -58,16 +59,34 @@ for (const transport of ['pg', 'data-api'] as const) {
             check(name in migrator.env, label(`the migrator sets ${name}, which it requires`))
         }
         check(!('DATABASE_URL' in server.env), label('no DATABASE_URL: the credential stays in Secrets Manager'))
+        check(!('DATABASE_URL' in migrator.env), label('no DATABASE_URL on the migrator either'))
         check(!server.inVpc && !migrator.inVpc, label('both Lambdas run outside the VPC'))
         check(cluster.EnableHttpEndpoint === true, label('the cluster has the Data API enabled'))
         check(count(all, 'AWS::EC2::NatGateway') === 0, label('no NAT gateway'))
         check(count(all, 'AWS::EC2::InternetGateway') === 0, label('no internet gateway'))
-        const grantsDataApi = Object.values(all).some(
-            (r) =>
-                r.Type === 'AWS::IAM::Policy' &&
-                JSON.stringify(r.Properties?.PolicyDocument ?? {}).includes('rds-data:ExecuteStatement'),
+        // Every statement granting a Data API action names this cluster, and nothing wider: the grant plus the
+        // secret is the whole way in on this shape.
+        const dataApiStatements = Object.values(all)
+            .filter((r) => r.Type === 'AWS::IAM::Policy')
+            .flatMap(
+                (r) =>
+                    ((r.Properties?.PolicyDocument as { Statement?: unknown[] } | undefined)?.Statement ?? []) as {
+                        Action?: unknown
+                        Resource?: unknown
+                    }[],
+            )
+            .filter((s) => JSON.stringify(s.Action ?? '').includes('rds-data:'))
+        check(
+            dataApiStatements.some((s) => JSON.stringify(s.Action).includes('rds-data:ExecuteStatement')),
+            label('a role is granted rds-data:ExecuteStatement'),
         )
-        check(grantsDataApi, label('a role is granted rds-data:ExecuteStatement'))
+        check(
+            dataApiStatements.every((s) => {
+                const resource = JSON.stringify(s.Resource ?? '*')
+                return resource.includes(`"Ref":"${clusterId}"`) && !resource.includes('"*"')
+            }),
+            label('every rds-data grant is scoped to this cluster alone'),
+        )
     } else {
         for (const name of Object.keys(DATABASE_ENV.pg)) {
             check(name in server.env, label(`the server sets ${name}, which the runtime requires`))

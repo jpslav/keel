@@ -1970,7 +1970,7 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
 - **Both shapes are checked by a gate.** `pnpm --filter infra synth`, which CI runs, now also runs
   `infra/check-shapes.ts`. It found what review found missing: nothing built the `data-api` shape, and
   nothing tied its environment to `DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`.
-  knip's infra entry gains that one file.
+  knip needs no entry for it: it reads the `synth` script.
 
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 

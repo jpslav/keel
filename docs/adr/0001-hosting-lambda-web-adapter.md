@@ -87,7 +87,8 @@ egress. The app's `params.database.transport` now chooses between two shapes (`i
 - Every SQL statement is an HTTPS round trip. A `withTenant` is at least BeginTransaction, one setup
   statement, the queries, and Commit.
 - The Data API's limits apply to the app and to its migrations: 1 MiB responses, 45 seconds per call,
-  one hour per transaction (AWS's `BeginTransaction` API reference; older SDK doc comments say 24 hours).
+  one hour per transaction (AWS's `BeginTransaction` API reference; the doc comment in the installed
+  `@aws-sdk/client-rds-data` 3.1169.0 still says 24 hours).
 - Anyone holding both the IAM grant and the secret can run SQL as the database user, so the grant is
   scoped to the one cluster. That user is the cluster's master user, as on `pg` today. Closing
   `db-role-not-superuser` on this shape means a second, non-superuser secret, and a hand-written grant
@@ -113,5 +114,8 @@ even though the app's params choose `pg`. It was also run offline by hand for bo
 - the `rds-data` and secret-read grants scoped as above.
 
 The `pg` shape keeps its NAT gateway, its subnets, its in-VPC Lambdas and its secret-read grants. It now
-sets `DATABASE_TRANSPORT=pg` explicitly on both Lambdas, and its cluster is unchanged. The cutover row `data-api-access` proves the deployed
-shape.
+sets `DATABASE_TRANSPORT=pg` explicitly on both Lambdas, and its cluster is unchanged. The cutover row
+`data-api-access` proves the deployed shape.
+
+The Decision's "`infra/` imports exactly one thing from the app" no longer holds: it imports two,
+`config/app` and, for `params.database.transport`, `config/params` (`infra/app.ts`).

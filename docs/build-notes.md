@@ -1679,9 +1679,8 @@ the panel is the element that carries it.
   built by any gate until someone deploys it. `infra/check-shapes.ts` constructs the stack once per
   shape with CDK's own `Template`, and checks each against the runtime's list of required variables
   (`DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`, imported by path).
-  `pnpm --filter infra synth` runs it, and so does CI. `knip.json`'s infra workspace lists it as an entry,
-  the narrowest addition: it is run by that script and imported by nothing, and knip would otherwise
-  report the file unused.
+  `pnpm --filter infra synth` runs it, and so does CI. It needs no `knip.json` entry: knip finds it as an
+  entry through that script (`tsx check-shapes.ts`), and an explicit entry was reported as redundant.
 - **A CDK prop set to `false` is not the same as one left unset.** `enableDataApi: false` adds
   `EnableHttpEndpoint: false` to a cluster that previously had no such property. That is a no-op update on
   every existing stack, and a diff for reviewers to puzzle over. Spread the property in only when it is
