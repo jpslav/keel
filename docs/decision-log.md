@@ -1757,6 +1757,55 @@ worth keeping.
   of the showcase; a script that is neither shape gets no bullet; and a renamed showcase counts as still
   there on a dry run and a real one alike. Each was watched failing against a deliberate break.
 
+## Catching up October's minor-and-patch group (2026-11-16, `deps/catch-up-2026-11`)
+
+- **keel's peer floors move with the apps' floors.** Dependabot's group PR (#30) raised `next`,
+  `next-intl`, `react` and `@mantine/core` in the root and both apps but left `packages/keel`'s
+  `peerDependencies` at the old floors. Before it, each of the four peer floors was the floor the apps
+  named. Leaving keel's lower is what kept the old `next-intl` and `@mantine/core` in keel's part of the
+  lockfile (build-notes, same date, has the mechanism). keel's peer ranges now match the apps' again:
+  `^16.4.6`, `^4.14.9` and `^9.7.3`, and `react` at `~19.2.8` for the hold below. A lower floor would
+  mean something only to a consumer installing keel from a registry with an older host, and nobody does:
+  `packages/keel` is `private` and ships by fork and merge (ADR-0013).
+- **next 16.4.6, not the group's 16.4.2.** GHSA-mfr8-8qww-v76h (medium, published 2026-11-16) covers next
+  16.3.0 through 16.4.4 and is fixed in 16.4.5. keel calls neither `'use cache'` nor `unstable_cache`, so
+  its code was not exposed, but 16.4.2 is the version `next dev` stopped on (build-notes). 16.4.6 is the
+  newest 16.4 patch and was published on 2026-11-09, past the two-day `minimumReleaseAge`.
+  `@next/eslint-plugin-next` moves with it.
+- **`@axe-core/playwright` is held at `~4.12.1`.** The group took it to 4.14.0, whose `axe-core` turns
+  on `label-content-name-mismatch` by default. Twelve showcase e2e tests then failed on that one rule,
+  on four framework controls whose `aria-label` replaces their visible text. The finding is real (WCAG
+  2.5.3, Level A), but fixing it means choosing new accessible names in two locales, which is a11y design
+  work rather than part of a dependency catch-up. The tilde keeps the hold through a lockfile
+  regeneration: with 4.14.0 already in the lockfile, `^4.12.1` resolved to 4.14.0. The fix and the way to
+  lift the hold are in `.claude/future-tasks/label-in-name-axe-4-14.md`.
+- **`react`, `react-dom` and their types are held at 19.2 (`~19.2.8`, `~19.2.17`, `~19.2.3`).** The group
+  took React to 19.3.1, which put the showcase's static demo at 845,719 bytes, over the 840,000 budget
+  re-based the same day (starter 755,326 of 820,000). With only `react` and `react-dom` pinned back to
+  19.2.8, the showcase built at 816,387 and the starter at 725,995: React was about 29 KB of the
+  showcase's ~31 KB growth. It is React's own code, not something keel can trim: react-dom's
+  `cjs/react-dom-client.production.js` is 536,016 bytes in 19.2.8 and 625,168 in 19.3.1. Taking it means
+  raising the showcase budget, which the budget's own rule reserves for a feature
+  (`scripts/check-demo-size.mjs`, "WHEN IT GOES RED"), so that is JP's call.
+  Until then the tildes keep 19.2 through a lockfile regeneration. keel's `react` peer is `~19.2.8` too,
+  the same range the apps name. Holding React back took one more lockfile regeneration (build-notes,
+  same date).
+- **Next's generated `AGENTS.md` is switched off (`agentRules: false` in both apps' `next.config.ts`).**
+  With next 16.4, `next dev` writes `apps/<app>/AGENTS.md` whenever it detects an AI coding agent, and
+  the block it writes tells the agent to commit the file. CI is not an agent and never sees it, but every
+  agent's `pnpm verify` starts `next dev` for e2e, so the file appeared untracked in agent worktrees, one
+  add-everything commit away from landing in a PR. keel's agent guide is the root `CLAUDE.md`, so a
+  second, generated one in each app is not wanted. The Next docs the block pointed to still ship with the
+  installed version, under `node_modules/next/dist/docs/` (resolved from an app directory). The manager
+  session that ran this catch-up decided this on JP's behalf; JP can overrule it when approving the PR.
+- **Next's upgrade advisor is switched off (`experimental.agentUpgrade: false` in both apps).** next 16.4
+  added it with the default `'security'`: every `next dev` outside CI queries npm's advisory feed, as does
+  `next build` when an agent runs it or the CLI can prompt at a terminal, and an agent's run stops when an
+  advisory matches (build-notes, same date). The CLAUDE.md hard rule that `pnpm dev` makes no network calls
+  decides this, so it is not a new choice. It does not make `pnpm dev` offline: the dev overlay's version
+  check, which next 16.2 already had, still fetches `next`'s dist-tags. Advisories now have to reach keel
+  another way, through Dependabot security updates (currently off in the repository settings) or review.
+
 ## Lint fences cover every extension; carve-outs name what their runner loads (2026-11-16, `fix/lint-fence-gaps`)
 
 - **Fence globs take their extensions from one constant, `SRC_EXT`.** They named `{ts,tsx}`, so a `.mjs`

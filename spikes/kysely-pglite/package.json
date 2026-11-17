@@ -8,10 +8,10 @@
         "test": "vitest run"
     },
     "devDependencies": {
-        "@electric-sql/pglite": "^0.5.4",
-        "@types/node": "^26.1.2",
-        "kysely": "^0.29.4",
-        "typescript": "^5.9.3",
+        "@electric-sql/pglite": "^0.5.11",
+        "@types/node": "^26.6.5",
+        "kysely": "^0.29.7",
+        "typescript": "^6.0.3",
         "vitest": "^4.1.10"
     }
 }
