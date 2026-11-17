@@ -326,6 +326,36 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(byToken.credential_kind).toBe('proof-token')
     expect(byToken.credential_id).toBe('proof-token-1')
 
+    // (a) so does `detail` (0016): app_user writes a nested jsonb detail in its own tenant and reads back
+    // the same object, on both engines. A row that writes none reads NULL.
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
+        trx
+            .insertInto('audit_events')
+            .values({
+                tenant_id: alphaTenantId,
+                org_id: alphaOrgId,
+                actor_user_id: 'proof-user',
+                action: 'membership.invited',
+                subject_type: 'Membership',
+                subject_id: 'membership-with-detail',
+                detail: jsonb({ refusal: 'revoked', removed: 3, steps: ['a', 'b'], nested: { ok: true } }),
+            })
+            .execute(),
+    )
+    const details = await runWithTenant(appDb, alphaTenantId, (trx) =>
+        trx
+            .selectFrom('audit_events')
+            .select(['subject_id', 'detail'])
+            .where('subject_id', 'in', ['membership-with-detail', 'membership-by-token'])
+            .execute(),
+    )
+    const written = details.find((r) => r.subject_id === 'membership-with-detail')?.detail
+    expect(written?.refusal).toBe('revoked')
+    expect(written?.removed).toBe(3)
+    expect(Array.isArray(written?.steps) && written.steps.join(',')).toBe('a,b')
+    expect((written?.nested as { ok?: unknown } | undefined)?.ok).toBe(true)
+    expect(details.find((r) => r.subject_id === 'membership-by-token')?.detail).toBe(null)
+
     // (b) append-only: as app_user (with tenant context set) an UPDATE FAILS at the privilege layer —
     // the table's only grants are SELECT, INSERT.
     let auditUpdateRejected = false
@@ -339,6 +369,19 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         auditUpdateRejected = /permission denied/.test(String(error))
     }
     expect(auditUpdateRejected).toBe(true)
+
+    // ...including the detail: once written, it can be neither corrected nor redacted (0016).
+    let auditDetailUpdateRejected = false
+    try {
+        await appDb.transaction().execute(async (trx) => {
+            await sql`SET LOCAL ROLE app_user`.execute(trx)
+            await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
+            await sql`UPDATE audit_events SET detail = NULL WHERE subject_id = 'membership-with-detail'`.execute(trx)
+        })
+    } catch (error) {
+        auditDetailUpdateRejected = /permission denied/.test(String(error))
+    }
+    expect(auditDetailUpdateRejected).toBe(true)
 
     // ...and a DELETE fails the same way — audit rows can never be erased.
     let auditDeleteRejected = false

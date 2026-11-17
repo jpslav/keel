@@ -280,8 +280,8 @@ want it.
 
 One gate is relaxed on the way out. keel's knip workspace carries `includeEntryExports: true`, which
 means "every symbol keel PUBLISHES must have a consumer" — an invariant the showcase made true by using
-nearly all of it. A one-entity app does not: `apps/starter` imports 32 of keel's 130 published subpaths,
-so the same setting would start demanding you delete the other 98 — capabilities you merely have not
+nearly all of it. A one-entity app does not: `apps/starter` imports 35 of keel's 131 published subpaths from its source (37
+counting its tests), so the same setting would start demanding you delete the other 96 — capabilities you merely have not
 reached yet, not dead code. `--eject-showcase` therefore turns it off. knip keeps reporting unused
 files, and the declared `exports` surface goes back to being what it is without a rich consumer: a
 declaration.
@@ -322,9 +322,9 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 ### What you may import from keel
 
-`packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
+`packages/keel/package.json`'s `exports` map is the contract: it lists the 131 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 46 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 47 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you, the authorization scan's
 analyser — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
@@ -429,6 +429,35 @@ against the starter's registrations — a framework module that assumed the show
 vocabulary fails there and nowhere else. `vitest.config.ts` then runs keel's seam-conformance tests
 (the i18n partition/parity pair, the composed pglite RLS suite and the demo-presets check) a second
 time under the starter's aliases. Each was watched failing before being trusted.
+
+### The scheduled tick
+
+keel's recurring work only advances when something ticks it. `job_schedules` (a digest, a reminder) and outbound
+webhook retries are drained by one function, `runScheduledTick` (`keel/server-lib/scheduled-tick`), and the route
+that calls it lives in the app you keep: `apps/<app>/src/app/api/webhooks/cron/route.ts`,
+`export const POST = withWebhookSecret(…)`. `init-app` moves it with the rest of the app and nothing deletes it;
+the showcase carries the same route over the same function.
+
+- **Who may call it** is a machine, not a person. The route is guarded by the shared webhook secret
+  (`Authorization: Bearer …`, compared in constant time; anything else is an opaque 401 before the tick runs). The
+  authorization scan (`authorized-mutations.test.ts`) exempts a `webhooks/` route only if its file calls
+  `withWebhookSecret(`, so if you edit the route keep that call, and keep the logic in keel's function.
+- **In a deployment** nothing calls it until you set up the scheduler: that is the `scheduled-tick` row of the
+  [cutover checklist](cutover-checklist.md).
+- **In `pnpm dev`** nothing ticks it for you. The dev server runs no scheduler, and the starter's server app has no Simulator panel
+  (its `file://` demo has one, in the browser; the showcase's server app has one too, and its Jobs tab advances the world clock
+  and runs what is due). To tick by hand, POST the route
+  with the per-checkout dev secret. The first request, even with a wrong bearer, creates the secret at
+  `apps/<app>/.data/auth/webhook-secret`:
+
+    ```sh
+    URL="http://localhost:$(node scripts/print-port.mjs starter)/api/webhooks/cron"   # the port key is still `starter`
+    curl -s -X POST "$URL" -H 'Authorization: Bearer x'     # a 401, and it creates the secret
+    curl -s -X POST "$URL" -H "Authorization: Bearer $(cat apps/<app>/.data/auth/webhook-secret)"
+    ```
+
+    The answer is `{"ok":true,"spawned":0,"failed":0,"deliveries":{…}}`. In a simulated world "now" is the Simulator's
+    world clock (real time plus whatever offset a demo advanced), so a tick honours a clock a demo moved.
 
 ## Cutover — from hermetic to real
 

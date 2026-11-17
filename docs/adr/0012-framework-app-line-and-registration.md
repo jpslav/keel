@@ -763,6 +763,80 @@ not match. TypeScript's `import m = require('…')` is held too: `no-restricted-
 the path rule checks it itself. Out of reach of every import rule, as before: a computed specifier, a `data:` URL,
 and a require not called by that name (`createRequire(…)(…)`, `module.require(…)`).
 
+## Addendum (2026-11-17): an audit row can say why
+
+The trail said who acted, what they did, to which subject, when, and (since 0014) with which credential.
+It could not say why: a refused credential's reason (unknown, revoked, expired), or how many rows a purge
+removed. The first adopter, the pages console, asked for both.
+
+**The column.** Framework migration `0016_audit_detail` adds a nullable `detail jsonb` to `audit_events`.
+NULL means "none recorded": every older row, and every writer that passes none. The grant is unchanged.
+`app_user` keeps SELECT and INSERT only, and table-level grants cover the new column. The RLS proofs write
+and read a nested detail as `app_user` on both engines, and prove that an UPDATE of it is refused.
+
+**Never a secret, a token, a password or free-form personal data.** `app_user` holds no UPDATE or DELETE
+on the table, so the app can never correct or redact a detail once written. Record a code or a count.
+
+**The writer is the gate.** `recordAuditEvent` takes an optional `detail` (`AuditDetail`, `keel/db/audit`)
+and checks it before it opens a transaction. The type admits only JSON (strings, numbers, booleans, null,
+arrays and plain objects), so a Date, a function or an explicit `undefined` does not compile. At run time
+the check goes in three steps:
+
+1. What the caller passed must be JSON: no non-finite number, no class instance, nothing nested deeper
+   than four levels, no `undefined` in an array. An object property left undefined is skipped, as JSON
+   writes it.
+2. It is serialized once, and that text must be at most 1024 bytes. The bound comes before any pattern
+   reads a value: scanning a 60 KB string with the email pattern first took seconds. (The one exception
+   is a key of up to 64 characters, shape-checked before it is shown in an error's path.)
+3. The parsed text is checked again, and it is what gets written. A `toJSON`, a getter or a Proxy can make
+   what is serialized differ from what was passed, so the rules below read the serialized form:
+    - no NUL or unpaired surrogate in a string (Postgres's jsonb refuses both, and would fail the insert);
+    - no key whose last word, or last two words joined, names a secret (`token`, `password`, `secret`,
+      `cookie`, `pin`, `apiKey`, `accessKey`, `cardNumber`, `ssn` and the like; a trailing number or `v2`
+      is ignored). A boolean or null under such a key passes (`missingToken: true`). A plural passes only as
+      a number under a qualifying word (`revokedTokens: 3`), since a bare `otps: 482913` may be the code
+      itself;
+    - no key or string value shaped like an email address (international domains included), a JWT or a
+      `Bearer` credential.
+
+The error names the rule and the path, never the value, which may be the secret it refused. A key in the
+path that is long or fails a shape check is withheld too.
+
+These checks catch the likely accident, which is spreading a request, a member or an error into the detail.
+They are not a scrubber: a secret under an innocent key, in an innocent shape, passes. The rule above is the
+contract.
+
+**A run-time denylist, not a lint rule.** A lint rule sees the literal keys at a call site. The accident it
+would have to catch is a spread or a variable (`detail: { ...body }`, `detail: { error: err.message }`),
+which only a run-time check sees. The denylist names secrets by their key, which is reliable. It does not
+try to name personal data by key, which is not (a name, a note or an address can sit under any key). The
+one personal-data shape keel itself handles, an email address, is caught by its value.
+
+**No CHECK constraint.** jsonb rewrites numbers and whitespace (`1e2` reads back as `100`), so a byte bound
+in SQL would measure a different text from the writer's, and the two could disagree about the same detail.
+
+**Keel's own use: inbound intake.** The `inbound-email.received` row now records why the email was filed as
+it was, in a closed vocabulary (`InboundReceivedDetail`, `keel/core/inbound-email`):
+
+- `{ outcome: 'handled' }`;
+- `{ outcome: 'unmatched', cause: 'no-handler' }` or `{ outcome: 'unmatched', cause: 'declined' }`;
+- `{ outcome: 'failed', cause: 'handler-threw' }`.
+
+The static twin records the same. A fourth cause, `{ outcome: 'failed', cause: 'intake-threw' }`, is the
+server's alone: the handler returned, and intake's own recording of its result then threw, so the handler's
+effect may already have happened. The handler's own reason never goes in: it is free text, and the
+reference handlers (the showcase's and keel's test fixture's) write the sender's address into it. It stays on the `inbound_emails` row.
+
+Intake now finds a handler only as an own entry of the registry. Before, `<org>+constructor@…` found
+`Object.prototype.constructor` and was filed as a message its handler declined.
+
+**Reading it.** The Simulator's Events tab shows `detail` inside the expanded row's JSON, as a React text
+child, so it is escaped and never parsed as HTML. An adopter's own audit screen must do the same: render it
+as text, never through `dangerouslySetInnerHTML` or a Markdown renderer.
+
+**What an adopter does.** Nothing to copy. 0016 runs on the next migrator run, and existing rows read NULL.
+To record a why, pass `detail` to `recordAuditEvent`.
+
 ## Addendum (2026-11-17): the authorization scan judges each handler, not the file's text
 
 **Why.** The scan matched TEXT. A route file passed if its comment-stripped source contained `authorize(` anywhere, or,
