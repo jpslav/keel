@@ -343,7 +343,7 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 | Seam module                                   | You register                                                                                       | Empty looks like                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `abilities.ts`                                | subject types + staff org + credential kinds + person and machine (`appMachineAbilityRules`) rules | (starter registers one)                    |
-| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001                                             | (starter registers one)                    |
+| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations named `NNNN_name`, four digits, numbered ≥ 1001             | (starter registers one)                    |
 | `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
 | `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
 | `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
@@ -423,6 +423,22 @@ upstream improvements reach you through `git merge`, not `pnpm update`.
 [ADR-0013](adr/0013-upstream-updates-fork-and-merge.md) records why, and the exact
 `git remote add upstream` workflow — including which directories reliably conflict and what would make
 publishing to a registry worth the versioning cost.
+
+### When an update changes what your seam must say
+
+A merge from keel can make your app stop compiling until you add a line. These come from the change that
+let non-session callers reach `authorize()` (ADR-0012, 2026-11-16 addendum):
+
+- `apps/<app>/src/app-config/abilities.ts` must export `AppPersonCredentialKind` and
+  `AppMachineCredentialKind` (types), plus `appMachineAbilityRules` and `nonSessionAdministration`
+  (values). `never`, `return false` and `{}` opt out.
+- An `AbilityActor` literal whose `manageAll` may be true must state its session:
+  `credential: { kind: 'session', id: null }`. Without it the literal no longer compiles, because only a
+  stated session wields `manageAll`. A literal with `manageAll: false` needs nothing, but without a
+  session credential it can no longer take an administrative action (inviting a member, changing the
+  org, managing a webhook endpoint).
+- A mutating route under `api/service/` must call `authorize(...)` with the actor `withServiceCaller`
+  passes. The scan's message says how.
 
 ## Keeping the docs honest
 

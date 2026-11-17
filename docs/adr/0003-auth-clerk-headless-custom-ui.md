@@ -119,7 +119,12 @@ person, and the real adapter reads it from the user's metadata, while `Membershi
 non-session actor built from `listMembers` would therefore have had to guess `restricted`. Inbound email
 used to guess it from the role. The real adapter answers `getMember` with the same two facts
 `getCurrentUser` reads for the caller: the org membership for the role, then the user's metadata. It
-returns null for an org Clerk doesn't have, rather than throwing its 404.
+returns null for an org Clerk doesn't have, rather than throwing its 404. It also returns null for a
+BANNED user. Banning ends their sessions but leaves their memberships, so without the check their
+tokens and email would keep their role. A LOCKED user keeps their standing on purpose: anyone can lock an
+account by failing its sign-ins, so treating that as "no standing" would let an attacker kill a victim's
+tokens. Each call costs three Clerk requests (the org, the membership, the user) on every non-session
+request; the `auth-dev` cutover row measures that against Clerk's rate limits.
 
 **Restriction now has one rule, in both adapters and for both methods.** `isRestricted(flag, role)` in
 `keel/core/roles` reads the user's flag OR the `restricted` role in the org in question. Before, the

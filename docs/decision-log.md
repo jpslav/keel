@@ -1865,3 +1865,20 @@ the calls the work made that no plan anticipated.
   abilities seam, through a deny-by-default `appMachineAbilityRules`, and per-token scopes are not built.
   The place for a later per-credential cap stays marked in `defineAbilitiesFor`, and retiring the
   `service/` exemption stands.
+- **An independent review, decided by the keel manager.** A cold review by a different model, at
+  `833638a`, found three MEDIUMs:
+    - The upgrade test's "old" database could not hold an app migration that builds on the newest framework
+      one. Fixed by building it one migration at a time.
+    - A banned user kept their standing. They now have none, and `locked` deliberately still does.
+    - A possibly-true `manageAll` without a session failed closed silently. It is now a type error.
+- **The administrative subjects are a manager decision, the conservative one, and JP was told.** They are
+  Membership, Org and WebhookEndpoint, and non-read actions on them take a stated session. An app widens
+  one subject at a time through `nonSessionAdministration`.
+- **Also from that review:**
+    - the inbound handler now reports its credential instead of the intake inferring it;
+    - `isRestricted` is used at every remaining literal;
+    - malformed actors are denied;
+    - an org's id and slug come from one row (`orgIdentityForSlug`);
+    - the numbering test no longer requires an app migration, and the four-digit rule is in
+      `docs/adopting.md`;
+    - one ADR sentence about un-forced RLS was corrected in place, since the addendum is today's.

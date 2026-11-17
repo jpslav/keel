@@ -626,7 +626,15 @@ numbered into the framework range. Both are now a seam-conformance test,
   triggers and functions.
 
 Under strict ordering the upgrade fails with the production error. A catalog-sweeping `GRANT` fails the
-comparison, and so does a migration that un-forces RLS.
+comparison, and so does a sweep that un-forces RLS on whatever tables exist. A migration that un-forces RLS
+on a NAMED table is the same in either position, so the comparison passes it. `rls-pglite.test.ts` catches
+that one instead ("has RLS but not FORCE ROW LEVEL SECURITY", via the RLS coverage proof).
+
+The comparison's "old" database is built the way it really stood before the update. The registry, minus
+the newest framework migration, is applied one migration at a time, and the build stops at the first app
+migration that cannot run without it. An app migration that builds on a new framework migration arrives
+with it, and the two apply together. A synthetic registry in the same file pins that case: an app index
+on a column only the newest framework migration adds.
 
 Unordered mode had also stopped Kysely refusing an app migration that runs after a later app migration,
 as two branches' 1005 and 1006 can. So `migrateToLatest` runs a preflight first: a pending migration that
@@ -670,3 +678,27 @@ stay in the app for now. They plausibly pass the universality test
 from the app's abilities seam, or from per-credential grants stored with each key or token? He chose the
 abilities seam: a deny-by-default `appMachineAbilityRules`, with no per-token scopes built and the place
 for a later cap left marked. Retiring the `service/` exemption stands.
+
+**An independent review, and what it changed (2026-11-16).** A cold review by a different model, with the
+keel manager deciding each finding:
+
+- **A possibly-true `manageAll` must state a session, in the type.** `AbilityActor` is now two shapes: one
+  with `manageAll: false` and any credential (or none), and one with a session credential and any
+  `manageAll`. A literal that could set `manageAll` without stating a session is a compile error. The run
+  time keeps refusing it. It was already failing closed, but silently.
+- **Administrative framework subjects take a session.** Inviting or managing members, changing the org,
+  and managing webhook endpoints are refused to any person whose credential is not a stated session. An
+  app widens one subject at a time on the seam, `nonSessionAdministration` (default `{}`); the export
+  joins the enumerated `abilities` value imports. Reads are not administration. Not listed: service keys
+  (no route mints one, and they are no ability subject), the self-only subjects, the system-managed ones,
+  and Job (a product action).
+- **A malformed actor is denied, not judged as a person.** Anything not a machine must be a well-formed
+  person (`kind` 'person' or absent, a real role, a boolean `restricted`), or it gets nothing. A machine
+  that lost its `kind` had been judged as a person with no role.
+- **One row gives an org's id and slug.** `abilityActorFromCredential` takes an `OrgIdentity`, from
+  `orgIdentityForSlug` (`keel/db/org-lookup`) or from the inbound context's `ctx.org`. The intake builds
+  `ctx.org` from the one row it resolved.
+- **The handler reports the credential.** `InboundHandlerResult` carries `credential`, and the intake
+  records exactly that, or NULL. A synthetic actor a handler names is no longer recorded as an email
+  credential.
+- **A banned person has no standing** (ADR-0003's addendum).
