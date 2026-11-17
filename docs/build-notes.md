@@ -1407,3 +1407,33 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   the registry's dynamic imports, keel's registry and pglite: 54 MB for the starter. `check:demo-size` is
   what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
   registries).
+
+## Storage `copy` (2026-11-16, `storage-copy`)
+
+- **`CopySource` is not encoded for you, and the obvious encoders are wrong.** The SDK sends the string as
+  given and S3 decodes it, so an unencoded `+` reads back as a space, a `?` starts a `?versionId=` suffix and a
+  `%` starts an escape. `encodeURI` leaves `+`, `?` and `#` alone; `encodeURIComponent` on the whole key turns every
+  `/` into `%2F`, away from AWS's own example (`awsexamplebucket/reports/january.pdf`). Each segment encoded and the
+  slashes kept was the one that held for every row of the test, and each of those encoders was seen failing it.
+- **A missing key is a 404 only if the caller may list the bucket.** Without `s3:ListBucket` S3 answers a missing
+  key with `AccessDenied`, so `copy`'s `NoSuchKey` to `NotFoundError` mapping rests on the grant. CDK's
+  `grantReadWrite` includes `s3:List*` (aws-cdk-lib `BUCKET_READ_ACTIONS`: `s3:GetObject*`, `s3:GetBucket*`,
+  `s3:List*`), and the cutover row asks to confirm it on the deployed policy.
+- **A 200 from `CopyObject` can carry an error in its body**; the SDK handles it. `CopyObjectCommand` is built
+  with the `getThrow200ExceptionsPlugin` middleware (`@aws-sdk/client-s3` 3.1096.0, `dist-cjs/index.js:992`), so a
+  failed copy throws and the adapter never reports a false success.
+- **A mocked builtin did not reach the adapter.** The first test of the fake's mechanism used
+  `vi.mock('node:fs/promises')` to record the order of `copyFile` and `rename`. The test file saw the mock
+  (`vi.isMockFunction` was true there) and the adapter module, which imports the same builtin, did not: zero
+  calls recorded, with or without `vi.resetModules()`. The cause was not found. It was dropped for a poll:
+  while a 64 MB copy runs, the destination is stat-ed on every turn of the event loop and may only ever be
+  absent or whole.
+- **That poll can fail only where a copy takes time.** On this machine (macOS, APFS) a plain `copyFile` into
+  the destination shows thousands of distinct partial sizes for 100 MB, and the test went red against exactly
+  that (`copyFile(from, to)` in place of the temp and rename), and against the body published before its
+  sidecar. A filesystem that clones a file in one step has no such window, so on one the test cannot provoke the
+  race; it is not evidence there, only a guard where the race exists.
+- **A guard nobody can test is not kept.** The fake first mapped an `ENOENT` during the copy to `NotFoundError`
+  for a source deleted after the existence check. Two mutations of the existence check survived because that
+  branch covered for it, and the race itself cannot be provoked deterministically. The branch was deleted, and the
+  early check is pinned by a test that a missing source creates not even the destination's directory.
