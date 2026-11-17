@@ -2389,3 +2389,50 @@ The design is in ADR-0004's addendum of the same date.
   their memberships are cluster-wide. Restored into another cluster, the ledger says 0001 and 0015 ran, so
   neither runs again, and neither `app_user` nor anyone's switch to it came along. The
   `db-role-not-superuser` cutover row says what to do before and after a restore.
+
+## JSX banned in keel/core; paths into apps/ fenced; getDb as a string banned (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **JSX in keel/core is banned with a rule of its own, `keel/no-jsx-in-core`,** reported for each outermost
+  element or fragment, so a disable comment on one does not hide the next. Banning `*.{tsx,jsx}` files under
+  core was the alternative. It was rejected because the extension is not what imports React: the JSX is.
+- **A path into app code is judged by where it lands, not how it is spelled.** `keel/no-path-to-app-code`
+  resolves a relative or absolute specifier against the importing file, following symlinks, and reports it if it
+  lands in `apps/` or `packages/seed/`. The first version was a `regex` on the spelling (an `apps/` segment anywhere in a
+  specifier). It closed the seam for `@app-config/apps/…`; round 1's fix, which kept `@` specifiers out of it, let
+  `@scope/../../apps/…` through; and each review round found a spelling it missed. Listing the two
+  apps' directories was rejected too: an adopter renames and adds apps.
+- **A `..` in any package or alias specifier is banned** (`bareTraversalPattern`), not only after
+  `@app-config/`: no package specifier has a reason to climb, and TypeScript resolves one that does out of
+  node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where pnpm links the apps
+  and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
+- **A specifier two patterns match is two findings, in both halves.** The declarationless half now reports every
+  pattern a specifier matches, as `no-restricted-imports` does. The alternative, exempting from the traversal ban
+  what the alias pattern "already bans", was tried and rejected: written as spellings, the exemptions let
+  `@\..\..\apps\…` and then `@//../../apps/…` through, because the alias group matches neither.
+- **The app's aliases are a `regex`, not a `group`** (`^(@[\\/]|@app[\\/]+seed([\\/]|$))`). A fuzz of 7,069 specifier
+  spellings against TypeScript's resolver found `@//domain/tickets` past the `@/*` group, whose gitignore syntax
+  does not match an empty segment. The regex matches every specifier the group did on the fuzz's corpus, plus the
+  empty-segment and backslash spellings, which no published package uses.
+- **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing,
+  and so are keys that define a member. Strings the computed and destructure selectors already report are left
+  to them, so each finding is reported once. A spy's key (`vi.spyOn(db, 'getDb')`) is exempt in a test file
+  only: a spy calls through, so anywhere else it is the raw handle.
+- **Two gaps stay documented and filed, not fixed:** a hand-written `.mjs` in the generated styles directory
+  (`.claude/future-tasks/generated-styles-mjs-unlinted.md`), and the vendor ban's two halves reading the list
+  differently (`.claude/future-tasks/vendor-ban-matcher-parity.md`).
+
+## App-owned lint exceptions (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **An app's exceptions to a fence live in `apps/<app>/lint-exceptions.mjs`**, read by `eslint.config.mjs` for
+  every app at load. The alternative, an exact path in `eslint.config.mjs`, stops matching after `pnpm init-app`: the path named
+  the app's directory, which `pnpm init-app` renames without rewriting keel's config. Every upstream change to the
+  file would also conflict with the adopter's edit.
+- **Only `keel/no-raw-db-handle` takes one.** It is the one fence the docs tell an adopter to except a module
+  from. The recipe and `/new-port` still say to add a vendor to `vendorSdkPattern` in `eslint.config.mjs`. That
+  widens a ban rather than excepting a file, and is left where it is.
+- **Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.**
+  The alternative was warning on a broad glob. It was rejected because a warning is easy to scroll past, while a
+  failed load names the entry. A Next route's `[locale]` is escaped, so the path matches literally.
+- **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
+  end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
+  cannot swap the exceptions; that guards against accidents and is not a boundary.

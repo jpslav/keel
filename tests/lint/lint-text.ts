@@ -73,6 +73,24 @@ export const GET_DB_DESTRUCTURE: Fence = {
     rule: 'keel/no-raw-db-handle',
     fragment: 'Destructuring getDb out of the db port',
 }
+export const GET_DB_STRING: Fence = { rule: 'keel/no-raw-db-handle', fragment: 'Naming getDb as a string' }
+// A path into app code is one rule, for every form; a `..` in a package or alias specifier is a pattern, so it
+// reports through the same two rules as the app's aliases.
+export const APP_CODE_PATH: Fence = { rule: 'keel/no-path-to-app-code', fragment: 'app content under another name' }
+export const BARE_TRAVERSAL_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a `..` in a package or alias' }
+export const BARE_TRAVERSAL_DYNAMIC: Fence = {
+    rule: 'keel/no-dynamic-app-import',
+    fragment: 'a `..` in a package or alias',
+}
+export const NODE_MODULES_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'never through node_modules' }
+export const NODE_MODULES_DYNAMIC: Fence = {
+    rule: 'keel/no-dynamic-app-import',
+    fragment: 'never through node_modules',
+}
+export const JSX_IN_CORE: Fence = {
+    rule: 'keel/no-jsx-in-core',
+    fragment: 'JSX compiles to an import of react/jsx-runtime',
+}
 // The framework/app fence and keel/core's fence, outside declarations; the declaration halves report as
 // no-restricted-imports with the pattern's own message.
 export const APP_CODE_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'must reach app content only through' }
