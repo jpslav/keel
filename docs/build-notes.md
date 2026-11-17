@@ -1652,3 +1652,11 @@ the panel is the element that carries it.
   file says `'getDb'` for another reason, so the string is the finding. It is left to the other selectors where
   they already report (a computed key, a destructured key), and left out of TypeScript type positions, which
   load nothing.
+- **A path in keel's config that names an app breaks at `pnpm init-app`**, which renames the app's directory and
+  rewrites only the surface it knows. Anything per-app belongs in the app's own directory, by a path relative to
+  it (`apps/<app>/lint-exceptions.mjs`), where a rename carries it along.
+- **The allowed door needs the same attention as the banned ones, and a pattern's own fix can open a new hole.**
+  The first fix for paths into `apps/` skipped every `@` specifier to keep `@app-config/apps/…` open, and so let
+  `@scope/../../apps/…` through: Node, webpack and TypeScript all resolve a bare specifier's `..` out of
+  node_modules. Resolving a path against the importing file (`keel/no-path-to-app-code`) answers "where does
+  this land"; matching its spelling only answers "does it look like it".

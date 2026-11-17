@@ -338,6 +338,29 @@ than a module specifier, and they are the two to remember if you move things: ea
 the migrator Lambda from `packages/keel/src/adapters/real/migrate-handler.ts`. Nothing typechecks
 `infra/`.
 
+### When a lint fence must let one of your modules through
+
+Some fences take named exceptions. Today one does: `keel/no-raw-db-handle`, which bans `getDb()` in every
+module of your app (tenant-scoped data goes through `db.withTenant()`, ADR-0004). If a module of yours truly
+needs the raw client, say a maintenance job that runs as the system across every tenant, list it in your app's
+own `apps/<app>/lint-exceptions.mjs`. Don't edit keel's `eslint.config.mjs`: every later keel update to it
+would conflict with your edit, and a path you wrote there names your app's directory, which `pnpm init-app`
+renames without rewriting that file.
+
+```js
+// apps/<app>/lint-exceptions.mjs
+export default {
+    'keel/no-raw-db-handle': [
+        { file: 'src/domain/maintenance.ts', reason: 'purges every tenant’s expired rows as the system' },
+    ],
+}
+```
+
+`eslint.config.mjs` reads the file for every app when it loads. Each entry names one existing file under
+`apps/<app>/src`, by a path relative to the app, and gives a reason. A glob, a directory, a path out of the
+app, a missing reason, or a file that no longer exists fails `pnpm lint` itself, naming the entry. So an
+exception cannot quietly widen, and a stale one cannot linger. Every other module stays banned.
+
 ## Building your product — everything registers through `apps/<app>/src/app-config/`
 
 The framework never imports your code directly; it imports the registration seam (`@app-config/*`), and

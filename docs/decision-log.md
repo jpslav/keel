@@ -2166,3 +2166,18 @@ runbook and clicking fifteen things in the right order.
 - **Two gaps stay documented and filed, not fixed:** a hand-written `.mjs` in the generated styles directory
   (`.claude/future-tasks/generated-styles-mjs-unlinted.md`), and the vendor ban's two halves reading the list
   differently (`.claude/future-tasks/vendor-ban-matcher-parity.md`).
+
+## App-owned lint exceptions (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **An app's exceptions to a fence live in `apps/<app>/lint-exceptions.mjs`**, read by `eslint.config.mjs` for
+  every app at load. The alternative, an exact path in `eslint.config.mjs`, broke an adoption probe: the path named
+  the app's directory, which `pnpm init-app` renames without rewriting keel's config. Every upstream change to the
+  file would also conflict with the adopter's edit.
+- **Only `keel/no-raw-db-handle` takes one.** It is the one fence the docs tell an adopter to except a module
+  from. The recipe and `/new-port` still say to add a vendor to `vendorSdkPattern` in `eslint.config.mjs`. That
+  widens a ban rather than excepting a file, and is left where it is.
+- **Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.**
+  The alternative was warning on a broad glob. It was rejected because a warning is easy to scroll past, while a
+  failed load names the entry. A Next route's `[locale]` is escaped, so the path matches literally.
+- **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
+  end to end without writing into this repo's `apps/`.

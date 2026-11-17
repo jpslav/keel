@@ -156,3 +156,11 @@ id that covers every module in an app's `src/`, keel's screens and keel's fixtur
 test outside routes, screens and the fixture. Anything else that needs the raw client is a named exception
 in `eslint.config.mjs` with its reason; there are none today. As before, the ban is a fast, local reminder,
 and RLS in the database is the boundary.
+
+## Addendum — 2026-11-16 (last): an app's raw-client exceptions live in the app
+
+The addendum above put a module that needs the raw client into `eslint.config.mjs`, by exact path. That path
+names the app's directory, which `pnpm init-app` renames without rewriting keel's config, and an adopter's edit
+to that file conflicts with every later keel update to it. So an app lists its exceptions in its own
+`apps/<app>/lint-exceptions.mjs`, by path relative to the app, and `eslint.config.mjs` reads every app's when it
+loads. Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.

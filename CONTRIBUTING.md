@@ -77,7 +77,8 @@ never to a vendor's API. `/new-port` (Claude command) scaffolds the layout.
   outside routes, screens and the fixture are exempt), and every tenant table carries the RLS policy pattern from
   `apps/showcase/src/app-config/db/migrations/1001_tickets.ts`. A `'use server'` action is an app module like any
   other, wherever you put it. If one module truly needs the raw client, add a named exception for that module,
-  with its reason, in `eslint.config.mjs`; never exempt a directory.
+  with its reason, in the app's `apps/<app>/lint-exceptions.mjs` (see `docs/adopting.md`); never exempt a
+  directory, and never edit `eslint.config.mjs` for it.
 - New migrations: app tables go under `apps/showcase/src/app-config/db/migrations/` (numbered ≥ 1001) and extend
   `AppTables`; framework tables go under `packages/keel/src/db/migrations/` (0001–0999). Register
   in the neighbouring `index.ts` either way. The same migration code must pass `pnpm test:unit`

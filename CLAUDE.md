@@ -97,8 +97,9 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `apps/*/src`, in keel's screens and in keel's fixture (`keel/no-raw-db-handle`, deny-by-default: a new
   directory is covered before anyone names it; tests outside routes, screens and the fixture are the one
   exception).
-  A module that truly needs the raw client is a named, reasoned exception in `eslint.config.mjs`, never a
-  directory. New tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
+  A module that truly needs the raw client is a named, reasoned exception in its app's own
+  `apps/<app>/lint-exceptions.mjs` (path relative to the app, one existing file per entry, never a glob or a
+  directory); nobody edits `eslint.config.mjs` for it. New tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
   migrations are numbered ≥1001; framework migrations 0001–0999 live in
   `packages/keel/src/db/migrations` — ADR-0012).
 - **Every mutating route handler (POST/PUT/PATCH/DELETE) must call `authorize(...)`**
