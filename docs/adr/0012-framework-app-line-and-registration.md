@@ -740,12 +740,14 @@ keel's fixture names the same file, and passed both halves of the fence. Each of
 another spelling that passed, so the fence is now built from the ways a specifier can reach app code rather than
 from the spellings (`eslint.config.mjs`, the list above `bareTraversalPattern`):
 
+- **The app's aliases** (`appCodePattern`), now a regex: `@` then any slash, or `@app`, slashes, `seed`. The `@/*`
+  group did not match `@//domain/tickets`, which an app's tsconfig resolves into its `src/`.
 - **A relative or absolute path, or a `file:` URL.** `keel/no-path-to-app-code` resolves it against the importing
   file, following symlinks, and reports it if it lands in `apps/` or `packages/seed/`. Every other path out of `packages/keel`
   stays open: keel's tests reach the repo's `tests/support/` helpers that way.
 - **A `..` segment in a package or alias specifier** (`bareTraversalPattern`). `@app-config/../seed` leaves the
   seam for the seed, and `@scope/../../apps/…` resolves out of node_modules into app code. Only `./`, `../`, `/`
-  and `\` begin a path; `.x/…` is a package name.
+  and `\` begin a path (a `file:` URL is one too); `.x/…` is a package name.
 - **A specifier through `node_modules`** (`nodeModulesPathPattern`). pnpm links the apps and the seed, among other
   workspace packages, into `node_modules/.pnpm/node_modules`.
 - **An app's package by name** resolves to nothing from `packages/keel`: keel depends on no app package, and none
@@ -753,6 +755,10 @@ from the spellings (`eslint.config.mjs`, the list above `bareTraversalPattern`):
 
 Both patterns travel with `appCodePattern` as `appCodePatterns`, so no fenced block lists one without the
 others, and the declarationless half reads them as `no-restricted-imports` does (a `regex` compiled with `iu`).
-The path rule leaves a path through `node_modules` to its pattern, so one import is one finding. TypeScript's
-`import m = require('…')` is held too: `no-restricted-imports` sees it for the patterns, and the path rule checks
-it itself. Out of reach of every import rule, as before: a computed specifier, and a `data:` URL.
+The path rule leaves a path through `node_modules` to its pattern. A specifier that two patterns match is two
+findings, in both halves: the declarationless half reports every pattern a specifier matches, as
+`no-restricted-imports` does, and no pattern exempts what another "already bans". The traversal ban once exempted
+`@/…` and `@app/seed…` that way, and missed `@\..\..\apps\…` and `@//../../apps/…`, spellings the alias group does
+not match. TypeScript's `import m = require('…')` is held too: `no-restricted-imports` sees it for the patterns, and
+the path rule checks it itself. Out of reach of every import rule, as before: a computed specifier, a `data:` URL,
+and a require not called by that name (`createRequire(…)(…)`, `module.require(…)`).

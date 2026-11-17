@@ -1657,8 +1657,8 @@ the panel is the element that carries it.
   it (`apps/<app>/lint-exceptions.mjs`), where a rename carries it along.
 - **The allowed door needs the same attention as the banned ones, and a pattern's own fix can open a new hole.**
   Round 1's fix for paths into `apps/` skipped every `@` specifier to keep `@app-config/apps/…` open, and so let
-  `@scope/../../apps/…` through: TypeScript's and Node's resolvers both resolve a bare specifier's `..` out of
-  node_modules. Resolving a path against the importing file (`keel/no-path-to-app-code`) answers "where does
+  `@scope/../../apps/…` through: TypeScript's resolver resolves a bare specifier's `..` out of node_modules (and
+  Node's `require()` does when the specifier spells the file's extension). Resolving a path against the importing file (`keel/no-path-to-app-code`) answers "where does
   this land"; matching its spelling only answers "does it look like it".
 - **When review rounds keep finding new spellings of one hole, list the ways in, not the spellings.** Three rounds
   each found a specifier that reached app code past the fence (`@app-config/../seed`, then `@scope/../../apps/…`,
@@ -1666,12 +1666,15 @@ the panel is the element that carries it.
   a `..` in a package specifier, a path through node_modules, a package by name) and holds each one; the list
   sits above `bareTraversalPattern` in `eslint.config.mjs`. A path is also judged through symlinks, or a checkout
   opened through a symlinked directory would resolve `../../apps/…` to somewhere that is not the repo.
-- **A ban's exemptions need the same spelling sweep as the ban.** The traversal ban exempted `@/…` and
-  `@app/seed…`, which the alias pattern bans whole, but wrote the exemption with `[\\/]`, so it also exempted
-  `@\..\..\apps\…`. The alias pattern does not match a backslash, and TypeScript reads one as a slash, so that
-  specifier reached app code past both. The claim check after the sweep found it, by probing the claim "(1)
-  already bans it whole". Exempt only the spellings the other rule is proven to catch, and test that the
-  exempted specifier still gives exactly one finding.
+- **Never exempt a specifier from one ban because another "already bans it".** The traversal ban exempted
+  `@/…` and `@app/seed…`, which the alias pattern bans, to keep each import to one finding. The claim check found
+  `@\..\..\apps\…` past both (the exemption accepted a backslash, the alias group does not), and the re-check of
+  that fix found `@//../../apps/…` (an empty segment, same story). Each exemption spelled out what the other rule
+  catches, and each was wrong in a way only a probe showed. The exemptions are gone: a specifier both patterns
+  match is two findings, in both halves. To find this class, fuzz rather than review: generate spellings, resolve
+  each with TypeScript, and flag any that lands in app code with no finding. The first such fuzz (7,069 spellings,
+  three keel files, the root's and both apps' tsconfigs) found one more at once, `@//domain/tickets` past the `@/*`
+  group itself, and none after the alias became a regex; on main's config it finds 3,846 spelling-file pairs.
 - **Cite a path in a gated doc in the spelling `pnpm init-app` rewrites.** `--eject-showcase` deletes
   `packages/seed` and rewrites the citation `` `packages/seed` `` to the surviving app's seed directory
   (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that

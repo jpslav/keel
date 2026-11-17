@@ -2160,9 +2160,17 @@ runbook and clicking fifteen things in the right order.
   `@scope/../../apps/…` through; and each review round found a spelling it missed. Listing the two
   apps' directories was rejected too: an adopter renames and adds apps.
 - **A `..` in any package or alias specifier is banned** (`bareTraversalPattern`), not only after
-  `@app-config/`: no package specifier has a reason to climb, and TypeScript's and Node's resolvers both resolve one
-  that does out of node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where
-  pnpm links the apps and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
+  `@app-config/`: no package specifier has a reason to climb, and TypeScript resolves one that does out of
+  node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where pnpm links the apps
+  and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
+- **A specifier two patterns match is two findings, in both halves.** The declarationless half now reports every
+  pattern a specifier matches, as `no-restricted-imports` does. The alternative, exempting from the traversal ban
+  what the alias pattern "already bans", was tried and rejected: written as spellings, the exemptions let
+  `@\..\..\apps\…` and then `@//../../apps/…` through, because the alias group matches neither.
+- **The app's aliases are a `regex`, not a `group`** (`^(@[\\/]|@app[\\/]+seed([\\/]|$))`). A fuzz of 7,069 specifier
+  spellings against TypeScript's resolver found `@//domain/tickets` past the `@/*` group, whose gitignore syntax
+  does not match an empty segment. The regex matches every specifier the group did on the fuzz's corpus, plus the
+  empty-segment and backslash spellings, which no published package uses.
 - **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing,
   and so are keys that define a member. Strings the computed and destructure selectors already report are left
   to them, so each finding is reported once. A spy's key (`vi.spyOn(db, 'getDb')`) is exempt in a test file
