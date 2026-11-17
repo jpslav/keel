@@ -1498,5 +1498,5 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   ever drops it, the config fails to load rather than mismatching.
 - **TSImportType is an import.** `import type { T } from 'x'` is a declaration, and `no-restricted-imports`
   bans it. `type T = import('x').T` is a TSImportType that no import rule saw, which is how a type-only
-  `@/*` import could sit in keel's fixture. In typescript-eslint 8 its specifier is `node.source`; earlier
-  versions used `node.argument.literal`.
+  `@/*` import could sit in keel's fixture. In the typescript-eslint this repo pins (8.72) its specifier is
+  `node.source`; print the AST before trusting that shape on another version.

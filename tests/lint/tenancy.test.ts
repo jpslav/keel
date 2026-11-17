@@ -62,6 +62,9 @@ const BANNED = [
     `${APP}/src/app/api/kv/route.test.ts`,
     'packages/keel/src/components/kv-panel.test.tsx',
     'packages/keel/test-fixture/api/kv/route.test.ts',
+    // demo-static is a screen on both sides of the line, so its tests keep the ban too
+    `${APP}/src/demo-static/app.test.tsx`,
+    'packages/keel/src/demo-static/shell.test.tsx',
     `${APP}/src/components/kv-card.stories.tsx`,
 ]
 

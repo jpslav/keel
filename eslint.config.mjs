@@ -400,6 +400,12 @@ const keelNoDirectMkdtempRule = {
 //
 // A TYPE-position `import('…').T` is an import too: `import type { T } from '…'` is banned by
 // no-restricted-imports, which never sees the inline form. Every rule built here checks it.
+//
+// This rule keeps its OWN reading of the vendor list, unlike the two fences below, which read their groups
+// exactly as no-restricted-imports does. The two disagree at the edges: the static ban's bare `pg` matches at
+// any depth and ignores case, so it flags a local `./pg` and `@CLERK/nextjs`, and this rule flags neither
+// (tests/lint/app-owned-adapters.test.ts pins `./pg` as not a vendor). Bringing them together means anchoring
+// the bare names in vendorSdkPattern first, which changes the static ban, so it is left for its own change.
 const isVendorSpecifier = (specifier) =>
     vendorSdkPattern.group.some((pattern) =>
         pattern.endsWith('/*')
@@ -409,8 +415,15 @@ const isVendorSpecifier = (specifier) =>
 
 // Every import a declaration-only ban cannot see, checked against one predicate: `import()`, `require()`,
 // vitest/jest's `importActual`, `requireActual`, `importMock` and `requireMock`, and a type-position
-// `import('…')` (TSImportType: `source` in typescript-eslint 8, `argument.literal` before it). A rule
+// `import('…')` (TSImportType, whose specifier is `source` in the typescript-eslint this repo pins). A rule
 // built here takes no options, so the merge trap has nothing to replace.
+//
+// NOT covered: `vi.mock`/`vi.doMock` and jest's. A mock names a module and, given a factory, never loads it;
+// the module under test that imports it is what the declaration and declarationless bans catch.
+// `what` names the thing the specifier is, and `rule` is the fence's own sentence, appended to the message.
+const declarationlessMessage = (what, rule) =>
+    `\`{{specifier}}\` is ${what}, and reaching it with import() or require(), or naming it in a type ` +
+    `import('…'), is still importing it. ${rule}`
 /** @returns {import('eslint').Rule.RuleModule} */
 const declarationlessImportBan = ({ description, matches, message }) => ({
     meta: { type: 'problem', docs: { description }, schema: [], messages: { banned: message } },
@@ -427,7 +440,7 @@ const declarationlessImportBan = ({ description, matches, message }) => ({
         }
         return {
             ImportExpression: (node) => check(node.source),
-            TSImportType: (node) => check(node.source ?? node.argument?.literal),
+            TSImportType: (node) => check(node.source),
             'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
             // A test inside the fence loads the real module with these, exactly as with import().
             'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
@@ -439,11 +452,11 @@ const declarationlessImportBan = ({ description, matches, message }) => ({
 const keelNoDynamicVendorImportRule = declarationlessImportBan({
     description: 'Vendor SDKs are not imported dynamically outside an adapters directory.',
     matches: isVendorSpecifier,
-    message:
-        '`{{specifier}}` is a vendor SDK, and loading it with import() or require(), or naming it in a type ' +
-        "import('…'), is still importing it. Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or " +
-        'apps/<app>/src/adapters/real/ (a port the app owns) — code against the port instead ' +
-        '(docs/recipes/app-owned-adapter.md).',
+    message: declarationlessMessage(
+        'a vendor SDK',
+        "Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or apps/<app>/src/adapters/real/ " +
+            '(a port the app owns) — code against the port instead (docs/recipes/app-owned-adapter.md).',
+    ),
 })
 
 // THE FRAMEWORK/APP FENCE AND keel/core's FENCE, outside declarations. Both are no-restricted-imports groups
@@ -465,16 +478,12 @@ const matchesGroup = (group) => {
 const keelNoDynamicAppImportRule = declarationlessImportBan({
     description: 'Framework code does not reach app content by import(), require() or a type import().',
     matches: matchesGroup(appCodePattern.group),
-    message:
-        "`{{specifier}}` is app content, and reaching it with import() or require(), or naming it in a type import('…'), " +
-        `is still importing it. ${appCodePattern.message}`,
+    message: declarationlessMessage('app content', appCodePattern.message),
 })
 const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
     description: 'keel/core does not reach a framework by import(), require() or a type import().',
     matches: matchesGroup(coreFrameworkPattern.group),
-    message:
-        "`{{specifier}}` is a framework, and reaching it with import() or require(), or naming it in a type import('…'), " +
-        `is still importing it. ${coreFrameworkPattern.message}`,
+    message: declarationlessMessage('a framework', coreFrameworkPattern.message),
 })
 
 // THE TENANCY BAN (ADR-0004) as a rule of its own: the getDb selectors above, each with its message. See
@@ -623,13 +632,17 @@ const eslintConfig = [
         plugins: { keel: keelPlugin },
         rules: { 'keel/no-raw-db-handle': 'error' },
     },
-    // ...and the tests that keep the ban, as they always have: a route's or a screen's test drives the code a
-    // request runs, and keel's fixture is app-shaped request code with no tests of its own to exempt.
+    // ...and the tests that keep the ban: a route's or a screen's test drives the code a request runs, and
+    // keel's fixture is app-shaped request code with no tests of its own to exempt. "Screens" are the
+    // components/ and demo-static/ trees on both sides of the line; routes and components kept it before
+    // deny-by-default, and demo-static joined them with it.
     {
         files: [
             'apps/*/src/app',
             'apps/*/src/components',
+            'apps/*/src/demo-static',
             'packages/keel/src/components',
+            'packages/keel/src/demo-static',
             'packages/keel/test-fixture',
         ].map((dir) => `${dir}/${TEST_FILES}`),
         plugins: { keel: keelPlugin },

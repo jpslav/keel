@@ -1839,5 +1839,10 @@ worth keeping.
   `keel/no-dynamic-framework-import-in-core`). They match through the `ignore` package loaded from ESLint, as
   `no-restricted-imports` does. A regex converter was the alternative, as the future task sketched; it was
   rejected because it would read some specifiers differently from the static half.
+- **The vendor rule keeps its own matcher, `isVendorSpecifier`.** The static vendor ban's bare names (`pg`,
+  `posthog-node`, `mailgun.js`) match at any depth and ignore case, so it flags a local `./pg`, which a test
+  from the app-owned adapters work pins as not a vendor for the declarationless half. Matching both halves the
+  same way means anchoring those names in `vendorSdkPattern`, which changes the static ban, so it is left for
+  its own change.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
