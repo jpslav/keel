@@ -14,9 +14,27 @@ proves the shape compiles offline before anyone has an AWS account.
 - `pnpm --filter infra synth` is the verification bar: green, offline, zero credentials
   (environment-agnostic stack, no lookups).
 - **Nothing here deploys until** (see `docs/cutover-checklist.md`): `cloud-accounts` fills
-  `apps/showcase/config/params.ts` · `recurring-cost` — Aurora, the NAT gateway, and CloudFront need
-  explicit approval. Not a checklist row, but do it first: if your organisation ships its own CDK
+  `apps/showcase/config/params.ts` · `recurring-cost` — Aurora, the NAT gateway (on the `pg` shape), and
+  CloudFront need explicit approval. Not a checklist row, but do it first: if your organisation ships its own CDK
   construct library, replace `lib/tags.ts` and the IAM/secrets/monitoring drafts with it.
+
+## Two network shapes — decide before the first deploy
+
+`params.database.transport` in the app's `config/params.ts` picks one (ADR-0001 and ADR-0002, addenda
+2026-11-16). Switching after the first deploy replaces the VPC and the cluster.
+
+- **`pg` (default):** both Lambdas inside the VPC, reaching Aurora over a socket. One NAT gateway carries
+  their egress.
+- **`data-api` (opt-in):**
+    - only the cluster lives in the VPC, in isolated subnets with no NAT gateway;
+    - both Lambdas run outside it and reach Aurora through the RDS Data API, authorised by IAM alone;
+    - the function configuration holds no database credential.
+
+    Cutover rows `data-api` (the transport, proven live by `docs/runbooks/data-api.md`) and
+    `data-api-access` (this shape, deployed) close it.
+
+Both shapes synthesize offline. To check the opt-in one, set the parameter to `'data-api'` and run
+`pnpm --filter infra synth`.
 
 ## Deploys — checks in CI, deploys in your own pipeline
 

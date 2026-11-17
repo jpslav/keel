@@ -59,3 +59,51 @@ a dedicated infrastructure repo is a supported end state: `infra/` imports exact
   standing cost, named in the stack and gated by `recurring-cost`.
 - The deploy shape is rehearsable before any account exists: `pnpm build:demo && pnpm start:demo` runs
   the identical standalone artifact locally against fake adapters (`docs/runbooks/deploy.md`).
+
+## Addendum (2026-11-16): the Lambdas outside the VPC, as a deployment choice
+
+The Decision's network shape stays the default: both Lambdas inside the VPC, and one NAT gateway for their
+egress. The app's `params.database.transport` now chooses between two shapes (`infra/stack.ts`):
+
+- **`pg` (default):** unchanged.
+- **`data-api` (opt-in):** the RDS Data API transport, from ADR-0002's addendum of the same date.
+    - Only the Aurora cluster lives in the VPC, in isolated subnets with no NAT gateway and no internet
+      gateway.
+    - The server and migrator Lambdas run outside any VPC and reach Aurora through the RDS Data API, which
+      the cluster enables.
+    - IAM is the whole boundary. Each function gets the Data API actions on this one cluster's ARN and read
+      on its secret (CDK's `grantDataApiAccess`), and nothing else database-related.
+
+**What it buys:**
+
+- no NAT gateway, the standing cost the Consequences named;
+- no VPC attachment for the Lambdas;
+- no database credential in the function's configuration, because the Data API reads the secret itself.
+  The `db-credential-not-in-env` cutover row therefore does not arise on this shape.
+
+**What it costs:**
+
+- Every SQL statement is an HTTPS round trip. A `withTenant` is at least BeginTransaction, one setup
+  statement, the queries, and Commit.
+- The Data API's limits apply to the app and to its migrations: 1 MiB responses, 45 seconds per call,
+  one hour per transaction.
+- Anyone holding both the IAM grant and the secret can run SQL as the database user, so the grant is
+  scoped to the one cluster.
+
+**Why the VPC path stays the default:**
+
+- The Data API transport is proven only through an emulator until the `data-api` cutover row closes.
+- A socket has lower latency per statement.
+- A migration or query that cannot fit the Data API's limits needs the socket.
+
+Switching shapes after the first deploy replaces the VPC and the cluster, so decide before it.
+`pnpm --filter infra synth` was run offline for both shapes. The `data-api` shape has:
+
+- no NAT gateway, no internet gateway, and two isolated subnets;
+- the cluster's HTTP endpoint enabled;
+- both Lambdas without VPC configuration;
+- the `rds-data` and secret-read grants scoped as above.
+
+The `pg` shape keeps its NAT gateway, its subnets, its in-VPC Lambdas and its secret-read grants, now
+with `DATABASE_TRANSPORT=pg` set explicitly. The cutover row `data-api-access` proves the deployed
+shape.
