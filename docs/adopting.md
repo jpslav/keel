@@ -359,7 +359,8 @@ export default {
 `eslint.config.mjs` reads the file for every app when it loads. Each entry names one existing file under
 `apps/<app>/src`, by a path relative to the app, and gives a reason. A glob, a directory, a path out of the
 app, a missing reason, or a file that no longer exists fails `pnpm lint` itself, naming the entry. So an
-exception cannot quietly widen, and a stale one cannot linger. Every other module stays banned.
+exception cannot quietly widen, and cannot outlive the file it names; one that outlives its need (the module
+stopped using the raw client) is still yours to delete. Every other module stays banned.
 
 ## Building your product — everything registers through `apps/<app>/src/app-config/`
 

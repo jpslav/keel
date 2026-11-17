@@ -1639,10 +1639,10 @@ the panel is the element that carries it.
   `packages/keel/src/core` compiles to an import of `react/jsx-runtime`, and neither `no-restricted-imports` nor
   a declarationless rule can see it. Ban the construct that causes the import (`keel/no-jsx-in-core`).
 - **A fence written as aliases leaves the path the alias stands for.** `@/*` was banned in keel, and
-  `../../../apps/showcase/src/…` named the same files. `appPathPattern` is a `regex` pattern, and
-  `no-restricted-imports` compiles a `regex` as `new RegExp(regex, 'iu')`. The declarationless half has to do
-  the same, flags included, or the two halves disagree on `Apps/`. `tests/lint/framework-fence.test.ts`'s
-  parity table pins it.
+  `../../../apps/showcase/src/…` named the same files. A `regex` pattern in `no-restricted-imports` is compiled as
+  `new RegExp(regex, 'iu')`, so the declarationless half compiles `bareTraversalPattern` and
+  `nodeModulesPathPattern` the same way, flags included, or the two halves would disagree on `../NODE_MODULES/…`.
+  `tests/lint/framework-fence.test.ts`'s parity table pins it.
 - **The allowed door is a path too.** `@app-config/*` maps to a directory, so `@app-config/../seed` resolves to
   the app's seed through the one alias the fence leaves open. And a pattern that bans paths into `apps/` will
   close the seam itself unless it skips `@` specifiers (`@app-config/apps/registry`). Test the allowed door
@@ -1660,3 +1660,9 @@ the panel is the element that carries it.
   `@scope/../../apps/…` through: Node, webpack and TypeScript all resolve a bare specifier's `..` out of
   node_modules. Resolving a path against the importing file (`keel/no-path-to-app-code`) answers "where does
   this land"; matching its spelling only answers "does it look like it".
+- **When review rounds keep finding new spellings of one hole, list the ways in, not the spellings.** Three rounds
+  each found a specifier that reached app code past the fence (`@app-config/../seed`, then `@scope/../../apps/…`,
+  then `.x/../../apps/…` and `.pnpm/node_modules/showcase/…`). The fence now names the ways a specifier can reach app code (an alias, a path,
+  a `..` in a package specifier, a path through node_modules, a package by name) and holds each one; the list
+  sits above `bareTraversalPattern` in `eslint.config.mjs`. A path is also judged through symlinks, or a checkout
+  opened through a symlinked directory would resolve `../../apps/…` to somewhere that is not the repo.

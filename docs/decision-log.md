@@ -2153,12 +2153,16 @@ runbook and clicking fifteen things in the right order.
 - **JSX in keel/core is banned with a rule of its own, `keel/no-jsx-in-core`,** reported for each outermost
   element or fragment, so a disable comment on one does not hide the next. Banning `*.{tsx,jsx}` files under
   core was the alternative. It was rejected because the extension is not what imports React: the JSX is.
-- **A path into `apps/` is app content** (`appPathPattern`, a `regex` matching an `apps` segment in a specifier
-  that does not start with `@`). Listing the two apps' directories was the alternative. It was rejected because
-  an adopter renames and adds apps. `@` specifiers are left out so that `@app-config/apps/…` stays the seam.
-- **Climbing out of the seam is banned** (`appSeamTraversalPattern`: a `..` segment after `@app-config/`). Every
-  seam module is reached directly, so a `..` there only ever leaves the seam. Both patterns travel with
-  `appCodePattern` as `appCodePatterns`.
+- **A path into app code is judged by where it lands, not how it is spelled.** `keel/no-path-to-app-code`
+  resolves a relative or absolute specifier against the importing file, following symlinks, and reports it if it
+  lands in `apps/` or `packages/seed/`. The first version was a `regex` on the spelling (an `apps` segment in a
+  specifier that did not start with `@`); each review round found a spelling it missed, and keeping `@` specifiers
+  out of it, so that `@app-config/apps/…` stayed the seam, let `@scope/../../apps/…` through. Listing the two
+  apps' directories was rejected too: an adopter renames and adds apps.
+- **A `..` in any package or alias specifier is banned** (`bareTraversalPattern`), not only after
+  `@app-config/`: no package specifier has a reason to climb, and Node, webpack and TypeScript all resolve one
+  that does out of node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where
+  pnpm links the apps and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
 - **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing,
   and so are keys that define a member. Strings the computed and destructure selectors already report are left
   to them, so each finding is reported once. A spy's key (`vi.spyOn(db, 'getDb')`) is exempt in a test file
@@ -2180,4 +2184,5 @@ runbook and clicking fifteen things in the right order.
   The alternative was warning on a broad glob. It was rejected because a warning is easy to scroll past, while a
   failed load names the entry. A Next route's `[locale]` is escaped, so the path matches literally.
 - **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
-  end to end without writing into this repo's `apps/`.
+  end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
+  cannot swap the exceptions; that guards against accidents and is not a boundary.

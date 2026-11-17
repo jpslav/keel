@@ -26,9 +26,10 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   tables or vocabulary fails to build). A change to keel is not done until BOTH apps are green. The
   app extends the framework through the `@app-config/*` seam — register new subjects, jobs, event kinds, tables, and migrations there, and
   **never edit a framework base union or registry**. Lint-enforced: inside `packages/keel` the
-  fence bans the app's `@/*` alias, `@app/seed` and any path into `apps/` outright, by `import()` and in a
-  type `import('…')` as well as in a declaration; the `@app-config/*` alias is the only channel back, and
-  nothing climbs out of it with `..`.
+  fence bans the app's `@/*` alias, `@app/seed`, a relative or absolute path that lands in `apps/` or
+  `packages/seed/`, a `..` in any package or alias specifier, and any specifier through `node_modules`, by
+  `import()` and in a type `import('…')` as well as in a declaration; the `@app-config/*` alias is the only
+  channel back.
 - **keel's OWN tests run against keel's own app seam, never an app's** — `packages/keel/test-fixture`
   (outside `packages/keel/src` because that tree is what `keel/*` resolves to and what ships; the
   fixture is neither). Living outside that tree buys NO exemption: every gate names `test-fixture/**`
