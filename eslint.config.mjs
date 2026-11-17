@@ -402,9 +402,9 @@ const keelNoDirectMkdtempRule = {
 // no-restricted-imports, which never sees the inline form. Every rule built here checks it.
 //
 // This rule keeps its OWN reading of the vendor list, unlike the two fences below, which read their groups
-// exactly as no-restricted-imports does. The two disagree at the edges: the static ban's bare `pg` matches at
-// any depth and ignores case, so it flags a local `./pg` and `@CLERK/nextjs`, and this rule flags neither
-// (tests/lint/app-owned-adapters.test.ts pins `./pg` as not a vendor). Bringing them together means anchoring
+// exactly as no-restricted-imports does. The two disagree at the edges. The static ban matches a bare name
+// at any depth and ignores case, so its `pg` flags a local `./pg` and its `@clerk/*` flags `@CLERK/nextjs`;
+// this rule flags neither (tests/lint/app-owned-adapters.test.ts pins `./pg` as not a vendor). Bringing them together means anchoring
 // the bare names in vendorSdkPattern first, which changes the static ban, so it is left for its own change.
 const isVendorSpecifier = (specifier) =>
     vendorSdkPattern.group.some((pattern) =>
@@ -492,7 +492,7 @@ const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
 const keelNoRawDbHandleRule = {
     meta: {
         type: 'problem',
-        docs: { description: 'App code and keel’s screens reach the database through db.withTenant().' },
+        docs: { description: "App code and keel's screens reach the database through db.withTenant()." },
         schema: [],
         messages: {
             member: getDbSelector.message,
@@ -906,7 +906,7 @@ const eslintConfig = [
     },
     // ...and core's framework ban outside declarations (keelNoDynamicFrameworkImportInCoreRule). The vendor and
     // app halves already hold there outside declarations: keel/no-dynamic-vendor-import and
-    // keel/no-dynamic-app-import both cover all of packages/keel/src.
+    // keel/no-dynamic-app-import both cover packages/keel/src/core.
     {
         files: [`packages/keel/src/core/**/*.${SRC_EXT}`],
         plugins: { keel: keelPlugin },

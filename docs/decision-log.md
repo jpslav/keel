@@ -1840,7 +1840,7 @@ worth keeping.
   `no-restricted-imports` does. A regex converter was the alternative, as the future task sketched; it was
   rejected because it would read some specifiers differently from the static half.
 - **The vendor rule keeps its own matcher, `isVendorSpecifier`.** The static vendor ban's bare names (`pg`,
-  `posthog-node`, `mailgun.js`) match at any depth and ignore case, so it flags a local `./pg`, which a test
+  `posthog-js`, `posthog-node`, `mailgun.js`) match at any depth and ignore case, so it flags a local `./pg`, which a test
   from the app-owned adapters work pins as not a vendor for the declarationless half. Matching both halves the
   same way means anchoring those names in `vendorSdkPattern`, which changes the static ban, so it is left for
   its own change.
