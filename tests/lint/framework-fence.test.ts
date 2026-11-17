@@ -217,7 +217,14 @@ describe('a path into app code crosses the framework/app fence too', () => {
             "import { c } from '../../../apps-config/x'",
             'export { a, b, c }',
         ].join('\n')
-        expect(fired(await lint(file, code), APP_CODE_PATH)).toBe(0)
+        const findings = await lint(file, code)
+        // ...and a relative path's `..` is not the bare-specifier traversal ban's business either
+        expect(fired(findings, APP_CODE_PATH) + fired(findings, BARE_TRAVERSAL_STATIC)).toBe(0)
+    })
+
+    it('a `..` that is part of a name, not a segment, climbs nowhere', async () => {
+        const code = "import { a } from '@app-config/x..y'\nimport { b } from 'pkg/a..b/c'\nexport { a, b }\n"
+        expect(fired(await lint('packages/keel/src/server-lib/kv.ts', code), BARE_TRAVERSAL_STATIC)).toBe(0)
     })
 
     it('an app reaching another app by path is not this fence’s business', async () => {
