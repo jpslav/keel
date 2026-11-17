@@ -13,8 +13,10 @@ import { Kysely, sql } from 'kysely'
  *
  * WHAT IT GRANTS: `SET TRUE`, the one thing `withTenant` needs. `INHERIT FALSE` on purpose: this role
  * OWNS every table it migrated, so app_user's privileges add nothing it needs, and inheriting them would
- * quietly hand it every grant made to app_user later. (A SEPARATE application role is a different case:
- * see `db-role-not-superuser` in docs/cutover-checklist.md.)
+ * quietly hand it every grant made to app_user later. One exception: if this role already holds a
+ * membership it granted itself (an operator set `createrole_self_grant`), SET is added to that membership
+ * and its INHERIT is left as the operator chose. (A SEPARATE application role is a different case: see
+ * `db-role-not-superuser` in docs/cutover-checklist.md.)
  *
  * SAFE TO RUN ANYWHERE:
  * - it names the two roles it touches and nothing else (the order-independence rule in ./index.ts);
@@ -29,7 +31,18 @@ export async function up(db: Kysely<any>): Promise<void> {
         DO $$
         BEGIN
             IF NOT pg_has_role(current_user, 'app_user', 'SET') THEN
-                GRANT app_user TO CURRENT_USER WITH SET TRUE, INHERIT FALSE;
+                IF EXISTS (
+                    SELECT 1 FROM pg_auth_members
+                    WHERE roleid = 'app_user'::regrole
+                      AND member = current_user::regrole
+                      AND grantor = current_user::regrole
+                ) THEN
+                    -- A membership this role already granted itself (createrole_self_grant set by the
+                    -- operator): add SET, and leave the INHERIT they chose alone.
+                    GRANT app_user TO CURRENT_USER WITH SET TRUE;
+                ELSE
+                    GRANT app_user TO CURRENT_USER WITH SET TRUE, INHERIT FALSE;
+                END IF;
             END IF;
         EXCEPTION WHEN insufficient_privilege THEN
             RAISE EXCEPTION 'keel: role % cannot switch to app_user, and cannot grant itself that (it holds no ADMIN on app_user). As a role that does, run: GRANT app_user TO % WITH SET TRUE, INHERIT FALSE', current_user, current_user;

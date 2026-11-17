@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { type Kysely, sql } from 'kysely'
 import { migrateToLatest } from './migrate'
 import { runRlsProofs } from './rls-proof-runner'
@@ -46,49 +47,53 @@ export async function runOwnerPass(
     const { admin, connect } = connections
     const stamp = Date.now()
     const owner = `keel_owner_${stamp}`
-    const password = `owner-${stamp}`
+    const probe = `${owner}_probe`
     const database = `keel_owner_db_${stamp}`
+    // Random, so a role a failed run left behind on a reused server cannot be logged into by its name.
+    const login = { user: owner, password: randomUUID() }
 
-    // Aurora's master user, as a role: may log in, create roles and databases, and is no superuser.
-    await sql`CREATE ROLE ${sql.id(owner)} LOGIN CREATEROLE CREATEDB NOSUPERUSER PASSWORD ${sql.lit(password)}`.execute(
-        admin,
-    )
-    const login = { user: owner, password }
-    const bootstrap = connect({ ...login, database: connections.maintenanceDatabase })
+    let ownerDb: Kysely<DB> | undefined
+    let superDb: Kysely<DB> | undefined
+    // ONE teardown for everything from CREATE ROLE on: a failure at any step must not leave a LOGIN
+    // CREATEROLE role (which may hold ADMIN on app_user) on a server that outlives the run.
     try {
-        // What THIS server gives a non-superuser for a role it creates, measured rather than assumed: the
-        // owner creates a throwaway role, and its own membership in it is read back. On Postgres 16+ with
-        // `createrole_self_grant` unset, that is ADMIN, and neither INHERIT nor SET.
-        const probe = `${owner}_probe`
-        await sql`CREATE ROLE ${sql.id(probe)} NOLOGIN`.execute(bootstrap)
-        const creator = await sql<{ admin_option: boolean; inherit_option: boolean; set_option: boolean }>`
-            SELECT m.admin_option, m.inherit_option, m.set_option FROM pg_auth_members m
-            WHERE m.roleid = ${probe}::regrole AND m.member = current_user::regrole`.execute(bootstrap)
-        expect(creator.rows.length).toBe(1)
-        expect(creator.rows[0]!.admin_option).toBe(true)
-        expect(creator.rows[0]!.inherit_option).toBe(false)
-        expect(creator.rows[0]!.set_option).toBe(false)
-        await sql`DROP ROLE ${sql.id(probe)}`.execute(bootstrap)
+        // Aurora's master user, as a role: may log in, create roles and databases, and is no superuser.
+        await sql`CREATE ROLE ${sql.id(owner)} LOGIN CREATEROLE CREATEDB NOSUPERUSER PASSWORD ${sql.lit(login.password)}`.execute(
+            admin,
+        )
 
-        // `app_user` is cluster-wide. On a fresh server the owner's own migration 0001 creates it, and the
-        // owner gets the creator's membership just measured. On a server where another pass already
-        // created it, the owner is granted EXACTLY that membership, so it stands where Aurora's master
-        // user stands after creating app_user either way.
-        const existing = await sql<{
-            n: number
-        }>`SELECT count(*)::int AS n FROM pg_roles WHERE rolname = 'app_user'`.execute(admin)
-        if (existing.rows[0]!.n > 0) {
-            await sql`GRANT app_user TO ${sql.id(owner)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`.execute(admin)
+        const bootstrap = connect({ ...login, database: connections.maintenanceDatabase })
+        try {
+            // What THIS server gives a non-superuser for a role it creates, measured rather than assumed:
+            // the owner creates a throwaway role, and its own membership in it is read back. On Postgres 16+
+            // with `createrole_self_grant` unset, that is ADMIN, and neither INHERIT nor SET.
+            await sql`CREATE ROLE ${sql.id(probe)} NOLOGIN`.execute(bootstrap)
+            const creator = await sql<{ admin_option: boolean; inherit_option: boolean; set_option: boolean }>`
+                SELECT m.admin_option, m.inherit_option, m.set_option FROM pg_auth_members m
+                WHERE m.roleid = ${probe}::regrole AND m.member = current_user::regrole`.execute(bootstrap)
+            expect(creator.rows.length).toBe(1)
+            expect(creator.rows[0]!.admin_option).toBe(true)
+            expect(creator.rows[0]!.inherit_option).toBe(false)
+            expect(creator.rows[0]!.set_option).toBe(false)
+
+            // `app_user` is cluster-wide. Where it does not exist yet, the owner's own migration 0001
+            // creates it and the owner gets the creator's membership just measured. Where another pass
+            // already created it, the owner is granted EXACTLY that membership, so it stands where Aurora's
+            // master user stands after creating app_user either way.
+            const existing = await sql<{ n: number }>`
+                SELECT count(*)::int AS n FROM pg_roles WHERE rolname = 'app_user'`.execute(admin)
+            if (existing.rows[0]!.n > 0) {
+                await sql`GRANT app_user TO ${sql.id(owner)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`.execute(admin)
+            }
+
+            await sql`CREATE DATABASE ${sql.id(database)}`.execute(bootstrap)
+        } finally {
+            await bootstrap.destroy()
         }
 
-        await sql`CREATE DATABASE ${sql.id(database)}`.execute(bootstrap)
-    } finally {
-        await bootstrap.destroy()
-    }
+        ownerDb = connect({ ...login, database })
+        superDb = connect({ ...connections.superuser, database })
 
-    const ownerDb = connect({ ...login, database })
-    const superDb = connect({ ...connections.superuser, database })
-    try {
         // The pass proves what it says only if the owner really is no superuser and cannot bypass RLS.
         const self = await sql<{ rolsuper: boolean; rolbypassrls: boolean }>`
             SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`.execute(ownerDb)
@@ -113,10 +118,11 @@ export async function runOwnerPass(
         // ...and the whole composed proof suite, every role switch made by the owner.
         await runRlsProofs(superDb, expect, { appDb: ownerDb })
     } finally {
-        await ownerDb.destroy()
-        await superDb.destroy()
-        // Best effort: a failed teardown must not mask the result, and the servers it runs on are throwaway.
+        await ownerDb?.destroy()
+        await superDb?.destroy()
+        // Best effort, each step on its own: a failed teardown must not mask the result.
         await sql`DROP DATABASE IF EXISTS ${sql.id(database)} WITH (FORCE)`.execute(admin).catch(() => undefined)
+        await sql`DROP ROLE IF EXISTS ${sql.id(probe)}`.execute(admin).catch(() => undefined)
         await sql`DROP ROLE IF EXISTS ${sql.id(owner)}`.execute(admin).catch(() => undefined)
     }
 }

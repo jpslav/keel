@@ -3,6 +3,8 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { randomUUID } from 'node:crypto'
+import { up as grantAppUser } from '../../db/migrations/0015_app_user_grant'
 import { runOwnerPass } from '../../db/owner-pass'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DbPort } from '../../ports/db'
@@ -55,8 +57,10 @@ beforeAll(async () => {
 
     const url = new URL(serverUrl)
     url.pathname = `/${DATABASE}`
+    // Not migrated yet: the non-superuser pass below runs FIRST, so on a fresh server the owner's own
+    // migration 0001 is what creates `app_user`, exactly as on a new Aurora cluster. The superuser pass
+    // migrates `keel_contract` when its turn comes.
     realDb = createRealDb(url.toString())
-    await realDb.migrateToLatest()
 }, 120_000)
 
 afterAll(async () => {
@@ -74,10 +78,9 @@ function connect(login: { database: string; user: string; password: string }) {
 }
 
 describe('keel fixture seam on real Postgres, through the real adapter (contract)', () => {
-    test('the full RLS proof suite passes', async () => {
-        await runRlsProofs(realDb.getDb(), expect)
-    })
-
+    // FIRST, deliberately (vitest runs a file's tests in order): on the fresh embedded server a local run
+    // starts, nothing has created `app_user` yet, so the owner creates it itself. On a server another pass
+    // already used (CI's shared service), the pass takes the measured path instead (owner-pass.ts).
     // The pass every other one cannot be: a NON-SUPERUSER owner, as Aurora's master user is, runs the
     // migrations and makes every role switch in the proofs (packages/keel/src/db/owner-pass.ts).
     test('a non-superuser owner migrates, and switches to app_user inside withTenant', async () => {
@@ -100,6 +103,113 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
                 },
                 expect,
             )
+        } finally {
+            await admin.destroy()
+        }
+    })
+
+    test('the full RLS proof suite passes', async () => {
+        await realDb.migrateToLatest()
+        await runRlsProofs(realDb.getDb(), expect)
+    })
+})
+
+// Migration 0015 against a real server, branch by branch: what it grants, what it leaves alone, and how it
+// fails. Each case is one throwaway non-superuser role, migrated by calling the migration's own `up`.
+describe('migration 0015 on real Postgres', () => {
+    interface Membership {
+        grantor: string
+        admin_option: boolean
+        inherit_option: boolean
+        set_option: boolean
+    }
+
+    async function withRole(
+        run: (role: string, roleDb: ReturnType<typeof connect>, admin: ReturnType<typeof connect>) => Promise<void>,
+    ) {
+        const server = new URL(serverUrl)
+        const superuser = { user: decodeURIComponent(server.username), password: decodeURIComponent(server.password) }
+        const admin = connect({ ...superuser, database: DATABASE })
+        const role = `keel_0015_${Date.now()}`
+        const password = randomUUID()
+        await sql`DO $$ BEGIN CREATE ROLE app_user NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`.execute(
+            admin,
+        )
+        await sql`CREATE ROLE ${sql.id(role)} LOGIN CREATEROLE NOSUPERUSER PASSWORD ${sql.lit(password)}`.execute(admin)
+        const roleDb = connect({ user: role, password, database: DATABASE })
+        try {
+            await run(role, roleDb, admin)
+        } finally {
+            await roleDb.destroy()
+            await sql`DROP ROLE IF EXISTS ${sql.id(role)}`.execute(admin).catch(() => undefined)
+            await admin.destroy()
+        }
+    }
+
+    const membershipsOf = async (admin: ReturnType<typeof connect>, role: string) =>
+        (
+            await sql<Membership>`
+                SELECT m.grantor::regrole::text AS grantor, m.admin_option, m.inherit_option, m.set_option
+                FROM pg_auth_members m
+                WHERE m.roleid = 'app_user'::regrole AND m.member = ${role}::regrole
+                ORDER BY 1`.execute(admin)
+        ).rows
+
+    test("a creator's ADMIN-only membership gains a SET grant of its own, with INHERIT off", async () => {
+        await withRole(async (role, roleDb, admin) => {
+            await sql`GRANT app_user TO ${sql.id(role)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`.execute(admin)
+            await grantAppUser(roleDb)
+            const rows = await membershipsOf(admin, role)
+            expect(rows.find((m) => m.grantor === role)).toEqual({
+                grantor: role,
+                admin_option: false,
+                inherit_option: false,
+                set_option: true,
+            })
+            // ...and it can switch, which is the point.
+            await roleDb.transaction().execute(async (trx) => {
+                await sql`SET LOCAL ROLE app_user`.execute(trx)
+            })
+            // Run again: nothing changes.
+            await grantAppUser(roleDb)
+            expect(await membershipsOf(admin, role)).toEqual(rows)
+        })
+    })
+
+    test('a membership the role granted itself keeps the INHERIT an operator chose, and gains SET', async () => {
+        await withRole(async (role, roleDb, admin) => {
+            await sql`GRANT app_user TO ${sql.id(role)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`.execute(admin)
+            // What `createrole_self_grant = 'inherit'` gives a creator: a self-granted INHERIT membership.
+            await sql`GRANT app_user TO ${sql.id(role)} WITH INHERIT TRUE, SET FALSE`.execute(roleDb)
+            await grantAppUser(roleDb)
+            const own = (await membershipsOf(admin, role)).find((m) => m.grantor === role)
+            expect(own?.inherit_option).toBe(true)
+            expect(own?.set_option).toBe(true)
+        })
+    })
+
+    test('a role with no ADMIN on app_user fails, and the error says what to run', async () => {
+        await withRole(async (role, roleDb) => {
+            await expect(grantAppUser(roleDb)).rejects.toThrow(
+                new RegExp(`cannot switch to app_user.*GRANT app_user TO ${role} WITH SET TRUE`),
+            )
+        })
+    })
+
+    test('a superuser is granted nothing: it can already switch', async () => {
+        const server = new URL(serverUrl)
+        const admin = connect({
+            user: decodeURIComponent(server.username),
+            password: decodeURIComponent(server.password),
+            database: DATABASE,
+        })
+        try {
+            await sql`DO $$ BEGIN CREATE ROLE app_user NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`.execute(
+                admin,
+            )
+            const before = await membershipsOf(admin, decodeURIComponent(server.username))
+            await grantAppUser(admin)
+            expect(await membershipsOf(admin, decodeURIComponent(server.username))).toEqual(before)
         } finally {
             await admin.destroy()
         }
