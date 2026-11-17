@@ -4,7 +4,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { randomUUID } from 'node:crypto'
+import { migrateToLatest } from '../../db/migrate'
 import { up as grantAppUser } from '../../db/migrations/0015_app_user_grant'
+import { runWithTenant } from '../../db/with-tenant'
 import { runOwnerPass } from '../../db/owner-pass'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DbPort } from '../../ports/db'
@@ -136,6 +138,64 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
                 expect,
             )
         } finally {
+            await admin.destroy()
+        }
+    })
+
+    // Two databases on ONE cluster, migrated by different owners (staging and production on one Aurora
+    // cluster): `app_user` is cluster-wide, so only whoever created it holds ADMIN. A second owner's
+    // migration must stop at 0015 with the statement to run, roll back whole, and succeed once a role
+    // holding ADMIN has run that statement VERBATIM.
+    test('a second owner, with no ADMIN on an app_user someone else created, stops at 0015 with the remedy', async () => {
+        const server = new URL(serverUrl)
+        const superuser = { user: decodeURIComponent(server.username), password: decodeURIComponent(server.password) }
+        const maintenance = server.pathname.slice(1) || 'postgres'
+        const admin = connect({ ...superuser, database: maintenance })
+        const stamp = Date.now()
+        const second = `keel_second_${stamp}`
+        const database = `keel_second_db_${stamp}`
+        const login = { user: second, password: randomUUID() }
+        let ownerDb: ReturnType<typeof connect> | undefined
+        try {
+            // Someone else made app_user (here the superuser); this owner holds no membership in it at all.
+            await sql`DO $$ BEGIN CREATE ROLE app_user NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`.execute(
+                admin,
+            )
+            await sql`CREATE ROLE ${sql.id(second)} LOGIN CREATEROLE CREATEDB NOSUPERUSER PASSWORD ${sql.lit(login.password)}`.execute(
+                admin,
+            )
+            const bootstrap = connect({ ...login, database: maintenance })
+            try {
+                await sql`CREATE DATABASE ${sql.id(database)}`.execute(bootstrap)
+            } finally {
+                await bootstrap.destroy()
+            }
+            ownerDb = connect({ ...login, database })
+
+            const failure = await migrateToLatest(ownerDb).then(
+                () => null,
+                (error: unknown) => String(error),
+            )
+            expect(failure).toMatch(new RegExp(`keel: role ${second} cannot switch to app_user`))
+            // Kysely runs every pending migration in one transaction, so nothing of the run survives.
+            const executed = await sql<{ n: number }>`SELECT count(*)::int AS n FROM kysely_migration`.execute(ownerDb)
+            expect(executed.rows[0]!.n).toBe(0)
+
+            // The remedy, exactly as the error states it, run by a role holding ADMIN on app_user.
+            const remedy = /run: (GRANT app_user TO \S+ WITH SET TRUE, INHERIT FALSE)/.exec(failure ?? '')?.[1]
+            expect(remedy).toBe(`GRANT app_user TO ${second} WITH SET TRUE, INHERIT FALSE`)
+            await sql.raw(remedy!).execute(admin)
+
+            // Now 0015 finds the switch already effective and grants nothing; everything migrates.
+            await migrateToLatest(ownerDb)
+            const inside = await runWithTenant(ownerDb, randomUUID(), (trx) =>
+                sql<{ role: string }>`SELECT current_user AS role`.execute(trx),
+            )
+            expect(inside.rows[0]!.role).toBe('app_user')
+        } finally {
+            await ownerDb?.destroy()
+            await sql`DROP DATABASE IF EXISTS ${sql.id(database)} WITH (FORCE)`.execute(admin).catch(() => undefined)
+            await sql`DROP ROLE IF EXISTS ${sql.id(second)}`.execute(admin).catch(() => undefined)
             await admin.destroy()
         }
     })
