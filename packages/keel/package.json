@@ -132,6 +132,7 @@
         "./server-lib/notify": "./src/server-lib/notify.ts",
         "./server-lib/notify-deps": "./src/server-lib/notify-deps.ts",
         "./server-lib/preset-operations": "./src/server-lib/preset-operations.ts",
+        "./server-lib/scheduled-tick": "./src/server-lib/scheduled-tick.ts",
         "./server-lib/sms": "./src/server-lib/sms.ts",
         "./server-lib/webhook-dispatch": "./src/server-lib/webhook-dispatch.ts",
         "./service-auth/mailgun": "./src/service-auth/mailgun.ts",

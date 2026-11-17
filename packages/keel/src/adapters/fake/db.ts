@@ -5,6 +5,7 @@ import type { DB } from '../../db/schema'
 import { seedDb } from '../../db/seed'
 import { runWithTenant } from '../../db/with-tenant'
 import type { DbPort } from '../../ports/db'
+import { worldNow } from './clock'
 import { dataDir } from './data-dir'
 import { fakeEmail } from './email'
 import { openPglite, PGliteDialect } from './pglite-dialect'
@@ -65,5 +66,23 @@ export const fakeDb: DbPort = {
     },
     async migrateToLatest() {
         await instance().ready
+    },
+    /**
+     * The Simulator's world clock (real time plus the offset a demo advanced), so audit rows follow it. Total on
+     * purpose: a hand-edited or corrupt `.data/simulator/clock.json`, or an offset past the Date range, must cost
+     * the demo its clock and not the app its audit writes (a route that has already committed would answer 500
+     * with no audit row), so anything but an instant Postgres can store falls back to real time. A valid JS Date
+     * is not enough: past year 9999 (or before year 0) `toISOString()` prints an extended-year string, which
+     * a timestamptz column rejects.
+     */
+    now() {
+        try {
+            const world = worldNow()
+            const year = world.getUTCFullYear() // NaN for an Invalid Date, which fails both comparisons
+            if (year >= 0 && year <= 9999) return world
+        } catch {
+            // an unreadable clock file: real time
+        }
+        return new Date()
     },
 }

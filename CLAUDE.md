@@ -43,7 +43,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   neither app's: **never reach for an app's slugs, tables or job kinds in a `packages/keel` test** —
   that regression is what the odd vocabulary exists to make obvious, and it is what used to leave
   `pnpm init-app --eject-showcase` with a red gate.
-- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 131 published subpaths
+- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 132 published subpaths
   (its `exports` keys minus `.` and `./package.json`; count it, never remember it);
   the rest of the package is internal and reachable only by relative import inside it. Lint-enforced
   (`keel/public-surface`, which reads that map, so the map is the only list). Adding a module does NOT
@@ -85,7 +85,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
   same RLS proofs on real Postgres, for EVERY app AND keel's fixture seam, each in its own
   database — keel's twice, once through the `pg` driver and once through the RDS Data API driver and its
-  emulator); after renumbering/renaming a migration, wipe local `.data` first.
+  emulator, each also as a non-superuser owner, `packages/keel/src/db/owner-pass.ts`); after
+  renumbering/renaming a migration, wipe local `.data` first.
   **Also wipe `apps/*/.data` after changing `packages/seed`** — the app seeder is guarded by "does this
   world have any rows yet", so new seed rows are invisible on an existing world and only CI sees them.
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The

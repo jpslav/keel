@@ -14,4 +14,14 @@ export interface DbPort {
     ready(): Promise<void>
     /** Applies pending migrations (dev boot, tests, and the migrator Lambda all share this). */
     migrateToLatest(): Promise<void>
+    /**
+     * The instant to stamp on a row whose time the FRAMEWORK writes (today only the audit trail's `at`,
+     * `recordAuditEvent`), when the database's own clock is not the world's.
+     *
+     * The fake database sets it to the Simulator's world clock, so a demo that advances time sees new events
+     * dated in that time. A real adapter must leave it undefined: Postgres `now()` is then the only clock, and
+     * nothing a caller passes can set an audit row's time. It is a property of the PORT, not an argument of
+     * `recordAuditEvent`, for exactly that reason: there is no `at` for a route to supply or forge.
+     */
+    now?(): Date
 }

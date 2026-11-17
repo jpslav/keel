@@ -5,10 +5,12 @@ useDefault = true
 # Test fixture, not a real credential: webhook.test.ts asserts the real-mode WEBHOOK_SECRET branch
 # of verifyWebhookCaller, which needs a literal env secret in the test body. The value is an obvious
 # placeholder ("env-secret-…"). Scoped to that one file AND that one string so any genuine leak — in
-# this file or elsewhere — is still caught. History-safe: the allowlist applies to every scanned
-# commit, including the one that first introduced the literal.
+# this file or elsewhere — is still caught. That scope needs `condition = "AND"`: gitleaks's default is
+# OR, under which this entry exempted every finding in the file. History-safe: the allowlist applies to
+# every scanned commit, including the one that first introduced the literal.
 [[allowlists]]
 description = "webhook.test.ts real-mode WEBHOOK_SECRET fixture"
+condition = "AND"
 paths = ['''packages/keel/src/service-auth/webhook\.test\.ts''']
 regexes = ['''env-secret-abcdef0123456789''']
 regexTarget = "line"
@@ -16,9 +18,9 @@ regexTarget = "line"
 # Test fixtures in audit.test.ts's detail-refusal cases, not credentials: a Stripe-shaped `sk_live_…`
 # string the detail check must refuse as a Bearer credential, and a shorter one under a `sessionToken`
 # key. The test now BUILDS its secret-shaped values (as the keyset note below asks); this entry exists
-# only because both literals are in the branch's history, and gitleaks scans every commit.
-# `condition = "AND"`: gitleaks's default is OR, under which an entry naming a path exempts that whole
-# file. Here a finding is skipped only when it is in that file AND its line holds that string.
+# only because both literals are in the repository's history, and gitleaks scans every commit.
+# `condition = "AND"`, as on the entry above: a finding is skipped only when it is in that file AND its
+# line holds that string.
 [[allowlists]]
 description = "audit.test.ts detail-refusal fixtures, in history only"
 condition = "AND"
