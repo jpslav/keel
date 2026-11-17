@@ -7,7 +7,7 @@ route that rests on this exemption. The gap is older than that change and the sc
 ## Resolution — the scan reads each handler with the TypeScript parser
 
 `packages/keel/src/authz/route-scan.ts` parses and binds each route file with the TypeScript compiler (one file at
-a time, no import resolution; the 80 route files here in about 150 ms), finds every exported mutating handler in every form
+a time, no import resolution; the 81 route files here in 100 to 165 ms), finds every exported mutating handler in every form
 Next accepts, and judges each on its own path. `authorized-mutations.test.ts` keeps the policy: the roots, the
 exemption map and the gates. The fix went wider than this file asked, because the main rule had the same flaw:
 
@@ -48,7 +48,7 @@ What this file asked for, and what was built:
   the showcase, 1 in the fixture) opens with its own gate, and the two files that export a second verb (`flags`,
   `snapshots`) gate their `GET` separately as well. So the rule is per verb everywhere, and no entry is per file.
 - **Fixture.** The gated routes import their stand-ins from `packages/keel/test-fixture/api/stand-ins.ts`; each had
-  defined its own locally, which is the look-alike the scan now refuses. `webhooks/jobs/route.ts` and
+  defined its own locally, which is a look-alike that no longer passes as the gate. `webhooks/jobs/route.ts` and
   `service/jobs/route.ts` called their wrapper inside a function handler; they now have the apps' shape,
   `export const POST = withX(…)`. `dockets/[id]/route.ts` is new: two mutating verbs in one file, one authorizing
   through a same-file helper.

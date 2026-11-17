@@ -1870,8 +1870,8 @@ the panel is the element that carries it.
   matches, check every rule that matches the same way, not only the one the finding names.
 - **See the old gate pass before you trust the new one to fail.** Each shape was dropped into
   `apps/starter/src/app/api` and run through main's scan, then the new one (a throwaway script: write the route,
-  run the suite, delete it). 15 of the 17 shapes passed main's scan; the two that did not were the real route and the
-  comment-only mention. All 17 are cases against the real policy in `authorized-mutations.test.ts`.
+  run the suite, delete it). 16 of the 17 shapes passed main's scan: the real route rightly, and
+  15 as false greens. Only the comment-only mention failed there. All 17 are cases against the real policy in `authorized-mutations.test.ts`.
 - **A suite that is green on its first run has not shown it can fail.** `route-scan.test.ts` passed first time, so
   the analyser was mutated, one change at a time, each run against both suites. Every pass left survivors, and none
   was a defect the reviews had missed. Most were missing cases, now added; the two that were not are noted below.
@@ -1898,7 +1898,7 @@ the panel is the element that carries it.
   `getShorthandAssignmentValueSymbol`. A test written for the obvious case found this. The code had used the wrong call.
 - **`getExportSpecifierLocalTargetSymbol` works without import resolution.** For `export { h as POST }` it returns
   the local symbol, an alias whose first declaration is the `ImportSpecifier` when `h` was imported. That is enough
-  to follow it by hand. `noResolve` programs bind each file correctly, and the 80 route files here take about
-  150 ms.
+  to follow it by hand. `noResolve` programs bind each file correctly, and the 81 route files here (both apps and the fixture, 2026-11-17) take 100 to
+  165 ms over three runs.
 - **Prettier pads a markdown table to its widest cell.** Adding the resolved row to `.claude/future-tasks/index.md`
   re-padded the whole Resolved table, so the diff touches every row of it.

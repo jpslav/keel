@@ -2527,7 +2527,7 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
   question asked of it, all of which are about bindings inside the file: which declaration a callee names, what an
   `export { h as POST }` points at, whether an identifier is a `const`. Following an import is done explicitly, with
   `ts.resolveModuleName` and the root's tsconfig. Rejected: one full program per app, which would load each app's
-  whole import graph (keel, Next, React types) to answer questions about 80 small files. Also rejected:
+  whole import graph (keel, Next, React types) to answer questions about 81 small files. Also rejected:
   typescript-eslint's parser, which the lint rules use. It would serve within one file, but following a re-export
   means reading another module and resolving its specifier through the root's tsconfig, which the compiler API does
   in one call. The check stays a test, as it was, because it judges a file's exports and the modules they lead to,
@@ -2560,7 +2560,7 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
   that shape (their stand-in wrappers invoked the handler at once). They were changed to the apps' shape, not
   accommodated.
 - **The fixture imports its stand-ins.** The fixture's gated routes each defined a local stand-in for the gate. Once
-  a gate binds to an import, a local stand-in is the look-alike the scan refuses, so they moved to one module,
+  a gate binds to an import, a local stand-in is a look-alike that no longer passes as the gate, so they moved to one module,
   `packages/keel/test-fixture/api/stand-ins.ts`, which knip already ignores with the rest of `test-fixture/api`.
 - **A module with two candidate files is refused, not guessed.** TypeScript and Next's bundler disagree on some
   layouts (`impl.ts` beside `impl.js`, `impl.mjs` beside `impl/index.ts`, a `package.json` the bundler follows by

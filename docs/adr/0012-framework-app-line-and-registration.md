@@ -900,7 +900,7 @@ claim.
 
 **What changed in the trees.** No app route was a false green: every route that passed still passes, with the same
 verbs judged. The fixture changed in three ways. Its routes imported nothing for their gates: each defined a local
-stand-in, which is exactly the look-alike the scan now refuses, so the stand-ins moved to
+stand-in, which is a look-alike that no longer passes as the gate, so the stand-ins moved to
 `packages/keel/test-fixture/api/stand-ins.ts` and the routes import them. `webhooks/jobs/route.ts` and
 `service/jobs/route.ts` called their wrapper inside a function handler; they are now `export const POST = withX(…)`,
 the shape every app route has, because `wrapped-by` requires it. And `dockets/[id]/route.ts` is new, named as an

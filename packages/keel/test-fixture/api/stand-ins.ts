@@ -14,9 +14,9 @@ import type { ServiceIdentity } from 'keel/service-auth/verify'
  * Why stand-ins at all: the real ones cannot be imported into this tree. `isSimulated`, `auth`, `llm` and
  * `analytics` come from keel/adapters, which pulls the whole adapter registry and `server-only`;
  * `acceptInvite` is the fake auth adapter's own entry point; and the wrappers are app-side machinery, each
- * app composing them over its own respond helpers. Each is typed against the port it stands for, so a port
- * rename breaks the build here instead of leaving an exemption's gate pointed at a call that no longer
- * exists.
+ * app composing them over its own respond helpers. `auth`, `llm` and `analytics` are typed against the
+ * ports they stand for, so a port rename breaks the build here instead of leaving an exemption's gate pointed at a
+ * call that no longer exists.
  */
 
 /** Annotated `boolean` so `if (!isSimulated)` is not narrowed away. */

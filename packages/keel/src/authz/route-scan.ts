@@ -38,9 +38,10 @@ import ts from 'typescript'
  * value import (not `import type`, not a JSDoc `@import`). A local function that happens to be named
  * `authorize` is followed like any other, so it counts only if it calls the real one.
  *
- * WHAT COUNTS AS A GATE'S NAME: the same rule, by binding. `withWebhookSecret`, `auth.updateProfile`,
- * `isSimulated` count only when the name (the head of a dotted one) is a value import, from any module; a
- * local look-alike (`const isSimulated = true`) is not the gate.
+ * WHAT COUNTS AS A GATE'S NAME: the same rule, by binding (`gateName`). `withWebhookSecret`, `auth.updateProfile`,
+ * `isSimulated` count only when the name (the head of a dotted one) is a value import kept under the name it is
+ * exported by, from any module; a namespace member reads under its own name. A local look-alike
+ * (`const isSimulated = true`) or an alias (`import { identity as withWebhookSecret }`) is not the gate.
  *
  * A handler the module cannot resolve at all (a destructured export, a `let`, a reassigned function, an
  * unresolvable re-export, a file that does not parse, a module that is not an ES module) is REFUSED with
@@ -106,11 +107,11 @@ export type Gate =
 export interface HandlerFacts {
     /** A call to `authorize` imported from one of the scan's authorize modules is on the handler's path. */
     reachesAuthorize: boolean
-    /** Dotted callee of the call the handler IS (`export const POST = withX(…)` → `withX`), if imported; else null. */
+    /** Gate name (`gateName`) of the call the handler IS (`export const POST = withX(…)` → `withX`), or null. */
     wrappedBy: string | null
-    /** Dotted callee of every call on the handler's path whose head is a value import (`auth.updateProfile`). */
+    /** Gate name (`gateName`) of every call on the handler's path that has one (`auth.updateProfile`). */
     calls: ReadonlySet<string>
-    /** The handler's first statement is the inert `if (!isSimulated)` gate, `isSimulated` imported. */
+    /** The handler opens with the inert `if (!isSimulated)` gate and no parameter runs code (`opensWithSimulated404`). */
     opensWithSimulated404: boolean
 }
 
