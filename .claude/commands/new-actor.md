@@ -24,6 +24,9 @@ hosting, `packages/keel/src/components/simulator/actor-runtime.ts`) is framework
    actor quietly runs someone else's behavior. The page itself genuinely is generic.
 3. **Org coupling**: if the actor impersonates a service bound to an org, that slug is app config
    (`analyzerOrgSlug` is the precedent) and must match a `packages/seed` org.
+   Over `/api/service/*` it is a MACHINE actor (`abilityActorFromService`, passed to handlers as
+   `ctx.actor`): a mutating service route calls `authorize(actor, …)`, and the only framework grant is
+   Job read/update in its own org. Anything else it needs is a line in `appMachineAbilityRules`.
 4. **Static twin**: the in-memory driver shapes are framework code
    (`packages/keel/src/demo-static/actor-drivers.ts`) — an actor over the jobs subsystem needs no new
    twin, just a scoped factory call and a tick wired into `actorSlots` in `apps/showcase/src/demo-static/app.tsx`,

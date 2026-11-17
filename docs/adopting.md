@@ -324,7 +324,7 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 `packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 37 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 38 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
@@ -346,8 +346,8 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 
 | Seam module                                   | You register                                                                                       | Empty looks like                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `abilities.ts`                                | your subject types + authorization rules + staff org                                               | (starter registers one)                    |
-| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001                                             | (starter registers one)                    |
+| `abilities.ts`                                | subject types + staff org + credential kinds + person and machine (`appMachineAbilityRules`) rules | (starter registers one)                    |
+| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations named `NNNN_name`, four digits, numbered ≥ 1001             | (starter registers one)                    |
 | `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
 | `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
 | `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
@@ -428,6 +428,24 @@ upstream improvements reach you through `git merge`, not `pnpm update`.
 [ADR-0013](adr/0013-upstream-updates-fork-and-merge.md) records why, and the exact
 `git remote add upstream` workflow — including which directories reliably conflict and what would make
 publishing to a registry worth the versioning cost.
+
+### When an update changes what your seam must say
+
+A merge from keel can make your app stop compiling, or fail the authorize scan, until you add a line. These come from the change that
+let non-session callers reach `authorize()` (ADR-0012, 2026-11-16 addendum):
+
+- `apps/<app>/src/app-config/abilities.ts` must export `AppPersonCredentialKind` and
+  `AppMachineCredentialKind` (types), plus `appMachineAbilityRules` and `nonSessionAdministration`
+  (values). `never`, `return false` and `{}` opt out.
+- An `AbilityActor` literal whose `manageAll` may be true must state its session:
+  `credential: { kind: 'session', id: null }`. Without it the literal no longer compiles, because only a
+  stated session wields `manageAll`. A literal with `manageAll: false` needs nothing, but without a
+  session credential it can no longer take a session-only action (inviting a member, changing the org,
+  managing a webhook endpoint, accepting terms).
+- `abilityActorFromCredential` takes an `OrgIdentity`, and only `orgIdentityForSlug` (`keel/db/org-lookup`)
+  makes one: a hand-paired `{ id, slug }` no longer compiles.
+- A mutating route under `api/service/` must call `authorize(...)` with the actor `withServiceCaller`
+  passes. The scan's message says how.
 
 ## Keeping the docs honest
 

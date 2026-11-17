@@ -1,4 +1,4 @@
-import type { AbilityAction, AbilityActor, AbilitySubject } from 'keel/core/abilities'
+import type { AbilityAction, AbilityActor, AbilitySubject, NonSessionAdministration } from 'keel/core/abilities'
 import { canManageOrg } from 'keel/core/roles'
 
 /**
@@ -27,6 +27,14 @@ export interface AppSubjectFields {
     /** Escalation — the team it was handed to. `null`/absent never matches a side. */
     responderOrgId?: string | null
 }
+
+/**
+ * The credential kinds, beyond keel's own, by which a PERSON or a MACHINE can reach the desk (composed
+ * into keel/core/abilities' `PersonCredentialKind` / `MachineCredentialKind`). The desk adds none: its
+ * people arrive by session or by inbound email, and its counterparties by keel's service keys.
+ */
+export type AppPersonCredentialKind = never
+export type AppMachineCredentialKind = never
 
 /**
  * The designated staff/operator org slug. ACTIVE membership in this org — acting AS it —
@@ -108,3 +116,20 @@ export function appAbilityRules(
             return false
     }
 }
+
+/**
+ * The app's rules for MACHINE actors (keel/core/abilities `MachineActor`). The desk grants machines
+ * nothing of its own: its one machine caller, a counterparty over /api/service/*, only ever touches
+ * framework Jobs, which the framework's own machine table governs. So every machine is denied every
+ * ticket, escalation and attachment, and this function is the off switch.
+ */
+export function appMachineAbilityRules(): boolean {
+    return false
+}
+
+/**
+ * The framework's session-only subjects (inviting members, changing the org, managing webhook endpoints,
+ * accepting terms) take a browser SESSION. Here an app may widen one of them to a non-session person
+ * credential (never an inbound email). The desk widens none: nobody administers a team by email.
+ */
+export const nonSessionAdministration: NonSessionAdministration = {}

@@ -24,6 +24,8 @@ House shape for a slice:
 3. **Authorization**: register your subject types + rules on the seam — add to `AppSubjectType`,
    `appAbilityRules` (and any two-sided fields to `AppSubjectFields`) in `apps/showcase/src/app-config/abilities.ts`,
    following the `Note`/`Escalation`/`Artifact` cases. Deny-by-default is framework-owned; you only add rules.
+   A route a MACHINE calls passes its machine actor (`authorize(actor, action, subject)`), and the grant goes
+   in `appMachineAbilityRules`, never in an exemption.
 4. **New table**: add its interface to `AppTables` in `apps/showcase/src/app-config/db/schema.ts` (the framework `DB`
    type `extends AppTables`, so `import type { DB }` keeps working), and a migration numbered ≥1001 under
    `apps/showcase/src/app-config/db/migrations/` registered in that dir's `index.ts`. Copy the RLS pattern from

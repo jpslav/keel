@@ -10,6 +10,8 @@ export const SERVICE_JWT_AUDIENCE = `${APP_SLUG}-service`
 /** The verified caller behind an M2M request: which org (hence tenant) the signed token proves. */
 export interface ServiceIdentity {
     kind: 'org-service'
+    /** The `service_keys` row that verified this call — which key acted, recorded as its credential id. */
+    keyId: string
     tenantId: string
     tenantSlug: string
     orgId: string
@@ -56,6 +58,7 @@ export async function verifyServiceCaller(db: DbPort, request: Request): Promise
             })
             return {
                 kind: 'org-service',
+                keyId: key.keyId,
                 tenantId: key.tenantId,
                 tenantSlug: key.tenantSlug,
                 orgId: key.orgId,

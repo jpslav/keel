@@ -285,6 +285,34 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     }
     expect(auditWriteRejected).toBe(true)
 
+    // (a) the credential columns (0014) ride the same grant: app_user, in its own tenant, INSERTs a row
+    // naming the credential that acted and reads it back. Table-level grants cover columns added later,
+    // so the trail gained columns without gaining a privilege.
+    await runWithTenant(db, alphaTenantId, (trx) =>
+        trx
+            .insertInto('audit_events')
+            .values({
+                tenant_id: alphaTenantId,
+                org_id: alphaOrgId,
+                actor_user_id: 'proof-user',
+                action: 'membership.invited',
+                subject_type: 'Membership',
+                subject_id: 'membership-by-token',
+                credential_kind: 'proof-token',
+                credential_id: 'proof-token-1',
+            })
+            .execute(),
+    )
+    const byToken = await runWithTenant(db, alphaTenantId, (trx) =>
+        trx
+            .selectFrom('audit_events')
+            .select(['credential_kind', 'credential_id'])
+            .where('subject_id', '=', 'membership-by-token')
+            .executeTakeFirstOrThrow(),
+    )
+    expect(byToken.credential_kind).toBe('proof-token')
+    expect(byToken.credential_id).toBe('proof-token-1')
+
     // (b) append-only: as app_user (with tenant context set) an UPDATE FAILS at the privilege layer —
     // the table's only grants are SELECT, INSERT.
     let auditUpdateRejected = false
