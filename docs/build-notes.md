@@ -1407,3 +1407,29 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   the registry's dynamic imports, keel's registry and pglite: 54 MB for the starter. `check:demo-size` is
   what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
   registries).
+
+## Lint fence gaps (2026-11-16, `fix/lint-fence-gaps`)
+
+- **The merge trap struck a third time, and re-listing was the mechanism that failed.** Every
+  `no-restricted-syntax` block for routes, pages and components re-listed the getDb selectors by hand, and
+  the last of them, the one that added the a11y-attribute ban, listed two of the three. ESLint keeps only the
+  last block's list for a file, so `db['getDb']()` passed lint in a route handler while
+  `getDbComputedSelector` sat unused in the blocks above. Re-listing works until one block lists PART of
+  a set. Selectors that implement one rule now travel as one array (`getDbSelectors`,
+  `runModeEnvSelectors`), so a block can drop the whole rule but not one form of it.
+- **Reading the config does not find these; printing it does.** The a11y block's list looked complete. A
+  script that calls `ESLint#calculateConfigForFile` for every zone × extension and prints the effective
+  `no-restricted-syntax` and `no-restricted-imports` entries found this gap and the others in one pass:
+  keel/core's block had dropped the font ban (its own `next/*` group still caught the import, under the wrong
+  message), and a story beside an app's fake had dropped the dynamic `real/` ban along with the a11y one.
+- **A fence that names a directory must name every extension ESLint lints there.** Every fence glob said
+  `*.{ts,tsx}`, so a `.mjs` file in `apps/*/src` or `packages/keel/src` could import a vendor SDK, read
+  `process.env` or take the raw db handle with a green `pnpm lint`. ESLint lints eight extensions here,
+  not six: typescript-eslint's recommended config adds `.mts` and `.cts`, which `keel/public-surface` had
+  missed too. The globs now take their extensions from one constant (`SRC_EXT`). Carve-outs do NOT: a test
+  carve-out names what vitest runs (`*.test.{ts,tsx}`), a story carve-out what Ladle loads, and
+  `next.config.*` the four names Next reads, so a `.test.mjs` or a `next.config.cjs` stays fenced.
+- **`.cjs` is linted as CommonJS**, where `import` does not parse, and `react/jsx-no-literals` can only be
+  configured for a file the block that registers the react plugin also matches. Widening one fence's glob
+  can therefore mean widening a plugin block's too; the lint gate fails with a config error, not a pass,
+  when it doesn't.

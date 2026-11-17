@@ -46,8 +46,13 @@ Unit tests (`*.test.ts`) may read `process.env`, as they already may everywhere 
 `process.env` ban also covers `apps/<app>/config/`, so `params.ts` records values and names and never
 reads the environment. The vendor ban also covers the rest of `apps/<app>/` (`apps/<app>/config/`,
 `apps/<app>/tests/`, `apps/<app>/scripts/`), minus the two carve-outs `eslint.config.mjs` names:
-`apps/<app>/next.config.ts` and `apps/<app>/tests/contract/`. The registry and fakes also may not import
-keel's own published real adapters (`keel/adapters/real/*`) statically.
+`apps/<app>/next.config.*` (the `.ts`, `.mts`, `.js` and `.mjs` names Next loads it from) and
+`apps/<app>/tests/contract/`. The registry and fakes also may not import keel's own published real adapters
+(`keel/adapters/real/*`) statically.
+
+Every row holds whatever the file's extension: `.mjs`, `.cjs`, `.js`, `.jsx`, `.mts` and `.cts` are fenced
+the same as `.ts` and `.tsx`. The registry is `index.ts` by name, so an `index.mjs` beside it is one more
+module that may not load `real/`.
 
 The split inside `adapters/` is the point. The registry and the fake are what keep `pnpm dev` hermetic,
 so they get the same bans as the rest of your app, and a stricter one: the registry reaches `real/` only
@@ -195,7 +200,8 @@ The starter is the minimum an adopter keeps, and a port nobody calls is dead cod
 have to delete. A real adapter would also need a vendor dependency added to one of keel's apps purely
 for demonstration. The shape is not new: keel's own seven ports are the worked example of port, fake,
 real adapter and registry (`packages/keel/src/adapters/index.ts`). What is new is the directory and its
-fence, and `tests/lint/app-owned-adapters.test.ts` proves the fence.
+fence, and `tests/lint/app-owned-adapters.test.ts` proves the fence (`tests/lint/extensions.test.ts` for
+the extensions other than `.ts` and `.tsx`).
 
 ## Limits
 
