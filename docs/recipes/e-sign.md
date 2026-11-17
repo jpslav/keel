@@ -146,7 +146,8 @@ tenant-level; a per-project SOW is org-level) — the same scoping decision `001
 
 ## 4. Cutover rows
 
-Add a `zohoSign` (or `docusign`) block to `apps/showcase/config/params.ts`, following the existing shape (plain
+Add a `zohoSign` (or `docusign`) block to `apps/<app>/config/params.ts` in every app that has one (the keys must match across apps:
+`tests/tooling/app-scaffold.test.ts`), following the existing shape (plain
 values for non-secret identifiers, `*Name` for the _name_ of a secret — never a secret value):
 
 ```ts
@@ -162,9 +163,9 @@ Cutover-checklist row template (`docs/cutover-checklist.md`), matching that tabl
 (`Status | Item | What it is | What unlocks it | Deferred verification` — copy the `email-outbound`/`twilio-sms`
 row format exactly):
 
-| Status | Item             | What it is                                                                                                  | What unlocks it                | Deferred verification                                                                                                                                                                                                                   |
-| ------ | ---------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⬜     | `esign-provider` | Zoho Sign / DocuSign account + API key + webhook signing secret (names in `apps/showcase/config/params.ts`) | you provision a vendor account | Real envelope creation through `packages/keel/src/adapters/real/esign.ts`; a signing ceremony completed by a real signer; the inbound `POST /api/webhooks/esign` verifies and pulls the signed PDF into an `attachments` row end-to-end |
+| Status | Item             | What it is                                                                                               | What unlocks it                | Deferred verification                                                                                                                                                                                                                   |
+| ------ | ---------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⬜     | `esign-provider` | Zoho Sign / DocuSign account + API key + webhook signing secret (names in `apps/<app>/config/params.ts`) | you provision a vendor account | Real envelope creation through `packages/keel/src/adapters/real/esign.ts`; a signing ceremony completed by a real signer; the inbound `POST /api/webhooks/esign` verifies and pulls the signed PDF into an `attachments` row end-to-end |
 
 The webhook secret rides the existing verified-inbound seam; no new secret _class_ — it's the
 Mailgun/webhook shared-secret pattern with a different value.

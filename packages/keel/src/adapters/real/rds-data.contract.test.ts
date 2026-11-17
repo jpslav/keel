@@ -1,10 +1,8 @@
 import { CommitTransactionCommand, ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
-import EmbeddedPostgres from 'embedded-postgres'
 import { AbortedTransactionError, sql, type Kysely } from 'kysely'
 import { Migrator } from 'kysely/migration'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
-import { portFor } from '../../../../../scripts/ports.mjs'
-import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { startContractServer, type ContractServer } from '../../../../../tests/support/contract-postgres'
 import { runOwnerPass, type Login } from '../../db/owner-pass'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DB } from '../../db/schema'
@@ -30,46 +28,24 @@ const LOCK_DATABASE = 'keel_data_api_lock'
 const RESOURCE_ARN = 'arn:aws:rds:us-east-1:000000000000:cluster:emulated'
 const SECRET_ARN = 'arn:aws:secretsmanager:us-east-1:000000000000:secret:emulated'
 
-let embedded: InstanceType<typeof EmbeddedPostgres> | null = null
+let server: ContractServer
 let emulator: RdsDataEmulator
 let dataApi: DbPort
 let viaPg: DbPort
 let migrationCalls: EmulatedCall[] = []
 let databaseUrl: (name: string) => string
-/** The database the server URL names (`postgres` unless CONTRACT_DATABASE_URL says otherwise). */
-let maintenanceDatabase: string
 
 beforeAll(async () => {
-    let serverUrl = process.env.CONTRACT_DATABASE_URL
-    if (!serverUrl) {
-        const port = portFor('contractPg')
-        embedded = new EmbeddedPostgres({
-            databaseDir: makeTestTmpDir('keel-data-api-pg-'),
-            user: 'postgres',
-            password: 'postgres',
-            port,
-            persistent: false,
-        })
-        await embedded.initialise()
-        await embedded.start()
-        serverUrl = `postgres://postgres:postgres@localhost:${port}/postgres`
-    }
-
-    const server = createRealDb(serverUrl).getDb()
-    try {
-        // The lock database must start empty every run (a reused live server would otherwise hand it over
-        // already migrated, and the race below would prove nothing).
-        await sql`DROP DATABASE IF EXISTS ${sql.id(LOCK_DATABASE)}`.execute(server)
-        await sql`CREATE DATABASE ${sql.id(LOCK_DATABASE)}`.execute(server)
-        await sql`CREATE DATABASE ${sql.id(DATABASE)}`.execute(server)
-    } catch (error) {
-        if (!/already exists/.test(String(error))) throw error
-    } finally {
-        await server.destroy()
-    }
+    // CONTRACT_DATABASE_URL's server in CI, otherwise an embedded-postgres of its own
+    // (tests/support/contract-postgres.ts, which every contract suite shares).
+    server = await startContractServer('keel-data-api')
+    const serverUrl = server.url
+    // The lock database must start empty every run (a reused live server would otherwise hand it over
+    // already migrated, and the race below would prove nothing).
+    await server.recreateDatabase(LOCK_DATABASE)
+    await server.createDatabase(DATABASE)
 
     const base = serverUrl
-    maintenanceDatabase = decodeURIComponent(new URL(serverUrl).pathname.slice(1)) || 'postgres'
     databaseUrl = (name: string) => {
         const url = new URL(base)
         url.pathname = `/${name}`
@@ -92,7 +68,7 @@ afterAll(async () => {
     await dataApi?.getDb().destroy()
     await viaPg?.getDb().destroy()
     await emulator?.close()
-    await embedded?.stop()
+    await server?.stop()
 })
 
 const db = (): Kysely<DB> => dataApi.getDb()
@@ -146,8 +122,7 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         // to an emulator logged in as that login: on Aurora the secret IS the login. Only `admin` is plain
         // `pg`: it creates the owner, grants it the creator's membership where `app_user` already exists, and
         // tears everything down. None of that is what is being proven.
-        const server = new URL(databaseUrl(maintenanceDatabase))
-        const admin = createRealDb(server.toString()).getDb()
+        const admin = createRealDb(databaseUrl(server.maintenanceDatabase)).getDb()
         const opened = new Map<Kysely<DB>, { port: DbPort; emulator: RdsDataEmulator; login: Login }>()
         const closing: Promise<void>[] = []
         const connect = (login: Login): Kysely<DB> => {
@@ -171,11 +146,8 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             await runOwnerPass(
                 {
                     admin,
-                    superuser: {
-                        user: decodeURIComponent(server.username),
-                        password: decodeURIComponent(server.password),
-                    },
-                    maintenanceDatabase,
+                    superuser: server.superuser,
+                    maintenanceDatabase: server.maintenanceDatabase,
                     connect,
                     migrate: async (ownerDb) => {
                         const { port, emulator: asOwner, login } = opened.get(ownerDb)!

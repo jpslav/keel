@@ -201,7 +201,7 @@ deterministic, and we control them. One real-engine contract suite in CI keeps t
 every developer and every agent. Determinism also makes tests trustworthy.
 
 **Tradeoff.** Fakes can drift from real behavior — mitigated by running the _same_ suite against the real
-engine. Here, `pnpm test:contract` runs the identical row-level-security proofs on real Postgres (embedded
+engine. Here, `pnpm test:contract` runs the identical row-level-security proofs on real Postgres, for every app, each in a database of its own (embedded
 binaries locally, a service container in CI); if the fake ever drifts, one of the two runs breaks. keel's
 own fixture runs there too, in a database of its own, which is how a driver-level difference between the
 engines (a `date` column read back as a different value on each) is caught the same way.

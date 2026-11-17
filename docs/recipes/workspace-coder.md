@@ -132,8 +132,8 @@ lifecycle `ready` AND, if you gate on one, the specific app reporting `healthy` 
 produces more than one agent is a template bug; throw rather than guess.
 
 **Config and cutover.** The Coder deployment URL, the template name (and version, if pinned), and the
-owner login type are non-secret parameters: they go in `apps/showcase/config/params.ts` (your app's
-equivalent), per CLAUDE.md, each carrying a `// cutover: workspace-backend` comment. The admin token is a
+owner login type are non-secret parameters: they go in `apps/<app>/config/params.ts` (every app's, with the
+same keys: `tests/tooling/app-scaffold.test.ts`), per CLAUDE.md, each carrying a `// cutover: workspace-backend` comment. The admin token is a
 secret: params holds only its _name_ (`adminTokenName: 'PLACEHOLDER_CODER_TOKEN_NAME'`), the value comes
 from your secret store into the environment, and the adapter is the only module that reads it. Register
 the env vars in `packages/keel/src/adapters/real/index.ts`'s `REQUIRED_ENV` only if every deployment of
@@ -220,7 +220,7 @@ username throws the typed conflict; `mintAccess` returns a token whose `expiresA
 
 - **Fake half** — a colocated unit test in `packages/keel/src/adapters/fake/`, in the `keel` vitest
   project (`vitest.config.ts`), no credentials, runs in `pnpm verify`.
-- **Real half** — a test beside the existing contract suite in `apps/showcase/tests/contract/`, run by
+- **Real half** — a test beside your app's contract suite in `apps/<app>/tests/contract/`, run by
   `pnpm test:contract`, which `pnpm verify` does not run. Skip it unless the config is present
   (`describe.skipIf(!process.env.<backend URL>)`) so CI stays green without credentials, and have it
   create and delete its own uniquely-named throwaway owner and clean up even on failure.
@@ -230,12 +230,12 @@ username throws the typed conflict; `mintAccess` returns a token whose `expiresA
 ## 8. Cutover rows
 
 Add to `docs/cutover-checklist.md`, copying the existing rows' format; the `workspace-backend` comment in
-`apps/showcase/config/params.ts` points here:
+`apps/<app>/config/params.ts` points here:
 
-| Status | Item                | What it is                                                                                          | What unlocks it                                 | Deferred verification                                                                                                                                                                                    |
-| ------ | ------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⬜     | `workspace-backend` | Coder deployment URL, admin token (name in `apps/showcase/config/params.ts`), template name/version | you provision a Coder deployment and a template | A real `ensure` → `running` with the readiness gates observed; `mintAccess` token accepted for its owner's workspace and rejected after expiry; the shared contract suite green against the real adapter |
-| ⬜     | `workspace-erasure` | Account deletion removes the owner and every workspace they own (only if you built that operation)  | the row above, plus a throwaway owner to delete | Delete sequence run live: workspaces deleted and awaited before the user; 410 vs 404 observed on a finished delete; the user delete succeeds on the first try, not by retry                              |
+| Status | Item                | What it is                                                                                         | What unlocks it                                 | Deferred verification                                                                                                                                                                                    |
+| ------ | ------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⬜     | `workspace-backend` | Coder deployment URL, admin token (name in `apps/<app>/config/params.ts`), template name/version   | you provision a Coder deployment and a template | A real `ensure` → `running` with the readiness gates observed; `mintAccess` token accepted for its owner's workspace and rejected after expiry; the shared contract suite green against the real adapter |
+| ⬜     | `workspace-erasure` | Account deletion removes the owner and every workspace they own (only if you built that operation) | the row above, plus a throwaway owner to delete | Delete sequence run live: workspaces deleted and awaited before the user; 410 vs 404 observed on a finished delete; the user delete succeeds on the first try, not by retry                              |
 
 Secret values never enter the repo — only the secret-store entry name does, as with `mailgun.apiKeyName`.
 Until both rows close, the real adapter is authored but unverified and should carry the

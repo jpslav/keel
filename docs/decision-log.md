@@ -2519,3 +2519,72 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
   the handler again. So the catch stays, and the cause says who threw.
 - **No SQL CHECK.** jsonb normalizes numbers and whitespace, so a SQL byte bound and the writer's would
   measure different texts.
+
+## The starter has a contract suite of its own, and the suite is generic (2026-11-17, `starter-contract-suite`)
+
+ADR-0014 step P11. `pnpm test:contract` ran the RLS proofs on real Postgres for ONE app, named by a
+`CONTRACT_APP` literal in `vitest.contract.config.ts`, and `pnpm init-app --eject-showcase` copied the
+showcase's suite and `config/params.ts` into the starter to keep that literal pointing at something.
+`apps/starter` now has its own suite, its own database and its own `config/params.ts`, and the command runs
+every app plus keel's fixture, each in a database of its own.
+
+- **One suite, written once, in `tests/support`.** `contract-suite.ts` is `defineContractSuite({ database })`:
+  a non-superuser owner pass, the same again where `app_user` already exists, then the full proof suite as a
+  superuser. It names no app and no table. The two apps' `tests/contract/rls-contract.test.ts` files are the
+  same four lines of code, and the conformance kit (P5) takes the suite over as it is. It lives at the repo's
+  `tests/support`, not in `keel/testing`, because P5 is where `keel/testing` is designed; until then it is
+  the one place both apps and keel's fixture already reach. The server helper (`contract-postgres.ts`) holds
+  the "embedded-postgres, or CI's service container" choice that `db.contract.test.ts` and
+  `rds-data.contract.test.ts` each carried their own copy of; both now call it.
+- **`keel/db/owner-pass` is published.** The suite imports it, so it needed an `exports` line, and the line is
+  the only way to widen the map (the count went up by one, to 132 once main's own addition merged, and the internal-module count from 46 to 45,
+  both pinned in `public-surface.test.ts` and read from `CLAUDE.md` and `docs/adopting.md`).
+- **Discovery, not a literal.** `vitest.contract.config.ts` builds one project per `apps/*` directory that has
+  a `tests/contract` (`contractApps`), plus keel's fixture. `init-app` renames the app and the discovery
+  follows, so the config is no longer rewritten on eject. The database is named from the app's own slug
+  (`contractDatabaseName`: `acme-corp` becomes `acme_corp_contract`), for the same reason.
+- **Two migration sets cannot share a database.** They share 0001-0999 and differ from 1001, and Kysely
+  reports corrupted migrations when the second set runs over the first. Each suite is therefore one database
+  on a shared server: `showcase_contract`, `starter_contract`, `keel_contract`, `keel_data_api_contract`. On a
+  shared server `app_user` is cluster-wide, so a later suite finds it already present. That is the branch the
+  second owner-pass test exists to run, and it is what CI's service container does anyway.
+- **`pg`, `kysely` and `embedded-postgres` are the root's devDependencies.** The helper is at repo level, so
+  they must resolve from there, and the vendor-SDK fence covers `apps/*/**` and `packages/*/src/**` only. The
+  showcase's two devDependencies and keel's one moved up with them (knip flagged keel's as unused once the
+  fixture tests stopped importing it).
+- **`init-app` lost a step.** `rescueFromShowcase` (copy `tests/contract` and `config/params.ts`, add three
+  devDependencies) and both rewrites of the contract config are gone, and so is the `hasParams` branch in the
+  summary: the starter carries all of it before anyone ejects. 66 lines left the script and 7 were added.
+- **A gate that the next app cannot skip: `tests/tooling/app-scaffold.test.ts`.** An app with no `params.ts`,
+  whose params have different keys from another app's (both directions), that cites a cutover row the checklist
+  does not have, that has migrations and no `tests/contract` file calling `defineContractSuite(` (a mention in a
+  comment is not a call), whose contract database is another app's (two slugs can fold to one name, and on CI's
+  one server their migrations would meet) or starts with `keel_` (keel's own fixture databases), fails it.
+  `scaffoldProblems` is a pure function with synthetic negative tests, like `presetProblems`, and it names no
+  app, so it travels with `tests/` to an adopter. Params shape parity is the cheap half of "every app's
+  deployment parameters look alike", which the conformance kit will state properly.
+- **The helper's pools carry the real adapter's client error listener.** A connection the server ends is an
+  'error' event, and with no listener it is an uncaught exception that takes the whole run down instead of
+  failing the test using it. Probed both ways: with the listener a server-terminated idle connection and one
+  inside a transaction fail only that test; with it removed the run reports an unhandled 57P01.
+- **`apps/starter/config/params.ts` is the showcase's file, copied.** Same keys, same cutover rows. The
+  checklist rows are the contract; a second value set that drifts is what the shape-parity gate catches.
+
+Seen failing, then restored: removing `ENABLE/FORCE ROW LEVEL SECURITY` from the starter's `1001_items.ts`
+turned all three starter contract tests red ("public.items is reachable by app_user"); deleting the
+`database` section of the starter's params, citing a row that does not exist, and removing the file each
+turned the scaffold gate red; so did removing `apps/starter/tests/contract`, giving the starter the
+showcase's slug or a `keel-` one, and commenting out its `defineContractSuite(` call.
+
+Measured, `pnpm test:contract` with one embedded server per file: on main (3604aa1) 3 files and 40 tests, 6.7 s
+once warm (11 s on a cold first run); here 4 files and 45 tests, 9.4 to 10.5 s. The five extra tests are the
+starter's three and two in the showcase's file, which on main ran only the superuser proofs and now runs the
+owner pass twice as well. Against one shared server, as CI runs it (`CONTRACT_DATABASE_URL`): 3.8 s on main,
+5.4 to 6.1 s here, green twice running on the same live server. Covering every app costs about 3 s locally. The
+owner pass found nothing new in either app's migrations.
+
+Found by running the whole flow on an ejected copy (`init-app acme --eject-showcase`), not by reading: a
+scaffold-gate assertion that named `starter` (it fails once the app is renamed), the internal-module count in
+`docs/adopting.md`, and the unused devDependency. The adoption probe does not run `test:contract` (`pnpm
+verify` does not either), so the ejected suite is proven by hand here and by the gate's own
+"every app with migrations has a suite" check.

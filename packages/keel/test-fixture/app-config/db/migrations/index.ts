@@ -10,7 +10,7 @@ import * as m1003 from './1003_dockets_last_touched_at'
  *
  * This set is the fixture's, and it never meets a host app's: two 1001+ sets over one database make
  * Kysely report corrupted migrations. So on real Postgres it gets a database of its own
- * (`keel_contract`, keel/adapters/real/db.contract.test.ts) beside the contract app's, and runs the same
+ * (`keel_contract`, keel/adapters/real/db.contract.test.ts) beside each app's, and runs the same
  * composed proof runner there that it runs on pglite.
  */
 export const appMigrations: Record<string, Migration> = {

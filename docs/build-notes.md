@@ -1860,3 +1860,33 @@ the panel is the element that carries it.
       case still crashed it.
 - The Data API transport has no such pool: it speaks HTTPS through the SDK, and an SDK failure rejects
   the call that made it.
+
+## Every app runs its own contract suite, in its own database (2026-11-17, `starter-contract-suite`)
+
+- **A suite that names its app is a suite for one app.** `vitest.contract.config.ts` held a literal,
+  `CONTRACT_APP`, and `init-app` rewrote it and copied the showcase's suite into the starter to keep it true.
+  The suite is now `defineContractSuite({ database })` in `tests/support/contract-suite.ts`, the config
+  builds one project per `apps/*` that has a `tests/contract`, and nothing is copied or rewritten on eject.
+- **One database per migration set, on a shared server.** Two apps' migrations both start with 0001-0999 and
+  then differ, so the second `migrateToLatest` over the first's database reports corrupted migrations. The
+  names are `<slug>_contract`, `keel_contract` and `keel_data_api_contract`. `app_user` is a cluster role, so
+  every suite after the first finds it, which is the owner pass's "already exists" branch and the one CI's
+  service container takes.
+- **A test helper that imports `pg` has to live where the vendor fence is not.** The fence covers `apps/*/**`
+  (bar `apps/*/tests/contract/**`) and `packages/*/src/**`, so the shared helper sits at `tests/support`, and
+  `pg`, `kysely` and `embedded-postgres` are the ROOT's devDependencies: from that path they resolve from the
+  root, and an app that lists them itself is an app an `init-app` has to remember to give them to.
+- **Publishing a module moves counts in several places, and the unpinned ones drift.** Adding `./db/owner-pass`
+  to `exports` moved the published-subpath count in `CLAUDE.md` and the internal-module count in
+  `docs/adopting.md` (46 to 45), which `public-surface.test.ts` pins. Two more counts in `docs/adopting.md`
+  (the "lists the N subpaths" sentence and the knip paragraph's "N of keel's") nothing pins, and a doc review
+  found them stale after main published a subpath of its own. A run of the whole unit suite on the ejected copy
+  showed the pinned internal-module count.
+- **The ejected copy found three things the main tree could not.** An assertion that named `starter` (the
+  app's name is whatever `init-app` made it), the doc count above, and knip's unused-devDependency finding on
+  the package whose tests had stopped importing `embedded-postgres`. A gate or a test in `tests/` or
+  `packages/` must not name an app, and the way to know is to run it on a renamed one.
+- **`pnpm verify` does not run `test:contract`, and neither does the adoption probe.** What proves an
+  adopter's suite is the scaffold gate's "an app with migrations has a `tests/contract` file that calls
+  `defineContractSuite(`", and a hand run of `init-app` then `pnpm test:contract` on a scratch copy. If the
+  probe should run it, that is a CI change of its own (it needs the service container).

@@ -34,7 +34,8 @@ Follow `docs/recipes/app-owned-adapter.md`; it carries the sketches. In short, w
    `AUTHORED — CUTOVER (<row>)`. Install the SDK in `apps/<app>/package.json`, never keel's. Read
    configuration from `process.env` in `apps/<app>/src/adapters/real/index.ts` with a REQUIRED_ENV map that
    throws `CutoverPendingError` (`keel/ports/errors`); never read `APP_MODE`, `DEMO_MODE` or `E2E_BUILD`.
-   Record non-secret params and secret NAMES in `apps/<app>/config/params.ts`, and add the cutover row.
+   Record non-secret params and secret NAMES in `apps/<app>/config/params.ts` (the same keys in every app's: the
+   scaffold gate checks the shape), and add the cutover row.
 4. Write the registry, `apps/<app>/src/adapters/index.ts`: import `isSimulated` from `keel/adapters/index`,
    `await import('./real/index')` only when it is false, and export each port as `real?.x ?? fakeX`.
 5. Callers import the registry (`@/adapters`), never `@/adapters/real/*`. Make sure the vendor's package is

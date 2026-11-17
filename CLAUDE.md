@@ -43,7 +43,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   neither app's: **never reach for an app's slugs, tables or job kinds in a `packages/keel` test** —
   that regression is what the odd vocabulary exists to make obvious, and it is what used to leave
   `pnpm init-app --eject-showcase` with a red gate.
-- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 131 published subpaths
+- **keel's public surface is `packages/keel/package.json`'s `exports` map** — 132 published subpaths
   (its `exports` keys minus `.` and `./package.json`; count it, never remember it);
   the rest of the package is internal and reachable only by relative import inside it. Lint-enforced
   (`keel/public-surface`, which reads that map, so the map is the only list). Adding a module does NOT
@@ -68,8 +68,9 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
 - **No hard-coded UI strings** — all copy goes through next-intl. The catalog is SPLIT: framework
   namespaces in `packages/keel/src/i18n/messages/{en,es}.json`, app namespaces in
   `apps/*/messages/{en,es}.json`, deep-merged at every load site. Lint-enforced (`react/jsx-no-literals`).
-- **Deployment/service parameters exist only in `apps/showcase/config/params.ts`** (placeholders tracked in the cutover
-  checklist). Secret values never enter the repo.
+- **Deployment/service parameters exist only in `apps/<app>/config/params.ts`** — one file per app, the same keys in
+  each (`tests/tooling/app-scaffold.test.ts` fails a drift), placeholders tracked in the cutover checklist. Secret
+  values never enter the repo.
 - **`pnpm dev` must stay hermetic**: no docker, no credentials, no network. Don't add `next/font/google`,
   telemetry, or anything that phones home.
 
@@ -82,7 +83,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `pnpm exec playwright install chromium`.
 - `pnpm verify` does NOT run `test:contract`, jscpd, coverage, or gitleaks — CI runs those
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
-  same RLS proofs on real Postgres, for the contract app AND keel's fixture seam, each in its own
+  same RLS proofs on real Postgres, for EVERY app AND keel's fixture seam, each in its own
   database — keel's twice, once through the `pg` driver and once through the RDS Data API driver and its
   emulator, each also as a non-superuser owner, `packages/keel/src/db/owner-pass.ts`); after
   renumbering/renaming a migration, wipe local `.data` first.

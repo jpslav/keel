@@ -836,3 +836,7 @@ as text, never through `dangerouslySetInnerHTML` or a Markdown renderer.
 
 **What an adopter does.** Nothing to copy. 0016 runs on the next migrator run, and existing rows read NULL.
 To record a why, pass `detail` to `recordAuditEvent`.
+
+## Addendum (2026-11-17): every app has its own contract database
+
+The Consequences' "contract runner stays single-app", and the 2026-10-03 addendum's "one app plus the framework's own seam", no longer hold. `vitest.contract.config.ts` makes one project for every `apps/*` that has a `tests/contract` (`tests/support/contract-apps.ts`), plus keel's fixture. Each app's suite is `defineContractSuite` (`tests/support/contract-suite.ts`) over a database of its own, `<slug>_contract`, beside the fixture's two (`keel_contract`, `keel_data_api_contract`) on the one server. The starter carries its own suite and `config/params.ts`, so `pnpm init-app --eject-showcase` rescues nothing from the showcase. `.claude/future-tasks/resolved/contract-suite-single-app.md` is resolved (ADR-0014, step P11).
