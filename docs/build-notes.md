@@ -1633,7 +1633,7 @@ the panel is the element that carries it.
   `@/*` import could sit in keel's fixture. In the typescript-eslint this repo pins (8.72) its specifier is
   `node.source`; print the AST before trusting that shape on another version.
 
-## JSX in core, paths into apps/, and getDb as a string (2026-11-17, `fix/lint-core-jsx-app-paths-getdb-string`)
+## JSX in core, paths into apps/, and getDb as a string (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
 
 - **An import the source never names is invisible to every import rule.** With `"jsx": "react-jsx"`, JSX in
   `packages/keel/src/core` compiles to an import of `react/jsx-runtime`, and neither `no-restricted-imports` nor

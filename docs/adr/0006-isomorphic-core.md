@@ -45,7 +45,7 @@ app supplies only its own rows and cards (`apps/<app>/src/demo-static/app.tsx`).
 - `pnpm ladle` can render screens in isolation for the same reason the demo can: nothing in a screen
   depends on how it was routed to.
 
-## Addendum — 2026-11-17: the core ban holds outside declarations, and covers JSX
+## Addendum — 2026-11-16: the core ban holds outside declarations, and covers JSX
 
 "Lint-enforced by a `no-restricted-imports` block" covered import declarations only. `keel/no-dynamic-framework-import-in-core`
 now holds the same list against `import()`, `require()`, test loaders and a type-position `import('…')`, reading it

@@ -158,7 +158,18 @@ describe('getDb: what the selectors match', () => {
         ['a longer name', "export const name = 'getDbRaw'\n"],
         // a template with an expression could be anything
         ['a template with an expression', 'const x = 1\nexport const name = `getDb${x}`\n'],
+        // a key that DEFINES a member, quoted as the unquoted key would not be reported
+        ['a quoted key in an interface', "export interface P {\n    'getDb'(): unknown\n}\n"],
+        ['a quoted key in a type literal', "export type P = { 'getDb': () => unknown }\n"],
+        ['a quoted key in an object literal', "export const fake = { 'getDb': () => null }\n"],
+        ['a quoted method in a class', "export class Fake {\n    'getDb'() {\n        return null\n    }\n}\n"],
     ])('%s is not the name as a string', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_STRING)).toBe(0)
+    })
+
+    // A route test that keeps the ban can still assert the handle is never taken.
+    it('a test may spy on it to prove the code under test never takes it', async () => {
+        const code = "import { vi } from 'vitest'\nexport const spy = (db: object) => vi.spyOn(db as never, 'getDb')\n"
+        expect(fired(await lint(`${APP}/src/app/api/kv/route.test.ts`, code), GET_DB_STRING)).toBe(0)
     })
 })

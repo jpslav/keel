@@ -128,10 +128,12 @@ const appCodePattern = {
 }
 // The same app code by PATH: `../../../apps/showcase/src/domain/tickets` from keel's fixture names the file the
 // app's `@/*` alias would, and passed both halves of the fence until this pattern existed. It matches an
-// `apps/<name>` segment anywhere in the specifier (relative, absolute, or bare): no keel directory and no
-// package keel imports is called `apps`, so a match is always a path into the repo's apps/.
+// `apps` path segment followed by a separator, anywhere in the specifier (relative, absolute or bare). A
+// separator is `/` or `\`: TypeScript resolves `../apps//showcase/…` and `..\apps\showcase\…` into apps/ as
+// well. No keel directory and no package keel imports is called `apps`, so a match is always a path into
+// the repo's apps/.
 const appPathPattern = {
-    regex: '(^|/)apps/[^/]+(/|$)',
+    regex: String.raw`(^|[\\/])apps[\\/]`,
     message:
         'Framework code (packages/keel) must reach app content only through the seam — a path into apps/ is the ' +
         "app's code under another name. Import from the @app-config/* alias instead (ADR-0012).",
@@ -194,15 +196,23 @@ const getDbDestructureSelector = {
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
 // The name as a STRING anywhere else: `Reflect.get(db, 'getDb')`, `Object.getOwnPropertyDescriptor(db,
-// 'getDb')`, a key held in a variable (`const k = 'getDb'; db[k]()`). Nothing in a zone file names it as a
-// string for any other reason, so the string itself is the finding. Left to the selectors above: a computed
-// member's key and a destructured key, which they already report (no double report). Left out: a TypeScript
-// type position (`Pick<DbPort, 'getDb'>`), which loads nothing.
+// 'getDb')`, a key held in a variable (`const k = 'getDb'; db[k]()`). Reaching the handle that way needs the
+// string, so the string is the finding. What is left out:
+//  - a computed member's key: the computed selector above reports it (no double report). A destructured key
+//    is reported by the destructure selector, and is left out with the rest of the keys below.
+//  - a key that DEFINES a member rather than reading one: a quoted key in an object literal, a class, or a
+//    type (`{ 'getDb': … }`, `'getDb'() {}`, `interface P { 'getDb'(): unknown }`), as the unquoted key is.
+//  - a TypeScript type position (`Pick<DbPort, 'getDb'>`), which loads nothing.
+//  - a test spying on it (`vi.spyOn(db, 'getDb')`), which is how a route test asserts the raw handle is never
+//    taken. The spy reads the property, but only in a test that keeps the ban, to prove the code under test
+//    does not.
 const getDbStringSelector = {
     selector:
         ':matches(Literal[value="getDb"], TemplateLiteral[expressions.length=0][quasis.0.value.cooked="getDb"])' +
-        ':not(MemberExpression[computed=true] > .property):not(ObjectPattern > Property > .key)' +
-        ':not(TSLiteralType > .literal)',
+        ':not(MemberExpression[computed=true] > .property)' +
+        ':not(:matches(Property, MethodDefinition, PropertyDefinition, TSPropertySignature, TSMethodSignature) > .key)' +
+        ':not(TSLiteralType > .literal)' +
+        ':not(CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name="spyOn"] > Literal)',
     message:
         "Naming getDb as a string (Reflect.get(db, 'getDb'), a key held in a variable) reaches the same raw handle — use " +
         'db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',

@@ -733,7 +733,7 @@ fences there. They match each group through the same `ignore` matcher `no-restri
 the two halves of a fence read a specifier the same way, and `tests/lint/framework-fence.test.ts` checks
 that specifier by specifier.
 
-## Addendum (2026-11-17): a path into `apps/` is app content too
+## Addendum (2026-11-16, later still): a path into `apps/` is app content too
 
 The fence banned the app's `@/*` alias and `@app/seed`, but `../../../apps/showcase/src/domain/tickets` from
 keel's fixture names the same file, and passed both halves of the fence. `appPathPattern` bans any specifier with

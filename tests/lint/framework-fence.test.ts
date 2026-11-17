@@ -23,8 +23,8 @@ import {
  * type-only escape the fixture's fence exists to stop: erased at runtime, resolved by the root tsc, and
  * broken only at `pnpm init-app --eject-showcase`.
  *
- * The new rules read the same groups through the same matcher as no-restricted-imports (eslint.config.mjs,
- * `matchesGroup`), and the parity table below holds them to it, specifier by specifier.
+ * The new rules read the same patterns through the same matchers as no-restricted-imports (eslint.config.mjs,
+ * `patternMatcher`), and the parity table below holds them to it, specifier by specifier.
  */
 const KEEL = [
     'packages/keel/src/server-lib/kv.ts',
@@ -129,6 +129,9 @@ describe('the two halves of each fence read the group the same way', () => {
         'apps/showcase/src/domain/tickets',
         // a regex pattern is case-insensitive too, as no-restricted-imports compiles it (`iu`)
         '../../../Apps/showcase/src/domain/tickets',
+        // separators TypeScript also resolves: a doubled slash, and backslashes
+        '../../../apps//showcase/src/domain/tickets',
+        '..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
         '../../mapps/x',
         '../apps-config/x',
     ]
@@ -140,8 +143,10 @@ describe('the two halves of each fence read the group the same way', () => {
 
     describe.each(halves)('%s', (_name, file, staticFence, dynamicFence) => {
         it.each(SPECIFIERS)('%s', async (specifier) => {
-            const declared = fired(await lint(file, `import x from '${specifier}'\nexport { x }\n`), staticFence)
-            const loaded = fired(await lint(file, `export const load = () => import('${specifier}')\n`), dynamicFence)
+            // JSON.stringify writes the specifier as source text, so a backslash in it survives into the value.
+            const at = JSON.stringify(specifier)
+            const declared = fired(await lint(file, `import x from ${at}\nexport { x }\n`), staticFence)
+            const loaded = fired(await lint(file, `export const load = () => import(${at})\n`), dynamicFence)
             expect(loaded, `static ${declared}, import() ${loaded}`).toBe(declared)
         })
     })
@@ -160,19 +165,24 @@ describe('the two halves of each fence read the group the same way', () => {
 // The same app code by PATH. `../../../apps/showcase/src/domain/tickets` from keel's fixture is the file the
 // app's `@/*` alias names, and passed both halves of the fence until appPathPattern existed.
 describe('a relative path into apps/ crosses the framework/app fence too', () => {
-    const intoApps = '../../../apps/showcase/src/domain/tickets'
+    // TypeScript resolves all three into apps/showcase/src/domain/tickets.ts.
+    const spellings = [
+        '../../../apps/showcase/src/domain/tickets',
+        '../../../apps//showcase/src/domain/tickets',
+        '..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
+    ]
 
-    it.each([...KEEL, FIXTURE, 'packages/keel/src/adapters/real/kv.ts'])(
-        '%s may not import it, in either half',
-        async (file) => {
-            const declared = `import type { Ticket } from '${intoApps}'\nexport type T = Ticket\n`
+    describe.each([...KEEL, FIXTURE])('%s', (file) => {
+        it.each(spellings)('may not import %s, in either half', async (intoApps) => {
+            const at = JSON.stringify(intoApps)
+            const declared = `import type { Ticket } from ${at}\nexport type T = Ticket\n`
             expect(fired(await lint(file, declared), APP_PATH_STATIC)).toBe(1)
-            const loaded = `export const load = () => import('${intoApps}')\n`
+            const loaded = `export const load = () => import(${at})\n`
             expect(fired(await lint(file, loaded), APP_PATH_DYNAMIC)).toBe(1)
-            const typed = `export type T = import('${intoApps}').Ticket\n`
+            const typed = `export type T = import(${at}).Ticket\n`
             expect(fired(await lint(file, typed), APP_PATH_DYNAMIC)).toBe(1)
-        },
-    )
+        })
+    })
 
     it('a directory merely named like it is not apps/', async () => {
         const code = "import { a } from '../mapps/x'\nimport { b } from './apps-config/y'\nexport { a, b }\n"

@@ -2148,7 +2148,7 @@ runbook and clicking fifteen things in the right order.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
 
-## JSX banned in keel/core; paths into apps/ fenced; getDb as a string banned (2026-11-17, `fix/lint-core-jsx-app-paths-getdb-string`)
+## JSX banned in keel/core; paths into apps/ fenced; getDb as a string banned (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
 
 - **JSX in keel/core is banned with a rule of its own, `keel/no-jsx-in-core`,** reported once per file. Banning
   `*.{tsx,jsx}` files under core was the alternative. It was rejected because the extension is not what imports
