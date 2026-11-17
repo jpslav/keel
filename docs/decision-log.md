@@ -2188,3 +2188,9 @@ The design is in ADR-0004's addendum of the same date.
   A reviewer proved that the second owner's grant fails. Skipping 0015 there would have migrated a database
   whose owner cannot serve a tenant query. So it stops, rolls back, and prints the GRANT. The contract
   suite runs the case end to end, executing the printed statement as written.
+- **A role name with capitals broke 0015, and the second-owner test found it.** `current_user::regrole`
+  parses its input as an unquoted identifier and folds it to lower case, so a role named `Keel_Second_…`
+  was "not found". 0015 now finds the role by its exact name in `pg_roles`, and the remedy it prints quotes
+  the name (`quote_ident`), so copying it runs as-is. The test's second owner has a mixed-case name to pin
+  both. Its remedy is run by an ADMIN-only creator, not the superuser, so the docs' "a role holding ADMIN"
+  is what is tested.

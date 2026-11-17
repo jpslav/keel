@@ -1648,3 +1648,7 @@ the panel is the element that carries it.
 - **Cluster-wide roles leak between test databases.** One contract pass creating `app_user` as the
   superuser changes what the next pass's owner can do. So the owner pass measures a creator's membership
   on the server it runs on, rather than trusting either the docs or the order the suites happen to run in.
+- **`name::regrole` folds case.** The `regrole` input function parses its argument as an identifier, so
+  `current_user::regrole` turns a role named `Keel_Second` into a lookup of `keel_second`. Compare
+  `pg_roles.rolname = current_user` instead, and quote any role name you print for someone to run
+  (`quote_ident`). A test role with a mixed-case name is what found it.
