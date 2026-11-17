@@ -402,6 +402,18 @@ describe('what the analyser refuses, and says why', () => {
             expect: { POST: /reassigns/ },
         },
         {
+            name: 'a handler a shorthand destructuring assigns',
+            files: {
+                'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\n;({ POST } = { POST: async () => {} })`,
+            },
+            expect: { POST: /reassigns/ },
+        },
+        {
+            name: 'a handler an array spread target assigns',
+            files: { 'route.ts': `${AUTHORIZE}${DECLS}export function PUT() { ${CALL} }\n;[...PUT] = []` },
+            expect: { PUT: /reassigns/ },
+        },
+        {
             name: 'a handler a for-of loop assigns',
             files: { 'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\nfor (POST of []) {}` },
             expect: { POST: /reassigns/ },
