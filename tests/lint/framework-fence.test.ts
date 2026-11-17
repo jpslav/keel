@@ -127,6 +127,8 @@ describe('the two halves of each fence read the group the same way', () => {
         '../../../apps/showcase/src/domain/tickets',
         '/home/x/keel/apps/starter/src/seed',
         'apps/showcase/src/domain/tickets',
+        // a regex pattern is case-insensitive too, as no-restricted-imports compiles it (`iu`)
+        '../../../Apps/showcase/src/domain/tickets',
         '../../mapps/x',
         '../apps-config/x',
     ]
