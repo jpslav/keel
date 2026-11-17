@@ -2482,3 +2482,40 @@ or as a package: the logic is in `packages/keel`, and the app holds thin wrapper
 - **Corrected figure:** the adopter guide said the starter imports 32 of keel's published subpaths; it was 33 before
   this change (every counting rule gives 33) and is 35 of 131 now from the starter's source, 37 counting its tests (the new cron route test imports
   `keel/adapters/fake/db` and `keel/adapters/fake/service-auth`), so from here on the figure depends on the rule: say which.
+
+## Audit rows carry a `detail` (2026-11-17, `feat/audit-detail`)
+
+The design is in ADR-0012's addendum of the same date. It was asked for by the pages console (item T-037).
+
+- **One nullable jsonb column, not typed columns.** A refusal's reason and a purge's count share nothing
+  but "why", and the next adopter's why will be different again. Typed columns would make every one a
+  framework migration.
+- **Checked in the writer, before any transaction opens.** The trail is append-only, so a bad detail could
+  never be taken back. A refused detail throws, and the audited mutation (already committed) answers 500,
+  the existing "committed write, failed audit" direction. The bound is 1024 bytes because codes and counts
+  take a few dozen, and a list that grows with the data then fails in a test rather than in a log nobody
+  can trim.
+- **A key denylist, matched on the key's last word or last two.** Matching the whole key on a substring
+  refused `tokensRemoved`, exactly the kind of count a purge records. Matching on the last word refuses what a
+  key NAMES (`accessToken`, `apiKey`) and passes what it describes (`tokenId`, `tokenCount`). A plural
+  is let through only as a number under a qualifying word (`revokedTokens: 3`): review showed a bare
+  `otps: 482913` is the code, not a count. A boolean or null passes under any key, since neither can
+  carry a secret. Personal data is caught only by value, as an email-address shape, because no key name
+  reliably marks it.
+- **The serialized text is bounded first, and checked second.** Review found two ways round a single
+  walk of the input: a `toJSON`, getter or Proxy could write what the walk never saw, and the patterns
+  read unbounded strings (60 KB took seconds with the email pattern). So the input is walked for JSON's
+  types (and a key shown in an error's path, at most 64 characters, is shape-checked), serialized once,
+  bounded, parsed, and the parsed value is walked with every rule and written.
+- **The error never repeats the value.** It names the rule and the path. The value may be the secret, and
+  the error goes to logs and to error tracking. A key in the path that is long or fails a shape check is
+  withheld as well, since a map keyed by email address is a plausible accident.
+- **Intake records a closed vocabulary, not the handler's reason.** Both reference handlers (the
+  showcase's and keel's test fixture's) write the sender's address into `reason`. Copying it would have put personal data into the one table nobody can
+  redact, in keel's own first use of the column. Letting a handler add a structured code of its own is a
+  possible follow-up; nothing asks for it yet.
+- **`intake-threw` is not `handler-threw`.** Intake's catch also covers its own recording after the
+  handler returned. Narrowing the catch would turn that failure into a 500, and Mailgun's retry would run
+  the handler again. So the catch stays, and the cause says who threw.
+- **No SQL CHECK.** jsonb normalizes numbers and whitespace, so a SQL byte bound and the writer's would
+  measure different texts.

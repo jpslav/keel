@@ -278,6 +278,15 @@ test('static shell: composing an inbound email to frontline+support opens a tick
     await page.getByTestId('simulator-tab-events').click()
     await expect(page.getByTestId('audit-list')).toContainText('inbound-email.received')
     await expect(page.getByTestId('audit-list')).toContainText('ticket.created')
+
+    // ...and the intake row's detail says why, in the same closed vocabulary the server records.
+    await page
+        .getByTestId('audit-list')
+        .locator('[data-testid^="audit-toggle-"]')
+        .filter({ hasText: 'inbound-email.received' })
+        .first()
+        .click()
+    await expect(page.getByTestId('audit-list').locator('pre')).toContainText('"outcome": "handled"')
 })
 
 test('static shell: a restricted member (Riley) gets a read-only TicketsCard (ability parity)', async ({ page }) => {
