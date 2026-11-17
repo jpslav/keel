@@ -139,7 +139,7 @@
         "./theme": "./src/theme.ts"
     },
     "dependencies": {
-        "@anthropic-ai/sdk": "^0.115.0",
+        "@anthropic-ai/sdk": "^1.8.0",
         "@aws-sdk/client-codebuild": "^3.1155.0",
         "@aws-sdk/client-rds-data": "^3.1169.0",
         "@aws-sdk/client-s3": "^3.1155.0",
