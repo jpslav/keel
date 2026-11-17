@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
+import process from 'node:process'
+import { pathToFileURL } from 'node:url'
 import js from '@eslint/js'
 import nextPlugin from '@next/eslint-plugin-next'
 import prettierConfig from 'eslint-config-prettier'
@@ -24,6 +26,60 @@ const SRC_EXT = '{ts,tsx,mts,cts,js,jsx,mjs,cjs}'
 const TEST_FILES = '**/*.test.{ts,tsx}'
 // Ladle's stories glob (apps/showcase/.ladle/config.mjs), extension for extension.
 const STORY_FILES = '**/*.stories.{js,jsx,ts,tsx}'
+
+// APP-OWNED LINT EXCEPTIONS. A fence that takes named exceptions should not make an adopter edit THIS file:
+// keel's own changes to it would then conflict at every upstream merge, and a path written here names the
+// app's directory, which `pnpm init-app` renames without rewriting this file (an exact `apps/<app>/…`
+// exception broke an adoption probe that way). So each app lists its own in `apps/<app>/lint-exceptions.mjs`,
+// by path relative to the app, and this file reads every app's when it loads. The file's default export maps
+// a rule id to entries of `{ file, reason }`; only the rules in APP_EXCEPTION_RULES take one.
+//
+// Each entry names ONE existing file under the app's src/ and says why. Anything else fails the config load,
+// naming the app's file and the entry: a glob, a directory, a path out of the app, a missing reason, a rule
+// that takes no exceptions, or a file that no longer exists. So an exception cannot quietly widen, and a stale
+// one cannot linger. The path is matched literally (a Next route's `[locale]` is not a glob).
+const APP_EXCEPTION_RULES = ['keel/no-raw-db-handle']
+const GLOB_SPECIALS = /[*?[\]{}()!+@]/g
+export async function loadAppLintExceptions(root) {
+    const ignoresByRule = Object.fromEntries(APP_EXCEPTION_RULES.map((rule) => [rule, []]))
+    const appsDir = join(root, 'apps')
+    if (!existsSync(appsDir)) return ignoresByRule
+    for (const app of readdirSync(appsDir).sort()) {
+        const source = join(appsDir, app, 'lint-exceptions.mjs')
+        if (!existsSync(source)) continue
+        const fail = (why) => {
+            throw new Error(`apps/${app}/lint-exceptions.mjs: ${why}`)
+        }
+        const { default: exceptions } = await import(pathToFileURL(source).href)
+        if (!exceptions || typeof exceptions !== 'object' || Array.isArray(exceptions)) {
+            fail('its default export must be an object mapping a rule id to its entries')
+        }
+        for (const [rule, entries] of Object.entries(exceptions)) {
+            if (!APP_EXCEPTION_RULES.includes(rule)) {
+                fail(`\`${rule}\` takes no app exceptions (only ${APP_EXCEPTION_RULES.join(', ')} does)`)
+            }
+            if (!Array.isArray(entries)) fail(`\`${rule}\` must map to an array of { file, reason } entries`)
+            for (const entry of entries) {
+                const { file, reason } = entry ?? {}
+                if (typeof file !== 'string' || file.trim() === '') fail(`an entry under \`${rule}\` names no file`)
+                if (/[*?]/.test(file)) fail(`\`${file}\` is a glob: an exception names one file`)
+                if (!file.startsWith('src/') || file.includes('\\') || file.split('/').includes('..')) {
+                    fail(`\`${file}\` must be a path under the app's src/, relative to the app, with / separators`)
+                }
+                const target = join(appsDir, app, file)
+                if (!existsSync(target) || !statSync(target).isFile()) {
+                    fail(`\`${file}\` names no file: an exception names one existing file, never a directory`)
+                }
+                if (typeof reason !== 'string' || reason.trim() === '') fail(`\`${file}\` needs a reason`)
+                ignoresByRule[rule].push(`apps/${app}/${file}`.replace(GLOB_SPECIALS, '\\$&'))
+            }
+        }
+    }
+    return ignoresByRule
+}
+// KEEL_LINT_EXCEPTIONS_ROOT is for tests/lint/app-lint-exceptions.test.ts alone: it points the loader at a
+// scratch tree, so the test can see an app's exception reach the rule without writing into this repo's apps/.
+const appLintExceptions = await loadAppLintExceptions(process.env.KEEL_LINT_EXCEPTIONS_ROOT ?? import.meta.dirname)
 
 // Shared by the boundary blocks below. NOTE: eslint rule config merges by OBJECT KEY — a later
 // block's 'no-restricted-imports' REPLACES an earlier one for matching files. Any block that
@@ -762,8 +818,8 @@ const eslintConfig = [
     //  - TESTS, except those of routes, screens and keel's fixture (the next block). A test resolving seed
     //    ids by slug to arrange a case is not a request path, and `fakeDb.getDb()` in an `ids()` helper is
     //    the pattern the domain/ and jobs/ suites use (apps/showcase/src/domain/db/tickets.test.ts).
-    // No production module in either app uses the raw client. One that must is added to `ignores` by exact
-    // path, with its reason, never by directory.
+    //  - a module an APP names in its own `apps/<app>/lint-exceptions.mjs`, one file at a time, with a reason
+    //    (see loadAppLintExceptions). No production module in either of keel's apps uses the raw client.
     //
     // Its own rule id (keel/no-raw-db-handle), not no-restricted-syntax selectors, so no later block can
     // replace it for a file: the merge trap dropped the computed form for every route that way once.
@@ -774,7 +830,7 @@ const eslintConfig = [
             `packages/keel/src/demo-static/**/*.${SRC_EXT}`,
             FIXTURE_FILES_GLOB,
         ],
-        ignores: [TEST_FILES],
+        ignores: [TEST_FILES, ...appLintExceptions['keel/no-raw-db-handle']],
         plugins: { keel: keelPlugin },
         rules: { 'keel/no-raw-db-handle': 'error' },
     },
