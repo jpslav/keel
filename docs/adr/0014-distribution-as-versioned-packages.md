@@ -514,8 +514,8 @@ app's own `config/params`.
 **What per-app infra costs**, all in the step that moves it (P9):
 
 - `pnpm-workspace.yaml` lists `apps/*/infra` instead of `infra`;
-- the lint, knip and Vitest globs treat `apps/*/infra` as a CDK project, not app source. The fences written
-  `apps/*/**` (the vendor ban's files, for one) would otherwise cover it, and a CDK app reads the environment;
+- the lint, knip and Vitest globs treat `apps/*/infra` as a CDK project, not app source. Globs written `apps/*/**` (the vendor ban's file list, for one) would otherwise apply
+  the app's rules to it;
 - `cdk.out` is ignored per app;
 - CI's synth step, #54's synth gate and `check-shapes` run once per app, and the reusable workflow's optional
   `synth` job takes the app's directory.
