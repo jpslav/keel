@@ -18,8 +18,10 @@ import { runWithTenant } from './with-tenant'
  * role "app_user"`. No gate could see it, because every gate was a superuser.
  *
  * How it is built, so another transport can run it. The pass only ever reaches the server through
- * `admin` and `connect`: the default contract run hands it pooled `pg` connections, and a Data API
- * transport (#46) could hand it its own. It does not yet.
+ * `admin` and `connect`, and migrates through `migrate`. The `pg` contract run (../adapters/real/db.contract.test.ts)
+ * hands it pooled `pg` connections. The Data API run (../adapters/real/rds-data.contract.test.ts) hands it
+ * Data API connections through the emulator, and its own migrate: the Data API runs every migration in
+ * one transaction that takes a transaction-scoped lock first (ADR-0002, addendum 2026-11-16).
  */
 
 /** A login to one database. */
@@ -38,6 +40,8 @@ export interface OwnerPassConnections {
     maintenanceDatabase: string
     /** Open a connection for a login, through whichever transport this pass is proving. */
     connect: (login: Login) => Kysely<DB>
+    /** Run the migrations on a connection `connect` opened, the way that transport does; `migrateToLatest` when omitted. */
+    migrate?: (db: Kysely<DB>) => Promise<void>
 }
 
 export async function runOwnerPass(
@@ -102,7 +106,7 @@ export async function runOwnerPass(
         expect(self.rows[0]!.rolsuper).toBe(false)
         expect(self.rows[0]!.rolbypassrls).toBe(false)
 
-        await migrateToLatest(ownerDb)
+        await (connections.migrate ?? migrateToLatest)(ownerDb)
 
         // The failure itself, named: inside withTenant the owner IS app_user, in the tenant it asked for.
         const [tenant] = await superDb

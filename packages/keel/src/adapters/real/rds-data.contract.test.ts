@@ -5,6 +5,7 @@ import { Migrator } from 'kysely/migration'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { runOwnerPass, type Login } from '../../db/owner-pass'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DB } from '../../db/schema'
 import type { DbPort } from '../../ports/db'
@@ -135,6 +136,64 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
 
     test('the full RLS proof suite passes through the Data API', async () => {
         await runRlsProofs(db(), expect)
+    })
+
+    test('a non-superuser owner migrates, and switches to app_user inside withTenant, through the Data API', async () => {
+        // The owner pass (../../db/owner-pass.ts), with every connection it opens made through the dialect,
+        // to an emulator logged in as that login: on Aurora the secret IS the login. Only `admin`, which
+        // creates the owner and tears everything down, is plain `pg`; it is not what is being proven. The
+        // owner's migrations go the Data API's way, in one transaction (createRealDataApiDb).
+        const server = new URL(databaseUrl('postgres'))
+        const admin = createRealDb(server.toString()).getDb()
+        const ports = new Map<Kysely<DB>, DbPort>()
+        const closing: Promise<void>[] = []
+        /** Every call each login's emulator received: the proof that the pass went through the dialect. */
+        const sent = new Map<string, EmulatedCall[]>()
+        const connect = (login: Login): Kysely<DB> => {
+            const url = new URL(databaseUrl(login.database))
+            url.username = encodeURIComponent(login.user)
+            url.password = encodeURIComponent(login.password)
+            const asLogin = new RdsDataEmulator(url.toString())
+            sent.set(`${login.user}@${login.database}`, asLogin.calls)
+            const port = createRealDataApiDb({
+                resourceArn: RESOURCE_ARN,
+                secretArn: SECRET_ARN,
+                database: login.database,
+                client: { send: (command) => asLogin.send(command), destroy: () => void closing.push(asLogin.close()) },
+            })
+            ports.set(port.getDb(), port)
+            return port.getDb()
+        }
+        try {
+            await runOwnerPass(
+                {
+                    admin,
+                    superuser: {
+                        user: decodeURIComponent(server.username),
+                        password: decodeURIComponent(server.password),
+                    },
+                    maintenanceDatabase: 'postgres',
+                    connect,
+                    migrate: (ownerDb) => ports.get(ownerDb)!.migrateToLatest(),
+                },
+                expect,
+            )
+        } finally {
+            await Promise.all(closing)
+            await admin.destroy()
+        }
+        // The owner's own database saw its migrations and its role switch arrive as Data API calls: the
+        // migration transaction, and withTenant's one-statement setup inside a transaction.
+        const owner = [...sent.entries()].find(([key]) => /^keel_owner_\d+@keel_owner_db_/.test(key))?.[1] ?? []
+        expect(owner.some((call) => call.operation === 'BeginTransaction')).toBe(true)
+        expect(
+            owner.some(
+                (call) =>
+                    call.operation === 'ExecuteStatement' &&
+                    call.transactionId !== undefined &&
+                    /set_config\('role', 'app_user', true\)/.test(call.sql ?? ''),
+            ),
+        ).toBe(true)
     })
 
     test('withTenant is ONE transaction: the role and the tenant reach every statement until Commit', async () => {
