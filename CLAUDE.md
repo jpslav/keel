@@ -26,8 +26,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   tables or vocabulary fails to build). A change to keel is not done until BOTH apps are green. The
   app extends the framework through the `@app-config/*` seam — register new subjects, jobs, event kinds, tables, and migrations there, and
   **never edit a framework base union or registry**. Lint-enforced: inside `packages/keel` the
-  fence bans the app's `@/*` alias and `@app/seed` outright, by `import()` and in a type `import('…')`
-  as well as in a declaration; the `@app-config/*` alias is the only channel back.
+  fence bans the app's `@/*` alias, `@app/seed` and any path into `apps/` outright, by `import()` and in a
+  type `import('…')` as well as in a declaration; the `@app-config/*` alias is the only channel back.
 - **keel's OWN tests run against keel's own app seam, never an app's** — `packages/keel/test-fixture`
   (outside `packages/keel/src` because that tree is what `keel/*` resolves to and what ships; the
   fixture is neither). Living outside that tree buys NO exemption: every gate names `test-fixture/**`
@@ -58,7 +58,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   tests), so the app's registry and fakes cannot read it; reading the run mode in an app's real adapters;
   a static import of an app's `adapters/real` anywhere in the app outside `real/` itself; and any import of
   `real/` from a fake. That the registry uses `isSimulated` is convention: lint cannot follow a value.
-- **`keel/core` is pure TypeScript** — no framework imports. Lint-enforced.
+- **`keel/core` is pure TypeScript** — no framework imports, and no JSX (it compiles to an import of
+  `react/jsx-runtime`). Lint-enforced.
 - **Screens are router-agnostic** — framework screens in `packages/keel/src/components`, app
   screens in `apps/*/src/components`; files under `apps/*/src/app` are thin wrappers. This keeps the `file://` static
   demo buildable — don't put logic in route files.

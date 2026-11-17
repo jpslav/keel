@@ -2147,3 +2147,18 @@ runbook and clicking fifteen things in the right order.
   its own change.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
+
+## JSX banned in keel/core; paths into apps/ fenced; getDb as a string banned (2026-11-17, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **JSX in keel/core is banned with a rule of its own, `keel/no-jsx-in-core`,** reported once per file. Banning
+  `*.{tsx,jsx}` files under core was the alternative. It was rejected because the extension is not what imports
+  React: the JSX is.
+- **A path into `apps/` is app content** (`appPathPattern`, a `regex` matching an `apps/<name>` segment). Listing
+  the two apps' directories was the alternative. It was rejected because an adopter renames and adds apps.
+  The pattern travels with `appCodePattern` as `appCodePatterns`.
+- **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing.
+  Strings the computed and destructure selectors already report are left to them, so each finding is reported
+  once.
+- **Two gaps stay documented and filed, not fixed:** a hand-written `.mjs` in the generated styles directory
+  (`.claude/future-tasks/generated-styles-mjs-unlinted.md`), and the vendor ban's two halves reading the list
+  differently (`.claude/future-tasks/vendor-ban-matcher-parity.md`).

@@ -1632,3 +1632,19 @@ the panel is the element that carries it.
   bans it. `type T = import('x').T` is a TSImportType that no import rule saw, which is how a type-only
   `@/*` import could sit in keel's fixture. In the typescript-eslint this repo pins (8.72) its specifier is
   `node.source`; print the AST before trusting that shape on another version.
+
+## JSX in core, paths into apps/, and getDb as a string (2026-11-17, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **An import the source never names is invisible to every import rule.** With `"jsx": "react-jsx"`, JSX in
+  `packages/keel/src/core` compiles to an import of `react/jsx-runtime`, and neither `no-restricted-imports` nor
+  a declarationless rule can see it. Ban the construct that causes the import (`keel/no-jsx-in-core`).
+- **A fence written as aliases leaves the path the alias stands for.** `@/*` was banned in keel, and
+  `../../../apps/showcase/src/…` named the same files. `appPathPattern` is a `regex` pattern, and
+  `no-restricted-imports` compiles a `regex` as `new RegExp(regex, 'iu')`. The declarationless half has to do
+  the same, flags included, or the two halves disagree on `Apps/`. `tests/lint/framework-fence.test.ts`'s
+  parity table pins it.
+- **Reflection needs the name as a string, so ban the string.** `Reflect.get(db, 'getDb')` and
+  `const k = 'getDb'; db[k]()` got past three selectors that matched how getDb is accessed. Nothing in a zone
+  file says `'getDb'` for another reason, so the string is the finding. It is left to the other selectors where
+  they already report (a computed key, a destructured key), and left out of TypeScript type positions, which
+  load nothing.
