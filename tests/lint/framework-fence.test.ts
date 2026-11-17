@@ -3,10 +3,13 @@ import {
     APP,
     APP_CODE_DYNAMIC,
     APP_CODE_STATIC,
+    APP_PATH_DYNAMIC,
+    APP_PATH_STATIC,
     CORE_DYNAMIC,
     CORE_STATIC,
     type Fence,
     fired,
+    JSX_IN_CORE,
     lint,
     VENDOR_DYNAMIC,
 } from './lint-text'
@@ -120,6 +123,12 @@ describe('the two halves of each fence read the group the same way', () => {
         '@app/seed/world',
         '@app/seedling',
         '@app-config/jobs',
+        // a path into apps/ is app content too (appPathPattern), in every spelling
+        '../../../apps/showcase/src/domain/tickets',
+        '/home/x/keel/apps/starter/src/seed',
+        'apps/showcase/src/domain/tickets',
+        '../../mapps/x',
+        '../apps-config/x',
     ]
     const halves: [string, string, Fence, Fence][] = [
         ['keel/core', 'packages/keel/src/core/kv.ts', CORE_STATIC, CORE_DYNAMIC],
@@ -143,6 +152,60 @@ describe('the two halves of each fence read the group the same way', () => {
             1,
         )
         expect(fired(await lint(FIXTURE, "export const l = () => import('@app/seedling')\n"), APP_CODE_DYNAMIC)).toBe(0)
+    })
+})
+
+// The same app code by PATH. `../../../apps/showcase/src/domain/tickets` from keel's fixture is the file the
+// app's `@/*` alias names, and passed both halves of the fence until appPathPattern existed.
+describe('a relative path into apps/ crosses the framework/app fence too', () => {
+    const intoApps = '../../../apps/showcase/src/domain/tickets'
+
+    it.each([...KEEL, FIXTURE, 'packages/keel/src/adapters/real/kv.ts'])(
+        '%s may not import it, in either half',
+        async (file) => {
+            const declared = `import type { Ticket } from '${intoApps}'\nexport type T = Ticket\n`
+            expect(fired(await lint(file, declared), APP_PATH_STATIC)).toBe(1)
+            const loaded = `export const load = () => import('${intoApps}')\n`
+            expect(fired(await lint(file, loaded), APP_PATH_DYNAMIC)).toBe(1)
+            const typed = `export type T = import('${intoApps}').Ticket\n`
+            expect(fired(await lint(file, typed), APP_PATH_DYNAMIC)).toBe(1)
+        },
+    )
+
+    it('a directory merely named like it is not apps/', async () => {
+        const code = "import { a } from '../mapps/x'\nimport { b } from './apps-config/y'\nexport { a, b }\n"
+        const findings = await lint('packages/keel/src/server-lib/kv.ts', code)
+        expect(fired(findings, APP_PATH_STATIC)).toBe(0)
+    })
+
+    it('an app reaching another app by path is not this fence’s business', async () => {
+        const code = "export const load = () => import('../../../../starter/src/seed')\n"
+        expect(fired(await lint(`${APP}/src/domain/kv.ts`, code), APP_PATH_DYNAMIC)).toBe(0)
+    })
+})
+
+// JSX in keel/core imports react/jsx-runtime without naming it ("jsx": "react-jsx" in tsconfig.json), so
+// neither half of core's import ban can see it. The JSX itself is the finding, once per file.
+describe('keel/core holds no JSX', () => {
+    it.each([
+        ['an element', 'export const C = () => <div>{1}</div>\n'],
+        [
+            'nested elements, reported once',
+            'export const C = () => (\n    <ul>\n        <li>{1}</li>\n        <li>{2}</li>\n    </ul>\n)\n',
+        ],
+        ['a fragment', 'export const C = () => <>{1}</>\n'],
+    ])('%s', async (_form, code) => {
+        expect(fired(await lint('packages/keel/src/core/view.tsx', code), JSX_IN_CORE)).toBe(1)
+    })
+
+    it('a .jsx file in core too', async () => {
+        const code = 'export const C = () => <p>{1}</p>\n'
+        expect(fired(await lint('packages/keel/src/core/view.jsx', code), JSX_IN_CORE)).toBe(1)
+    })
+
+    it('outside core, JSX is just JSX', async () => {
+        const code = 'export const C = () => <div>{1}</div>\n'
+        expect(fired(await lint('packages/keel/src/components/kv-panel.tsx', code), JSX_IN_CORE)).toBe(0)
     })
 })
 

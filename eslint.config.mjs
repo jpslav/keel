@@ -119,13 +119,25 @@ const appRealAdapterStaticPattern = {
 // so the fenced form stays bannable.
 //
 // MERGE TRAP (see the vendorSdkPattern note): a later no-restricted-imports block REPLACES an earlier
-// one for matching files, so every framework block re-lists BOTH vendorSdkPattern AND appCodePattern.
+// one for matching files, so every framework block re-lists BOTH vendorSdkPattern AND appCodePatterns.
 const appCodePattern = {
     group: ['@/*', '@app/seed', '@app/seed/*'],
     message:
         'Framework code (packages/keel) must reach app content only through the seam — import from the ' +
         "@app-config/* alias (apps/*/src/app-config/*), never the app's @/* alias or @app/seed (ADR-0012).",
 }
+// The same app code by PATH: `../../../apps/showcase/src/domain/tickets` from keel's fixture names the file the
+// app's `@/*` alias would, and passed both halves of the fence until this pattern existed. It matches an
+// `apps/<name>` segment anywhere in the specifier (relative, absolute, or bare): no keel directory and no
+// package keel imports is called `apps`, so a match is always a path into the repo's apps/.
+const appPathPattern = {
+    regex: '(^|/)apps/[^/]+(/|$)',
+    message:
+        'Framework code (packages/keel) must reach app content only through the seam — a path into apps/ is the ' +
+        "app's code under another name. Import from the @app-config/* alias instead (ADR-0012).",
+}
+// Together, as the merge-trap rule for selectors asks: every block that fences app content lists both.
+const appCodePatterns = [appCodePattern, appPathPattern]
 // keel/core is pure TypeScript (ADR-0006). Named once: the core block bans it in declarations and
 // `keel/no-dynamic-framework-import-in-core` everywhere else, from this one list.
 const coreFrameworkPattern = {
@@ -139,9 +151,10 @@ const coreFrameworkPattern = {
 // one for those files). A rule id of its own cannot be replaced that way, which is also what lets the ban be
 // deny-by-default (see its block).
 // These aim at the ACT — naming `getDb` — rather than one syntactic shape of it, because
-// shape-matching was bypassed twice. They do NOT catch every indirection and cannot: a variable key
-// (`const k = 'getDb' as const; db[k]()`) still walks past them, and no lint rule can chase an
-// arbitrary alias. The real boundary is RLS in the database; this is a fast, local reminder.
+// shape-matching was bypassed twice. They do NOT catch every indirection and cannot: a name built at
+// runtime (`db['get' + 'Db']()`) still walks past them, and no lint rule can chase an arbitrary alias. A
+// key held in a variable is caught where the string is written (getDbStringSelector). The real boundary
+// is RLS in the database; this is a fast, local reminder.
 //
 // The history is why they look like this: a call-expression selector missed `const { getDb } = db`,
 // and adding a destructuring selector still left `db.getDb.bind(db)`, `db['getDb']()` and
@@ -157,8 +170,9 @@ const coreFrameworkPattern = {
 // is the esquery path to the key; `name` is a quoted string or a regex. quotedKey leaves out the
 // identifier because in a computed access an identifier is a VARIABLE (`db[k]`), not the name. The anyKey
 // selectors on `process` keep it, as main's `[property.name="env"]` did, so `process[env]` with `env` a
-// variable is reported too. A key wrapped in a TypeScript assertion (`db['getDb' as const]`) is out of
-// reach, as an alias is.
+// variable is reported too. A key wrapped in a TypeScript assertion is out of these selectors' reach:
+// `process.env['APP_MODE' as const]` passes, and `db['getDb' as const]` is caught only because its string
+// is (getDbStringSelector).
 const quotedKey = (path, name) =>
     `:matches([${path}.value=${name}], [${path}.expressions.length=0][${path}.quasis.0.value.cooked=${name}])`
 const anyKey = (path, name) =>
@@ -178,6 +192,20 @@ const getDbDestructureSelector = {
     selector: `ObjectPattern > Property${anyKey('key', '"getDb"')}`,
     message:
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
+}
+// The name as a STRING anywhere else: `Reflect.get(db, 'getDb')`, `Object.getOwnPropertyDescriptor(db,
+// 'getDb')`, a key held in a variable (`const k = 'getDb'; db[k]()`). Nothing in a zone file names it as a
+// string for any other reason, so the string itself is the finding. Left to the selectors above: a computed
+// member's key and a destructured key, which they already report (no double report). Left out: a TypeScript
+// type position (`Pick<DbPort, 'getDb'>`), which loads nothing.
+const getDbStringSelector = {
+    selector:
+        ':matches(Literal[value="getDb"], TemplateLiteral[expressions.length=0][quasis.0.value.cooked="getDb"])' +
+        ':not(MemberExpression[computed=true] > .property):not(ObjectPattern > Property > .key)' +
+        ':not(TSLiteralType > .literal)',
+    message:
+        "Naming getDb as a string (Reflect.get(db, 'getDb'), a key held in a variable) reaches the same raw handle — use " +
+        'db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
 // Also the import form — `import { env }`, or a default or namespace import, from `process`/`node:process`
 // — which reads the same object under another name (a type-only import, or `import { cwd }`, does not).
@@ -420,13 +448,20 @@ const isVendorSpecifier = (specifier) =>
 //
 // NOT covered: `vi.mock`/`vi.doMock` and jest's. A mock names a module and, given a factory, never loads it;
 // the module under test that imports it is what the declaration and declarationless bans catch.
-// `what` names the thing the specifier is, and `rule` is the fence's own sentence, appended to the message.
-const declarationlessMessage = (what, rule) =>
-    `\`{{specifier}}\` is ${what}, and reaching it with import() or require(), or naming it in a type ` +
-    `import('…'), is still importing it. ${rule}`
+// `what` names the thing the specifier is. `matches` returns the fence's own sentence for a banned specifier
+// (appended to the message, so a finding says which pattern it hit) and nothing for an allowed one.
 /** @returns {import('eslint').Rule.RuleModule} */
-const declarationlessImportBan = ({ description, matches, message }) => ({
-    meta: { type: 'problem', docs: { description }, schema: [], messages: { banned: message } },
+const declarationlessImportBan = ({ description, what, matches }) => ({
+    meta: {
+        type: 'problem',
+        docs: { description },
+        schema: [],
+        messages: {
+            banned:
+                `\`{{specifier}}\` is ${what}, and reaching it with import() or require(), or naming it in a type ` +
+                "import('…'), is still importing it. {{rule}}",
+        },
+    },
     create(context) {
         const check = (node) => {
             const specifier =
@@ -435,8 +470,9 @@ const declarationlessImportBan = ({ description, matches, message }) => ({
                     : node?.type === 'TemplateLiteral' && node.expressions.length === 0
                       ? node.quasis[0].value.cooked
                       : undefined
-            if (typeof specifier !== 'string' || !matches(specifier.trim())) return
-            context.report({ node, messageId: 'banned', data: { specifier } })
+            const rule = typeof specifier === 'string' ? matches(specifier.trim()) : undefined
+            if (!rule) return
+            context.report({ node, messageId: 'banned', data: { specifier, rule } })
         }
         return {
             ImportExpression: (node) => check(node.source),
@@ -449,14 +485,13 @@ const declarationlessImportBan = ({ description, matches, message }) => ({
     },
 })
 
+const vendorDeclarationlessRule =
+    "Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or apps/<app>/src/adapters/real/ " +
+    '(a port the app owns) — code against the port instead (docs/recipes/app-owned-adapter.md).'
 const keelNoDynamicVendorImportRule = declarationlessImportBan({
     description: 'Vendor SDKs are not imported dynamically outside an adapters directory.',
-    matches: isVendorSpecifier,
-    message: declarationlessMessage(
-        'a vendor SDK',
-        "Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or apps/<app>/src/adapters/real/ " +
-            '(a port the app owns) — code against the port instead (docs/recipes/app-owned-adapter.md).',
-    ),
+    what: 'a vendor SDK',
+    matches: (specifier) => (isVendorSpecifier(specifier) ? vendorDeclarationlessRule : undefined),
 })
 
 // THE FRAMEWORK/APP FENCE AND keel/core's FENCE, outside declarations. Both are no-restricted-imports groups
@@ -470,21 +505,54 @@ const keelNoDynamicVendorImportRule = declarationlessImportBan({
 // dependencies so the static and declarationless bans cannot read one group two ways. That includes the
 // group syntax's quirks: a bare name matches at any depth, so core's `react` also bans `@x/react` and
 // `./react`, in both. If ESLint ever stops depending on `ignore`, this line throws when the config loads.
+// A `regex` pattern (appPathPattern) is read as that rule reads one too: a RegExp with the `iu` flags.
 const ignore = createRequire(createRequire(import.meta.url).resolve('eslint'))('ignore')
-const matchesGroup = (group) => {
-    const matcher = ignore({ allowRelativePaths: true, ignorecase: true }).add(group)
+const patternMatcher = (pattern) => {
+    if (pattern.regex) {
+        const regex = new RegExp(pattern.regex, 'iu')
+        return (specifier) => regex.test(specifier)
+    }
+    const matcher = ignore({ allowRelativePaths: true, ignorecase: true }).add(pattern.group)
     return (specifier) => matcher.ignores(specifier)
+}
+// The message of the first pattern a specifier matches, or nothing.
+const matchesPatterns = (patterns) => {
+    const matchers = patterns.map((pattern) => ({ test: patternMatcher(pattern), message: pattern.message }))
+    return (specifier) => matchers.find(({ test }) => test(specifier))?.message
 }
 const keelNoDynamicAppImportRule = declarationlessImportBan({
     description: 'Framework code does not reach app content by import(), require() or a type import().',
-    matches: matchesGroup(appCodePattern.group),
-    message: declarationlessMessage('app content', appCodePattern.message),
+    what: 'app content',
+    matches: matchesPatterns(appCodePatterns),
 })
 const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
     description: 'keel/core does not reach a framework by import(), require() or a type import().',
-    matches: matchesGroup(coreFrameworkPattern.group),
-    message: declarationlessMessage('a framework', coreFrameworkPattern.message),
+    what: 'a framework',
+    matches: matchesPatterns([coreFrameworkPattern]),
 })
+// JSX in keel/core is a framework import nobody writes: with `"jsx": "react-jsx"` (tsconfig.json) every
+// element compiles to an import of `react/jsx-runtime`. Neither half of core's ban can see an import that is
+// not in the source, so the JSX itself is the finding, once per file (the file should hold none).
+/** @type {import('eslint').Rule.RuleModule} */
+const keelNoJsxInCoreRule = {
+    meta: {
+        type: 'problem',
+        docs: { description: 'keel/core holds no JSX: it compiles to an import of react/jsx-runtime.' },
+        schema: [],
+        messages: {
+            jsx: `JSX compiles to an import of react/jsx-runtime ("jsx": "react-jsx" in tsconfig.json). ${coreFrameworkPattern.message}`,
+        },
+    },
+    create(context) {
+        let reported = false
+        const report = (node) => {
+            if (reported) return
+            reported = true
+            context.report({ node, messageId: 'jsx' })
+        }
+        return { JSXElement: report, JSXFragment: report }
+    },
+}
 
 // THE TENANCY BAN (ADR-0004) as a rule of its own: the getDb selectors above, each with its message. See
 // its block for where it holds and the exceptions.
@@ -498,6 +566,7 @@ const keelNoRawDbHandleRule = {
             member: getDbSelector.message,
             computed: getDbComputedSelector.message,
             destructure: getDbDestructureSelector.message,
+            string: getDbStringSelector.message,
         },
     },
     create(context) {
@@ -506,6 +575,7 @@ const keelNoRawDbHandleRule = {
             [getDbSelector.selector]: report('member'),
             [getDbComputedSelector.selector]: report('computed'),
             [getDbDestructureSelector.selector]: report('destructure'),
+            [getDbStringSelector.selector]: report('string'),
         }
     },
 }
@@ -520,6 +590,7 @@ const keelPlugin = {
         'no-dynamic-vendor-import': keelNoDynamicVendorImportRule,
         'no-dynamic-app-import': keelNoDynamicAppImportRule,
         'no-dynamic-framework-import-in-core': keelNoDynamicFrameworkImportInCoreRule,
+        'no-jsx-in-core': keelNoJsxInCoreRule,
         'no-raw-db-handle': keelNoRawDbHandleRule,
     },
 }
@@ -854,7 +925,7 @@ const eslintConfig = [
     {
         files: [FRAMEWORK_FILES_GLOB, FIXTURE_FILES_GLOB],
         rules: {
-            'no-restricted-imports': ['error', { patterns: [vendorSdkPattern, appCodePattern, nextFontPattern] }],
+            'no-restricted-imports': ['error', { patterns: [vendorSdkPattern, ...appCodePatterns, nextFontPattern] }],
         },
     },
     // ...and the same fence outside declarations (keelNoDynamicAppImportRule): import(), require(), a test
@@ -882,13 +953,13 @@ const eslintConfig = [
         },
     },
     // Adapters are fenced against app content too, but MAY import vendor SDKs (that is their job) — so
-    // this block carries appCodePattern only (no vendorSdkPattern). The ports-boundary block above ignores
+    // this block carries appCodePatterns only (no vendorSdkPattern). The ports-boundary block above ignores
     // packages/keel/src/adapters, and the framework fence above matches it but comes earlier, so this
     // block's list is the one that counts there.
     {
         files: [`${KEEL_ADAPTERS_GLOB}/*.${SRC_EXT}`],
         rules: {
-            'no-restricted-imports': ['error', { patterns: [appCodePattern, nextFontPattern] }],
+            'no-restricted-imports': ['error', { patterns: [...appCodePatterns, nextFontPattern] }],
         },
     },
     // keel/core stays framework-free (ADR-0006) AND fenced from app content (ADR-0012) — vendor, app and
@@ -900,17 +971,18 @@ const eslintConfig = [
         rules: {
             'no-restricted-imports': [
                 'error',
-                { patterns: [vendorSdkPattern, appCodePattern, nextFontPattern, coreFrameworkPattern] },
+                { patterns: [vendorSdkPattern, ...appCodePatterns, nextFontPattern, coreFrameworkPattern] },
             ],
         },
     },
-    // ...and core's framework ban outside declarations (keelNoDynamicFrameworkImportInCoreRule). The vendor and
-    // app halves already hold there outside declarations: keel/no-dynamic-vendor-import and
-    // keel/no-dynamic-app-import both cover packages/keel/src/core.
+    // ...and core's framework ban outside declarations (keelNoDynamicFrameworkImportInCoreRule), plus the JSX
+    // that imports react/jsx-runtime without naming it (keelNoJsxInCoreRule). The vendor and app halves already
+    // hold there outside declarations: keel/no-dynamic-vendor-import and keel/no-dynamic-app-import both cover
+    // packages/keel/src/core.
     {
         files: [`packages/keel/src/core/**/*.${SRC_EXT}`],
         plugins: { keel: keelPlugin },
-        rules: { 'keel/no-dynamic-framework-import-in-core': 'error' },
+        rules: { 'keel/no-dynamic-framework-import-in-core': 'error', 'keel/no-jsx-in-core': 'error' },
     },
     // keel's public surface (see keelPublicSurfaceRule above). Repo-wide on purpose: apps, repo
     // scripts, infra and the other workspace packages all resolve `keel/…` through an alias, so all

@@ -73,6 +73,14 @@ export const GET_DB_DESTRUCTURE: Fence = {
     rule: 'keel/no-raw-db-handle',
     fragment: 'Destructuring getDb out of the db port',
 }
+export const GET_DB_STRING: Fence = { rule: 'keel/no-raw-db-handle', fragment: 'Naming getDb as a string' }
+// A path into apps/ reports with its own sentence, through the same two rules as the app's aliases.
+export const APP_PATH_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a path into apps/' }
+export const APP_PATH_DYNAMIC: Fence = { rule: 'keel/no-dynamic-app-import', fragment: 'a path into apps/' }
+export const JSX_IN_CORE: Fence = {
+    rule: 'keel/no-jsx-in-core',
+    fragment: 'JSX compiles to an import of react/jsx-runtime',
+}
 // The framework/app fence and keel/core's fence, outside declarations; the declaration halves report as
 // no-restricted-imports with the pattern's own message.
 export const APP_CODE_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'must reach app content only through' }

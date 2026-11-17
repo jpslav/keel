@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { APP, type Fence, fired, GET_DB, GET_DB_COMPUTED, GET_DB_DESTRUCTURE, lint } from './lint-text'
+import { APP, type Fence, fired, GET_DB, GET_DB_COMPUTED, GET_DB_DESTRUCTURE, GET_DB_STRING, lint } from './lint-text'
 
 /**
  * The tenancy ban (ADR-0004): no module in an app's src/, in keel's screens or in keel's fixture takes the
@@ -30,6 +30,10 @@ const FORMS: [string, string, Fence][] = [
         GET_DB_DESTRUCTURE,
     ],
     ['destructuring a parameter', 'export const load = ({ getDb }) => getDb()\n', GET_DB_DESTRUCTURE],
+    // the name as a string, which reflection and a key held in a variable both need
+    ['Reflect.get', "export const load = (db) => Reflect.get(db, 'getDb').call(db)\n", GET_DB_STRING],
+    ['a key held in a variable', "const key = 'getDb'\nexport const load = (db) => db[key]()\n", GET_DB_STRING],
+    ['a key held in a template literal', 'const key = `getDb`\nexport const load = (db) => db[key]()\n', GET_DB_STRING],
 ]
 
 /** Every kind of place the ban holds: all of an app's src/, keel's screens, and keel's app-shaped fixture. */
@@ -128,5 +132,33 @@ describe('getDb: what the selectors match', () => {
         const findings = await lint(`${APP}/src/app/api/kv/route.ts`, code)
         expect(fired(findings, GET_DB_COMPUTED)).toBe(0)
         expect(fired(findings, GET_DB)).toBe(1)
+    })
+
+    // The string selector leaves to the others the strings they already report, so a finding is one finding.
+    it.each([
+        ['computed access', "export const load = (db) => db['getDb']()\n", GET_DB_COMPUTED],
+        ['computed access with a template literal', 'export const load = (db) => db[`getDb`]()\n', GET_DB_COMPUTED],
+        ['a quoted destructuring key', "const { 'getDb': raw } = {}\nexport { raw }\n", GET_DB_DESTRUCTURE],
+    ])('%s is reported once, by its own selector, not twice', async (_form, code, fence) => {
+        const findings = await lint(`${APP}/src/app/api/kv/route.ts`, code)
+        expect(fired(findings, fence)).toBe(1)
+        expect(fired(findings, GET_DB_STRING)).toBe(0)
+    })
+
+    // A key wrapped in a TypeScript assertion is out of every key selector's reach; its string is not.
+    it("db['getDb' as const] is caught by its string", async () => {
+        const code = "export const load = (db: Record<string, () => unknown>) => db['getDb' as const]()\n"
+        expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_STRING)).toBe(1)
+    })
+
+    it.each([
+        // a type position loads nothing
+        ['a type', "export type Raw = Pick<{ getDb(): unknown }, 'getDb'>\n"],
+        // a different name that starts the same
+        ['a longer name', "export const name = 'getDbRaw'\n"],
+        // a template with an expression could be anything
+        ['a template with an expression', 'const x = 1\nexport const name = `getDb${x}`\n'],
+    ])('%s is not the name as a string', async (_form, code) => {
+        expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_STRING)).toBe(0)
     })
 })
