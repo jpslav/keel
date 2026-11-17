@@ -568,6 +568,11 @@ describe("what counts as a handler's own path", () => {
             files: post(`do { continue } while (false)\n${CALL}`),
             expect: 'authorized',
         },
+        {
+            name: 'after do whose only continue is in an inner loop',
+            files: post(`do { for (const x of [1]) { continue } return 1 } while (cond)\n${CALL}`),
+            expect: 'open',
+        },
         { name: 'after do-while (true)', files: post(`do {} while (true)\n${CALL}`), expect: 'open' },
         {
             name: 'after do-while (true) that breaks',
@@ -1062,6 +1067,9 @@ describe('the facts a gate is judged on', () => {
         expect(gate('if (!isSimulated) return db.Response(null)')).toBe(false)
         expect(gate('if (!isSimulated) return new Response(null)', `${SIM}const Response = class {}\n`)).toBe(false)
         expect(gate('if (!isSimulated) throw make()', `${SIM}declare const make: any\n`)).toBe(false)
+        // A global that is not a response: `fetch` is undeclared like `Response`, and is not allowed.
+        expect(gate("if (!isSimulated) return fetch('/wipe')")).toBe(false)
+        expect(gate('if (!isSimulated) return new Map()')).toBe(false)
         expect(factsOf(`${SIM}export const POST = async () => (!isSimulated ? 1 : 2)`).opensWithSimulated404).toBe(
             false,
         )
