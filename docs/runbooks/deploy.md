@@ -10,7 +10,8 @@
   `pnpm start:demo` runs locally via `scripts/serve-standalone.mjs`).
 - Stack: `infra/` — server Lambda + Web Adapter layer, CloudFront, S3 assets, migrator Lambda, Aurora
   Serverless v2. It is a draft you take over, and it can move into your own infrastructure repo: it
-  imports exactly one thing from the app (`apps/showcase/config/app.ts`).
+  imports two things from the app, `apps/showcase/config/app.ts` and `apps/showcase/config/params.ts`
+  (for `params.database.transport`).
 - Pipeline: yours (cutover `deploy-pipeline`). `.github/workflows/checks.yml` runs checks and **never
   deploys**, deliberately — the deploy pipeline is the piece most tied to an organisation's accounts and
   approval gates, so the template declines to guess it.

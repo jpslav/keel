@@ -4,7 +4,7 @@
     "private": true,
     "license": "MIT",
     "type": "module",
-    "description": "keel \u2014 the framework half of this template: ports/adapters, RLS tenancy, authz, jobs, service auth, i18n and the Simulator harness. Apps extend it through the @app-config/* seam (ADR-0012).",
+    "description": "keel — the framework half of this template: ports/adapters, RLS tenancy, authz, jobs, service auth, i18n and the Simulator harness. Apps extend it through the @app-config/* seam (ADR-0012).",
     "exports": {
         "./package.json": "./package.json",
         "./i18n/messages/en.json": "./src/i18n/messages/en.json",
@@ -141,6 +141,7 @@
     "dependencies": {
         "@anthropic-ai/sdk": "^0.115.0",
         "@aws-sdk/client-codebuild": "^3.1155.0",
+        "@aws-sdk/client-rds-data": "^3.1169.0",
         "@aws-sdk/client-s3": "^3.1155.0",
         "@aws-sdk/client-secrets-manager": "^3.1155.0",
         "@aws-sdk/s3-presigned-post": "^3.1155.0",

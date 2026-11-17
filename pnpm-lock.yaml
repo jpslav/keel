@@ -252,6 +252,9 @@ importers:
       '@aws-sdk/client-codebuild':
         specifier: ^3.1155.0
         version: 3.1169.0
+      '@aws-sdk/client-rds-data':
+        specifier: ^3.1169.0
+        version: 3.1169.0
       '@aws-sdk/client-s3':
         specifier: ^3.1155.0
         version: 3.1169.0
@@ -383,6 +386,10 @@ packages:
 
   '@aws-sdk/client-codebuild@3.1169.0':
     resolution: {integrity: sha512-9HVtaiZ5/OD2CU7mXWBOgZ54xkpKYKCah4O2utSwjKCYVgBJtLZ4ywkZhjQfOQbIjgGSO4Hj92HHVxRiqQkE4g==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-rds-data@3.1169.0':
+    resolution: {integrity: sha512-hBx0lsBA+Dqbh7nYVMqfxakZoceKbEi/ANyXtW3qsSiP0R+6E0IH/g4e0Zw3hYRPHcNzusWZnx8tvs11XqVL8Q==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-s3@3.1169.0':
@@ -7001,6 +7008,17 @@ snapshots:
       tslib: 2.8.1
 
   '@aws-sdk/client-codebuild@3.1169.0':
+    dependencies:
+      '@aws-sdk/core': 3.981.0
+      '@aws-sdk/credential-provider-node': 3.972.97
+      '@aws-sdk/types': 3.975.1
+      '@smithy/core': 3.40.0
+      '@smithy/fetch-http-handler': 5.8.1
+      '@smithy/node-http-handler': 4.14.2
+      '@smithy/types': 4.20.0
+      tslib: 2.8.1
+
+  '@aws-sdk/client-rds-data@3.1169.0':
     dependencies:
       '@aws-sdk/core': 3.981.0
       '@aws-sdk/credential-provider-node': 3.972.97

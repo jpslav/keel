@@ -1884,6 +1884,86 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   the other syntax bans there. A story beside a fake was given it back, since the static form was already
   banned in stories.
 
+## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
+
+- **JP decided, 2026-11-16: it lives in keel, as an opt-in.** Tenant isolation through any transport is
+  keel's to prove. So the transport sits beside the `pg` one in `packages/keel/src/adapters/real/`. `pg`
+  stays the default, and the Data API is chosen per deployment.
+- **The switch is `DATABASE_TRANSPORT=pg|data-api`.** Each app records it as `params.database.transport`
+  in its `config/params.ts`. It is never inferred from which variables are set, and an unknown value
+  throws. `DATABASE_URL` left `REQUIRED_ENV`: each transport's variables come from `DATABASE_ENV`
+  (`packages/keel/src/adapters/real/database-transport.ts`), so only on `data-api` do its three replace it.
+  "Transport" rather than "driver": both paths are Kysely over Postgres, and what differs is how the SQL
+  travels.
+- **Loaded only when chosen.** `db-data-api.ts` is reached by dynamic import alone, so a `pg` deployment
+  never loads the RDS Data SDK. `packages/keel/src/adapters/real/index.test.ts` proves it by watching the
+  module loads. A static import of the module was watched turning it red, whichever test runs first.
+- **`withTenant` sets the role and the tenant in one statement**, with `set_config('role', 'app_user', true)`
+  beside the tenant's `set_config` (ADR-0004 addendum). On the Data API, every statement is an HTTPS call.
+- **Hand-written, not `kysely-data-api`.** That package peers on `kysely ^0.27`, sends parameters untyped
+  and turns `date` into a `Date`. ADR-0002 hand-rolled the pglite dialect for the same kind of reason.
+- **Parameters are typed by PREPARE, not by guessing.** Guessing a `UUID` type hint from the value breaks
+  `set_config`'s text argument as soon as a tenant id is passed to it. Postgres's own inference, read back
+  once per SQL shape, gives node-postgres's semantics exactly. Rejected as well: inlining escaped literals.
+  It would be safe if escaped correctly, but ADR-0004 keeps the tenant id a real parameter on purpose.
+- **SDK retries off (`maxAttempts: 1`); resume retried by hand.** AWS warns that retrying a statement
+  whose call timed out can write twice. A paused Serverless v2's `DatabaseResumingException` means the
+  request never ran, so the dialect retries that one alone, for about 15 seconds.
+- **Errors carry `code` and `constraint`.** They are read from a stated SQLSTATE when the Data API gives
+  one, and otherwise from Postgres's wording. Reports differ on whether the Data API includes the
+  SQLSTATE, and the showcase's ticket-reference retry keys on `23505`.
+- **Proven through a strict emulator; the live proof is deferred.** `pnpm test:contract` runs the
+  migrations, the full RLS suite and a pg-parity battery through the dialect against
+  `packages/keel/src/adapters/real/rds-data-emulator.ts`. The live check is `docs/runbooks/data-api.md`,
+  for the `data-api` cutover row. The community `local-data-api` emulator was rejected: it binds untyped
+  strings as `unknown`, so it passes exactly the queries Aurora rejects.
+- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. That
+  transaction opens with `pg_advisory_xact_lock` on Kysely's lock id. Kysely's own session-level lock
+  would be dropped by the connection reset, and Kysely creates its tables before locking at all. A
+  single statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs
+  on the `pg` transport from inside the VPC. The pre-PR review found the lock gap. A race test of two
+  migrators on an empty database, which first failed on Kysely's create-before-lock, proves the fix.
+- **The emulator lives in `packages/keel/src/adapters/real/`, not in `test-fixture/`.** It needs `pg` and
+  the RDS Data SDK, which only an adapters directory may import. Test-only modules in `src/` have
+  precedent in `rls-proof-runner.ts`. Nothing in an app or a deployment imports it, and knip would report
+  it if nothing did.
+- **Review rounds 1 and 2 (Opus) found the same shape twice, so it was swept rather than run a third time.**
+  An explicit CAST truncates or pads where node-postgres's untyped parameter is refused: first
+  `char(n)`/`bit(n)`, whose inferred type printed as `character`/`bit` (length 1), then domains over
+  `char`/`varchar`/`bit`. The sweep found the divergence only in length-bearing types: inferred base types
+  carry no length, and a domain is the only other way a length reaches the cast. So the dialect now walks
+  each domain down to its base type and prints it with `format_type(…, -1)`. The parity battery covers
+  `char(3)`, `bit(4)`, `char(3)[]` and two domains, and a too-long domain value is refused on both
+  transports.
+- **The same rounds found two transaction-state bugs, both fixed and pinned.** A transaction Postgres had
+  aborted (a caught statement error) was reported as committed; it now throws Kysely's
+  `AbortedTransactionError`, as the `pg` driver does. And a raw `ROLLBACK TO SAVEPOINT`, the recovery
+  available inside `withTenant`, did not count as recovery.
+- **Declined: invalidating the type cache.** A statement that fails inside a transaction has already
+  aborted it, so a retry with fresh types could only help outside one. It is an accepted limit (ADR-0002
+  addendum): deploys replace processes.
+- **Round 2's fixes were reviewed as a diff, not by a third general round** (Opus): its findings were one
+  more instance of round 1's shape, now swept, and one defect in round 1's fix. The diff review found
+  nothing at MEDIUM. Fixed from its LOWs: EXPLAIN is recognised after a comment, as `ANALYSE`, and before
+  a parenthesised statement; a contract test now runs a parameterised EXPLAIN through the dialect, which
+  nothing did; and the too-long-value test asserts each refusal's reason, not merely that something
+  failed. Accepted as limits (ADR-0002 addendum): an explicit `::domain` cast in the SQL, and a colon
+  before a column name, as in `a[lo:hi]`.
+- **An independent cold review (2026-11-17, on a different model) found no tenant-isolation or injection
+  defect.** The manager decided on every finding, and all were made:
+    - A leading `;` hid COMMIT from the guard, and a statement after a `;` was never looked at, so `;commit`
+      inside `withTenant` ended the tenant's transaction. Now one scanner (`sqlSegments`) says where code
+      is, for the dialect and the emulator alike. A multistatement is refused before calling, and the
+      emulator refuses one as AWS does, before running any of it.
+    - The emulator's own colon scanner was weaker than the dialect's (E-strings, nested comments). It now
+      uses the dialect's.
+    - Parameter types expire after five minutes. Within them a type change is silent; ADR-0002 says so.
+    - A commit counts only when CommitTransaction answers "Transaction Committed".
+    - The runbook now proves migrations through the Data API on an empty database, sends statements on
+      ended transaction ids, and asks whether AWS accepts 0001's `DO` block. If it does not, 0001 changes;
+      that is written down, not built.
+    - The 1 MiB response cap meeting a page of unbounded text is an accepted limit.
+
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 
 - **Three packages raised past their advisories, staying on their current majors.** `@sentry/nextjs`
