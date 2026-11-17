@@ -105,7 +105,8 @@ export type AuditDetailValue =
  *      the end is ignored). A boolean or null under such a key passes (`missingToken: true`). A plural
  *      passes only as a number under a qualifying word, which counts them (`revokedTokens: 3`); a bare
  *      `otps: 482913` may be the code itself. `tokenId` and `tokenCount` pass;
- *    - no key or string value shaped like an email address (any script), a JWT or a `Bearer` credential.
+ *    - no key or string value shaped like an email address (international domains included), a JWT or
+ *      a `Bearer` credential.
  *
  * The key and shape rules are a backstop for the likely accident (spreading a request, a member or an
  * error into the detail), not a scrubber: a secret under an innocent key, in an innocent shape, passes.
@@ -158,9 +159,11 @@ const SECRET_KEY_WORDS = new Set([
     'ssn',
 ])
 
-// These run only on the serialized detail, which is bounded first, so no pattern ever sees more than
-// AUDIT_DETAIL_MAX_BYTES (EMAIL_SHAPE's leading run backtracks, quadratically in a string's length).
-const EMAIL_SHAPE = /[^\s@]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}/u
+// No pattern reads a string longer than AUDIT_DETAIL_MAX_BYTES: they run on the serialized detail, which
+// is bounded first, and on keys of at most 64 characters that `shownKey` puts in an error's path.
+// (EMAIL_SHAPE's leading run backtracks, quadratically in a string's length.) The domain classes take
+// combining marks (\p{M}) as well as letters, which Devanagari, Thai and Tamil domains need.
+const EMAIL_SHAPE = /[^\s@]+@[\p{L}\p{M}\p{N}-]+(?:\.[\p{L}\p{M}\p{N}-]+)*\.[\p{L}\p{M}]{2,}/u
 const JWT_SHAPE = /eyJ[\w-]+\.[\w-]+\./
 const BEARER_SHAPE = /\bbearer\s+[\w.~+/=-]{16,}/i
 const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
@@ -291,7 +294,8 @@ function checkKey(key: string, child: unknown, path: string): void {
 /**
  * The detail as it will be WRITTEN, or a refusal naming the rule and the path. What the caller handed
  * over is checked for JSON's types first, so nothing is silently converted (a Date to a string, a
- * function dropped). It is then serialized ONCE, and that text is bounded before any pattern reads it.
+ * function dropped). It is then serialized ONCE, and that text is bounded before any pattern reads it
+ * (apart from `shownKey`'s check of a short key it may put in an error's path).
  * The parsed text is what every content rule checks and what is written: a `toJSON`, a getter or a Proxy
  * can make it differ from what the caller handed over.
  */

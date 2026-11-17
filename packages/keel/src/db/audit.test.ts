@@ -263,6 +263,9 @@ describe('recordAuditEvent detail', () => {
         ['an address with an accented domain', { member: 'josé@bücher.de' }, 'looks like an email address'],
         ['an address in another script', { member: '李@例子.中国' }, 'looks like an email address'],
         ['an address with a suffix', { member: 'alice@example.com_admin' }, 'looks like an email address'],
+        ['a Devanagari address', { member: 'संपर्क@डाटामेल.भारत' }, 'looks like an email address'],
+        ['a Thai address', { member: 'user@ตัวอย่าง.ไทย' }, 'looks like an email address'],
+        ['a Tamil address', { member: 'user@உதாரணம்.இந்தியா' }, 'looks like an email address'],
         [
             'credentials in a URL',
             { dsn: 'postgres://app:hunter2@db.internal.example/keel' },

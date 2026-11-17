@@ -2217,7 +2217,7 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
   take a few dozen, and a list that grows with the data then fails in a test rather than in a log nobody
   can trim.
 - **A key denylist, matched on the key's last word or last two.** Matching the whole key on a substring
-  refused `tokensRemoved`, which is the pages purge's own count. Matching on the last word refuses what a
+  refused `tokensRemoved`, exactly the kind of count a purge records. Matching on the last word refuses what a
   key NAMES (`accessToken`, `apiKey`) and passes what it describes (`tokenId`, `tokenCount`). A plural
   is let through only as a number under a qualifying word (`revokedTokens: 3`): review showed a bare
   `otps: 482913` is the code, not a count. A boolean or null passes under any key, since neither can
@@ -2226,13 +2226,13 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
 - **The serialized text is bounded first, and checked second.** Review found two ways round a single
   walk of the input: a `toJSON`, getter or Proxy could write what the walk never saw, and the patterns
   read unbounded strings (60 KB took seconds with the email pattern). So the input is walked for JSON's
-  types only, serialized once, bounded, parsed, and the parsed value is walked with every rule and
-  written.
+  types (and a key shown in an error's path, at most 64 characters, is shape-checked), serialized once,
+  bounded, parsed, and the parsed value is walked with every rule and written.
 - **The error never repeats the value.** It names the rule and the path. The value may be the secret, and
   the error goes to logs and to error tracking. A key in the path that is long or fails a shape check is
   withheld as well, since a map keyed by email address is a plausible accident.
-- **Intake records a closed vocabulary, not the handler's reason.** Both of keel's handlers write the
-  sender's address into `reason`. Copying it would have put personal data into the one table nobody can
+- **Intake records a closed vocabulary, not the handler's reason.** Both reference handlers (the
+  showcase's and keel's test fixture's) write the sender's address into `reason`. Copying it would have put personal data into the one table nobody can
   redact, in keel's own first use of the column. Letting a handler add a structured code of its own is a
   possible follow-up; nothing asks for it yet.
 - **`intake-threw` is not `handler-threw`.** Intake's catch also covers its own recording after the

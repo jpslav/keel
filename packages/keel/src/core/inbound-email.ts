@@ -78,8 +78,8 @@ export function parseInboundRecipient(rawRecipient: string): InboundRecipient | 
  * WHY intake filed an inbound email as it did: the `detail` of its `inbound-email.received` audit row
  * (keel/db/audit, migration 0016), written by the server intake and its static twin alike.
  *
- * A closed vocabulary on purpose. A handler's refusal `reason` is free text, and keel's own handlers put
- * the sender's address in it ("sender … is not a member of …"). It stays on the inbound_emails row, which
+ * A closed vocabulary on purpose. A handler's refusal `reason` is free text, and the reference handlers
+ * (the showcase's and keel's test fixture's) put the sender's address in it ("sender … is not a member of …"). It stays on the inbound_emails row, which
  * `app_user` may UPDATE. The audit trail grants no UPDATE, so nothing a sender wrote goes there.
  */
 export type InboundReceivedDetail =

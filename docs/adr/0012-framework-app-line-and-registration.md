@@ -756,7 +756,8 @@ the check goes in three steps:
    than four levels, no `undefined` in an array. An object property left undefined is skipped, as JSON
    writes it.
 2. It is serialized once, and that text must be at most 1024 bytes. The bound comes before any pattern
-   reads a string: scanning a 60 KB string with the email pattern first took seconds.
+   reads a value: scanning a 60 KB string with the email pattern first took seconds. (The one exception
+   is a key of up to 64 characters, shape-checked before it is shown in an error's path.)
 3. The parsed text is checked again, and it is what gets written. A `toJSON`, a getter or a Proxy can make
    what is serialized differ from what was passed, so the rules below read the serialized form:
     - no NUL or unpaired surrogate in a string (Postgres's jsonb refuses both, and would fail the insert);
@@ -765,7 +766,8 @@ the check goes in three steps:
       is ignored). A boolean or null under such a key passes (`missingToken: true`). A plural passes only as
       a number under a qualifying word (`revokedTokens: 3`), since a bare `otps: 482913` may be the code
       itself;
-    - no key or string value shaped like an email address (in any script), a JWT or a `Bearer` credential.
+    - no key or string value shaped like an email address (international domains included), a JWT or a
+      `Bearer` credential.
 
 The error names the rule and the path, never the value, which may be the secret it refused. A key in the
 path that is long or fails a shape check is withheld too.
@@ -792,8 +794,8 @@ it was, in a closed vocabulary (`InboundReceivedDetail`, `keel/core/inbound-emai
 
 The static twin records the same. A fourth cause, `{ outcome: 'failed', cause: 'intake-threw' }`, is the
 server's alone: the handler returned, and intake's own recording of its result then threw, so the handler's
-effect may already have happened. The handler's own reason never goes in: it is free text, and keel's
-handlers write the sender's address into it. It stays on the `inbound_emails` row.
+effect may already have happened. The handler's own reason never goes in: it is free text, and the
+reference handlers (the showcase's and keel's test fixture's) write the sender's address into it. It stays on the `inbound_emails` row.
 
 Intake now finds a handler only as an own entry of the registry. Before, `<org>+constructor@…` found
 `Object.prototype.constructor` and was filed as a message its handler declined.
