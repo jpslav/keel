@@ -12,8 +12,8 @@ import { createRealDb } from './db'
  * API transaction, as it does on `pg` (Postgres DDL is transactional). Two limits follow, and both fail
  * loudly rather than half-apply: the transaction dies after an hour (AWS's BeginTransaction API
  * reference) or three idle minutes, and any single statement still running at 45 seconds is cancelled. A
- * migration that cannot fit — a long backfill, an index on a large table — runs from inside the VPC on
- * the `pg` transport instead.
+ * migration that cannot fit — a long backfill, an index on a large table — needs the `pg` transport, from
+ * inside the VPC: a deployment on the `data-api` network shape has no other way in to run it.
  *
  * @public
  */

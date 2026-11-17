@@ -140,7 +140,7 @@ const TYPE_CACHE_LIMIT = 2000
  * where node-postgres stores the instant (ADR-0002's addendum of 2026-11-16 states the limit) — so the
  * cache must forget. Five minutes bounds that window to about the time a deploy's migration takes to
  * settle, and costs one describe per shape per five minutes per warm process (three extra calls inside a
- * transaction, five outside): for a few hundred shapes, well under one extra call a second. Shorter buys
+ * transaction, five outside): for three hundred shapes all in use, one describe a second. Shorter buys
  * little and spends round trips on every request; longer leaves an out-of-band migration's mismatch live.
  */
 const TYPE_CACHE_TTL_MS = 5 * 60 * 1000

@@ -17,7 +17,7 @@ proven. The dialect is `packages/keel/src/adapters/real/rds-data-dialect.ts`. It
   migrator on either transport. Step 5 needs one no migrator has touched, so that every migration goes
   through the Data API: see there.
 - Your shell can call `rds-data:*` on the cluster and `secretsmanager:GetSecretValue` on its secret.
-- At least one tenant with rows in a tenant-scoped table (`jobs` is in every app).
+- For steps 1–4, at least one tenant with rows in a tenant-scoped table (`jobs` is in every app).
 
 ```bash
 export CLUSTER=arn:aws:rds:REGION:ACCOUNT:cluster:NAME
@@ -148,15 +148,25 @@ emulator together:
 - `ts` is a `stringValue` of UTC wall-clock time, `YYYY-MM-DD HH:MM:SS[.ffffff]`, with no zone.
 - `big` and `n` are `stringValue`s; `ds` is an `arrayValue` of `stringValues`; `by` is a `blobValue`.
 
-Then a response over the 1 MiB cap:
+Then a response over the 1 MiB cap, in rows that each stay under the 64 KB per row that AWS's
+troubleshooting page also lists, so that a failure is the cap's:
 
 ```bash
-rds execute-statement --database "$DB" --sql "SELECT repeat('x', 2000000) AS big"
+rds execute-statement --database "$DB" --sql "SELECT repeat('x', 60000) AS big FROM generate_series(1, 20)"
 ```
 
 Pass when it fails. Record the exception's name and message; the emulator answers "Database returned more
 than the allowed response size limit". This is the limit a page of rows with unbounded text meets on this
 transport where `pg` returns it (ADR-0002's addendum, accepted limits).
+
+Then one row over that 64 KB, which the emulator does not model:
+
+```bash
+rds execute-statement --database "$DB" --sql "SELECT repeat('x', 100000) AS big"
+```
+
+Record whether it succeeds. If it fails, a text field over 64 KB cannot be read through this transport
+at all, even one row at a time: add that to ADR-0002's accepted limits, and to the emulator.
 
 ## 4. Errors
 
@@ -190,9 +200,10 @@ model of AWS.)
 
 - **On an EMPTY database.** On the `data-api` network shape the Data API is the migrator's only way in, so
   every migration must be seen to go through it: deploy staging with `params.database.transport` set to
-  `'data-api'` (so `DATABASE_TRANSPORT=data-api`) onto a database no migrator has touched — a new
-  stack's cluster, or a new database named by `DATABASE_NAME`. Invoke the migrator Lambda. It must return
-  `{ ok: true }`, and then
+  `'data-api'` (so `DATABASE_TRANSPORT=data-api`) as a new stack, whose new cluster's database (named
+  `APP_SLUG` by `infra/stack.ts`) no migrator has touched. Point `$CLUSTER`, `$SECRET` and `$DB` at that
+  cluster, its secret and that database for the rest of this step. Invoke the migrator Lambda. It must
+  return `{ ok: true }`, and then
 
     ```bash
     rds execute-statement --database "$DB" --sql "SELECT count(*) FROM kysely_migration"
@@ -214,12 +225,13 @@ model of AWS.)
     Pass when it succeeds. If AWS refuses it, keel changes 0001, not the migrator: the migration checks
     `pg_roles` for `app_user` from its TypeScript and sends `CREATE ROLE app_user NOLOGIN` alone, one
     statement per call. 0001's is the only dollar-quoted body in keel's migrations and both apps'. An
-    adopter's PL/pgSQL function would meet the same refusal, and its migration would run on `pg` from
-    inside the VPC.
+    adopter's PL/pgSQL function would meet the same refusal, and its migration could run only on the `pg`
+    shape: on `data-api` nothing but the Data API reaches the database (the first bullet above).
 
 - Invoke the migrator twice at once. Both must return `{ ok: true }`: the second waits on the
   transaction-scoped migration lock and then finds nothing pending.
 - Sign in and use a tenant-scoped screen. Then sign in as a member of the second tenant and confirm none
-  of the first tenant's rows appear.
+  of the first tenant's rows appear. The database the first bullet migrated starts with no tenants (no
+  migration creates one): give it two, each with a member, and rows for the first, before this check.
 - Let a Serverless v2 cluster with minimum capacity 0 pause. The next request must still succeed, after
   the dialect's `DatabaseResumingException` retries, and the logs should show the retry.
