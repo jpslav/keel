@@ -36,6 +36,8 @@ let dataApi: DbPort
 let viaPg: DbPort
 let migrationCalls: EmulatedCall[] = []
 let databaseUrl: (name: string) => string
+/** The database the server URL names (`postgres` unless CONTRACT_DATABASE_URL says otherwise). */
+let maintenanceDatabase: string
 
 beforeAll(async () => {
     let serverUrl = process.env.CONTRACT_DATABASE_URL
@@ -67,6 +69,7 @@ beforeAll(async () => {
     }
 
     const base = serverUrl
+    maintenanceDatabase = decodeURIComponent(new URL(serverUrl).pathname.slice(1)) || 'postgres'
     databaseUrl = (name: string) => {
         const url = new URL(base)
         url.pathname = `/${name}`
@@ -140,30 +143,30 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
 
     test('a non-superuser owner migrates, and switches to app_user inside withTenant, through the Data API', async () => {
         // The owner pass (../../db/owner-pass.ts), with every connection it opens made through the dialect,
-        // to an emulator logged in as that login: on Aurora the secret IS the login. Only `admin`, which
-        // creates the owner and tears everything down, is plain `pg`; it is not what is being proven. The
-        // owner's migrations go the Data API's way, in one transaction (createRealDataApiDb).
-        const server = new URL(databaseUrl('postgres'))
+        // to an emulator logged in as that login: on Aurora the secret IS the login. Only `admin` is plain
+        // `pg`: it creates the owner, grants it the creator's membership where `app_user` already exists, and
+        // tears everything down. None of that is what is being proven.
+        const server = new URL(databaseUrl(maintenanceDatabase))
         const admin = createRealDb(server.toString()).getDb()
-        const ports = new Map<Kysely<DB>, DbPort>()
+        const opened = new Map<Kysely<DB>, { port: DbPort; emulator: RdsDataEmulator; login: Login }>()
         const closing: Promise<void>[] = []
-        /** Every call each login's emulator received: the proof that the pass went through the dialect. */
-        const sent = new Map<string, EmulatedCall[]>()
         const connect = (login: Login): Kysely<DB> => {
             const url = new URL(databaseUrl(login.database))
             url.username = encodeURIComponent(login.user)
             url.password = encodeURIComponent(login.password)
             const asLogin = new RdsDataEmulator(url.toString())
-            sent.set(`${login.user}@${login.database}`, asLogin.calls)
             const port = createRealDataApiDb({
                 resourceArn: RESOURCE_ARN,
                 secretArn: SECRET_ARN,
                 database: login.database,
                 client: { send: (command) => asLogin.send(command), destroy: () => void closing.push(asLogin.close()) },
             })
-            ports.set(port.getDb(), port)
+            opened.set(port.getDb(), { port, emulator: asLogin, login })
             return port.getDb()
         }
+        // The calls the owner's emulator received WHILE the migrations ran: the migration itself, alone.
+        let migration: EmulatedCall[] = []
+        let migratedAs: Login | undefined
         try {
             await runOwnerPass(
                 {
@@ -172,9 +175,15 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
                         user: decodeURIComponent(server.username),
                         password: decodeURIComponent(server.password),
                     },
-                    maintenanceDatabase: 'postgres',
+                    maintenanceDatabase,
                     connect,
-                    migrate: (ownerDb) => ports.get(ownerDb)!.migrateToLatest(),
+                    migrate: async (ownerDb) => {
+                        const { port, emulator: asOwner, login } = opened.get(ownerDb)!
+                        const from = asOwner.calls.length
+                        await port.migrateToLatest()
+                        migration = asOwner.calls.slice(from)
+                        migratedAs = login
+                    },
                 },
                 expect,
             )
@@ -182,10 +191,16 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             await Promise.all(closing)
             await admin.destroy()
         }
-        // The owner's own database saw its migrations and its role switch arrive as Data API calls: the
-        // migration transaction, and withTenant's one-statement setup inside a transaction.
-        const owner = [...sent.entries()].find(([key]) => /^keel_owner_\d+@keel_owner_db_/.test(key))?.[1] ?? []
-        expect(owner.some((call) => call.operation === 'BeginTransaction')).toBe(true)
+        // The owner's migrations went the Data API's way: ONE transaction, opening with the transaction-scoped
+        // lock, every statement on that one id, ending in a commit, all of it through the owner's emulator.
+        expect(migratedAs?.user).toMatch(/^keel_owner_\d+$/)
+        expect(migration.filter((call) => call.operation === 'BeginTransaction')).toHaveLength(1)
+        expect(migration[0]?.operation).toBe('BeginTransaction')
+        expect(migration[1]?.sql).toMatch(/pg_advisory_xact_lock/)
+        expect(new Set(migration.slice(1).map((call) => call.transactionId)).size).toBe(1)
+        expect(migration.at(-1)?.operation).toBe('CommitTransaction')
+        // ...and its role switch inside withTenant did too: the one-statement setup, inside a transaction.
+        const owner = [...opened.values()].find(({ login }) => login === migratedAs)!.emulator.calls
         expect(
             owner.some(
                 (call) =>
