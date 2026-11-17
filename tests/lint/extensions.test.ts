@@ -57,6 +57,8 @@ const GET_DB_ZONES = [
     `${APP}/src/components/kv-card`,
     `${APP}/src/domain/kv`,
     `${APP}/src/jobs/publish-kv`,
+    `${APP}/src/actions/kv`,
+    `${APP}/src/lib/kv`,
     'packages/keel/src/components/kv-panel',
     'packages/keel/test-fixture/api/kv/route',
 ]

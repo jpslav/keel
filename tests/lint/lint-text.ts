@@ -37,9 +37,9 @@ export async function lint(relativePath: string, code: string): Promise<Finding[
 export const isIgnored = (relativePath: string) => linter().isPathIgnored(path.join(repoRoot, relativePath))
 
 // Each fence is told apart by its rule id AND its message, because several patterns report as
-// `no-restricted-imports` (vendor, two real-adapter forms, keel's real adapters, next/font/google) and
-// several selectors as `no-restricted-syntax` (getDb in three forms, process.env, run mode, dynamic
-// real/, a11y).
+// `no-restricted-imports` (vendor, app content, keel/core's frameworks, two real-adapter forms, keel's
+// real adapters, next/font/google), several selectors as `no-restricted-syntax` (process.env, run mode,
+// dynamic real/, a11y), and getDb's three forms as `keel/no-raw-db-handle`.
 export interface Fence {
     rule: string
     fragment: string
@@ -64,15 +64,21 @@ export const A11Y_LITERAL: Fence = {
     rule: 'no-restricted-syntax',
     fragment: 'aria-label/placeholder/title/alt carry user-visible copy',
 }
-export const GET_DB: Fence = { rule: 'no-restricted-syntax', fragment: 'must not use the raw db handle' }
+export const GET_DB: Fence = { rule: 'keel/no-raw-db-handle', fragment: 'must not use the raw db handle' }
 export const GET_DB_COMPUTED: Fence = {
-    rule: 'no-restricted-syntax',
+    rule: 'keel/no-raw-db-handle',
     fragment: "Reaching the raw db handle as db['getDb']",
 }
 export const GET_DB_DESTRUCTURE: Fence = {
-    rule: 'no-restricted-syntax',
+    rule: 'keel/no-raw-db-handle',
     fragment: 'Destructuring getDb out of the db port',
 }
+// The framework/app fence and keel/core's fence, outside declarations; the declaration halves report as
+// no-restricted-imports with the pattern's own message.
+export const APP_CODE_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'must reach app content only through' }
+export const APP_CODE_DYNAMIC: Fence = { rule: 'keel/no-dynamic-app-import', fragment: 'is app content' }
+export const CORE_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'keel/core is pure TypeScript' }
+export const CORE_DYNAMIC: Fence = { rule: 'keel/no-dynamic-framework-import-in-core', fragment: 'is a framework' }
 
 // The vendor import every gate here uses, statically and with import().
 export const IMPORTS_VENDOR = "import { S3Client } from '@aws-sdk/client-s3'\nexport const client = S3Client\n"

@@ -18,7 +18,7 @@ House shape for a slice:
    `apps/showcase/messages/es.json` (the two catalogs must stay key- and placeholder-identical, and the framework/app
    namespace partition is test-enforced).
 2. **Route handler(s)** under `apps/showcase/src/app/api/` using ports only; tenant-scoped data through
-   `db.withTenant()` (never `getDb()` in a request path); auth via `auth.requireUser()`/`requireRole()`.
+   `db.withTenant()` (never `getDb()` anywhere under `apps/*/src`: `keel/no-raw-db-handle` bans it by default); auth via `auth.requireUser()`/`requireRole()`.
    Every mutating route (POST/PUT/PATCH/DELETE) MUST call `authorize(...)` (`packages/keel/src/authz/authorize.ts`) —
    the build-time mutation scan fails any route that neither calls it nor is justified in its exemption map.
 3. **Authorization**: register your subject types + rules on the seam — add to `AppSubjectType`,
