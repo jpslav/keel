@@ -1,6 +1,12 @@
-import { CopyObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3'
+import {
+    CopyObjectCommand,
+    DeleteObjectsCommand,
+    HeadObjectCommand,
+    ListObjectsV2Command,
+    S3Client,
+} from '@aws-sdk/client-s3'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { NotFoundError } from '../../ports/errors'
+import { NotFoundError, PreconditionFailedError } from '../../ports/errors'
 import { createRealStorage } from './storage'
 
 /**
@@ -176,6 +182,151 @@ describe('real storage copy', () => {
 
     test('copying an object onto itself is refused before any request, as in the fake', async () => {
         await expect(storage().copy('same/key', 'same/key')).rejects.toThrow(/same key: same\/key/)
+        expect(send).not.toHaveBeenCalled()
+    })
+})
+
+describe('real storage head', () => {
+    const modified = new Date('2026-11-16T12:00:00Z')
+
+    test('sends exactly one HeadObject for the key as given, and reports size, type, ETag and date', async () => {
+        send.mockResolvedValueOnce({
+            ContentLength: 434234,
+            ContentType: 'application/pdf',
+            ETag: '"fba9dede5f27731c9771645a39863328"',
+            LastModified: modified,
+        })
+
+        const info = await storage().head('staging/t1/abc/Q1 report+draft?.pdf')
+
+        expect(send).toHaveBeenCalledTimes(1)
+        // The key goes in the `Key` field, which the SDK puts in the URL itself: never encoded here.
+        expect(sentOfType(HeadObjectCommand)[0]!.input).toStrictEqual({
+            Bucket: 'bucket-under-test',
+            Key: 'staging/t1/abc/Q1 report+draft?.pdf',
+        })
+        expect(info).toStrictEqual({
+            size: 434234,
+            contentType: 'application/pdf',
+            // exactly as S3 sent it, quotes included: it is opaque, and `copy`'s ifMatch must get it back unchanged
+            etag: '"fba9dede5f27731c9771645a39863328"',
+            lastModified: modified,
+        })
+    })
+
+    test('a size of zero is a size of zero, and a missing content type is the same default as get', async () => {
+        send.mockResolvedValueOnce({
+            ContentLength: 0,
+            ETag: '"d41d8cd98f00b204e9800998ecf8427e"',
+            LastModified: modified,
+        })
+
+        expect(await storage().head('empty')).toMatchObject({ size: 0, contentType: 'application/octet-stream' })
+    })
+
+    test.each(['NotFound', 'NoSuchKey'])('a missing object (%s) is null, as in get and the fake', async (name) => {
+        send.mockRejectedValueOnce(s3Error(name, 'not here'))
+        expect(await storage().head('nope')).toBeNull()
+    })
+
+    test('a 403 (no s3:ListBucket), a missing bucket named as such, and every other error reach the caller as they came', async () => {
+        const errors = [
+            s3Error('Forbidden', 'Forbidden'),
+            s3Error('AccessDenied', 'Access Denied'),
+            s3Error('NoSuchBucket', 'The specified bucket does not exist'),
+            s3Error('InternalError', 'try again'),
+        ]
+        for (const error of errors) {
+            send.mockRejectedValueOnce(error)
+            await expect(storage().head('k')).rejects.toBe(error)
+        }
+    })
+
+    test.each([
+        ['ContentLength', { ETag: '"e"', LastModified: modified }],
+        ['ETag', { ContentLength: 1, LastModified: modified }],
+        ['LastModified', { ContentLength: 1, ETag: '"e"' }],
+    ])('an answer without %s throws instead of reporting something S3 never said', async (_name, answer) => {
+        send.mockResolvedValueOnce(answer)
+        await expect(storage().head('k')).rejects.toThrow(/without a ContentLength, ETag and LastModified/)
+    })
+})
+
+describe('real storage copy with ifMatch', () => {
+    test('sends CopySourceIfMatch with the etag exactly as given, and nothing else conditional', async () => {
+        send.mockResolvedValueOnce({})
+
+        await storage().copy('staging/a', 'final/a', { ifMatch: '"fba9dede5f27731c9771645a39863328"' })
+
+        expect(sentOfType(CopyObjectCommand)[0]!.input).toStrictEqual({
+            Bucket: 'bucket-under-test',
+            Key: 'final/a',
+            CopySource: 'bucket-under-test/staging/a',
+            MetadataDirective: 'COPY',
+            CopySourceIfMatch: '"fba9dede5f27731c9771645a39863328"',
+        })
+    })
+
+    test('the etag head returned goes to CopyObject unchanged (head, then copy, as finalize does)', async () => {
+        send.mockResolvedValueOnce({ ContentLength: 5, ETag: '"abc"', LastModified: new Date() })
+        send.mockResolvedValueOnce({})
+
+        const info = (await storage().head('staging/a'))!
+        await storage().copy('staging/a', 'final/a', { ifMatch: info.etag })
+
+        expect(sentOfType(CopyObjectCommand)[0]!.input.CopySourceIfMatch).toBe(info.etag)
+    })
+
+    test('no options, or options without ifMatch, send no condition at all', async () => {
+        send.mockResolvedValue({})
+        await storage().copy('a', 'b')
+        await storage().copy('a', 'c', {})
+        for (const command of sentOfType(CopyObjectCommand))
+            expect(command.input).not.toHaveProperty('CopySourceIfMatch')
+    })
+
+    test.each([
+        [
+            'named PreconditionFailed',
+            s3Error('PreconditionFailed', 'At least one of the pre-conditions you specified did not hold'),
+        ],
+        ['a bare 412', Object.assign(new Error('x'), { name: 'Unknown', $metadata: { httpStatusCode: 412 } })],
+    ])('a source that no longer matches (%s) is a PreconditionFailedError', async (_label, error) => {
+        send.mockRejectedValueOnce(error)
+
+        const failure = storage().copy('staging/a', 'final/a', { ifMatch: '"old"' })
+
+        await expect(failure).rejects.toBeInstanceOf(PreconditionFailedError)
+        await expect(failure).rejects.toThrow(/staging\/a is no longer the version "old"; nothing was copied/)
+    })
+
+    test('a missing source is still a NotFoundError when an ifMatch was given, and other errors are unchanged', async () => {
+        const denied = s3Error('AccessDenied', 'Access Denied')
+        send.mockRejectedValueOnce(s3Error('NoSuchKey', 'gone')).mockRejectedValueOnce(denied)
+
+        await expect(storage().copy('a', 'b', { ifMatch: '"x"' })).rejects.toBeInstanceOf(NotFoundError)
+        await expect(storage().copy('a', 'b', { ifMatch: '"x"' })).rejects.toBe(denied)
+    })
+
+    test.each(['', ' ', '*', ' * '])(
+        'an ifMatch of %j is refused before any request: HTTP gives it a meaning no etag has',
+        async (ifMatch) => {
+            await expect(storage().copy('a', 'b', { ifMatch })).rejects.toThrow(/not empty and not "\*"/)
+            // first of all: before the same-key check too, as in the fake
+            await expect(storage().copy('same', 'same', { ifMatch })).rejects.toThrow(/not empty and not "\*"/)
+            expect(send).not.toHaveBeenCalled()
+        },
+    )
+
+    test('the refusal names the version when there is one, and not "undefined" when a 412 comes back unasked', async () => {
+        send.mockRejectedValueOnce(s3Error('PreconditionFailed', 'x'))
+        await expect(storage().copy('staging/a', 'final/a')).rejects.toThrow(
+            /staging\/a is no longer the version \(none given\)/,
+        )
+    })
+
+    test('a copy onto itself is refused before any request even with an ifMatch', async () => {
+        await expect(storage().copy('same', 'same', { ifMatch: '"x"' })).rejects.toThrow(/same key/)
         expect(send).not.toHaveBeenCalled()
     })
 })

@@ -31,6 +31,13 @@ export const params = {
         demo: 'PLACEHOLDER_DEMO_DOMAIN',
         certificateArn: 'PLACEHOLDER_ACM_CERTIFICATE_ARN',
     },
+    database: {
+        // cutover: data-api — how the app reaches Postgres; infra/stack.ts builds the matching network shape
+        // and sets DATABASE_TRANSPORT from it.
+        // 'pg' (the default): node-postgres from a Lambda inside the database's VPC. 'data-api' (opt-in):
+        // the RDS Data API from a Lambda outside any VPC, with no NAT (ADR-0002, addendum 2026-11-16).
+        transport: 'pg' as 'pg' | 'data-api',
+    },
     clerk: {
         // cutover: auth-dev (development instance), auth-prod (production instance)
         publishableKeyName: 'PLACEHOLDER_CLERK_PUBLISHABLE_KEY_NAME',

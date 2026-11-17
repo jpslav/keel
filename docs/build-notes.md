@@ -1633,6 +1633,32 @@ the panel is the element that carries it.
   `@/*` import could sit in keel's fixture. In the typescript-eslint this repo pins (8.72) its specifier is
   `node.source`; print the AST before trusting that shape on another version.
 
+## Storage `head` and `copy`'s `ifMatch` (2026-11-17, `storage-head`)
+
+- **A HEAD error is a bare status.** AWS's HeadObject reference says the response is the GET's without a body, so an
+  error is "a generic code, such as 400, 403, 404, 405, 412 or 304" and "it's not possible to retrieve the exact
+  exception". The SDK has a `NotFound` class for it (`@aws-sdk/client-s3` 3.1096.0), and `head` maps that and
+  `NoSuchKey`. The same bareness is why a missing bucket cannot be told from a missing key on a HEAD.
+- **The ETag is checked on the bytes about to be published.** The fake stages the copy, hashes the STAGED file and
+  compares it with `ifMatch`, so no replacement of the source can put other bytes under the old etag. A mutation
+  that checks the source after staging instead survives, and should: it differs only when B is staged and the
+  source is back to A before the check (an ABA swap). A race with a writer that goes A, B, A did not catch it in 5
+  runs each at 9-byte and 1 MB bodies (the same test with 8 MB bodies failed even on the correct code, which was not
+  investigated), so the test's comment says what it does not pin. The staged check is the strict form by
+  construction, so it stays.
+- **Opening a directory read-only succeeds, and reading it fails.** `head` of a directory first passed its test by an
+  accident, most likely because the sidecar's `ENOENT` won the `Promise.all` and the catch turned it into `null`. Removing the
+  `isFile` guard survived until the test put a sidecar file beside the directory, so that only "not a regular file"
+  could say no. The mutant then failed 3 runs of 3.
+- **A race test needs the loser to happen.** The conditional copy loses to a simultaneous `put` of the source in
+  roughly 3% to 20% of rounds here (3 refusals took 18 to 107 rounds, five runs). Delaying the replacement by 0 to 7
+  event-loop turns to spread it across the copy made that rarer (50 to 257 rounds for 3), so it was dropped. The test runs
+  up to 1000 rounds until 3 refusals have happened, checks the invariant every round (the destination is absent or
+  holds the OLD bytes, never the new ones under the old etag), and requires that at least one refusal happened.
+  Vitest hides the output of a passing test, so the counts were written to a file to measure this.
+- **`copyFile` does not carry the modification time over**: the copy's time is the time of the copy (checked on this
+  machine), so the fake's `lastModified` after a copy is its own, as a new object's is.
+
 ## A superuser hides every grant a role switch needs (2026-11-16, `fix/grant-app-user-to-owner`)
 
 - **Every contract suite connected as `postgres`, so none of them could see that the deployed role may
@@ -1652,6 +1678,59 @@ the panel is the element that carries it.
   `current_user::regrole` turns a role named `Keel_Second` into a lookup of `keel_second`. Compare
   `pg_roles.rolname = current_user` instead, and quote any role name you print for someone to run
   (`quote_ident`). A test role with a mixed-case name is what found it.
+
+## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
+
+- **An untyped string parameter is `varchar` on the real Data API.** So `uuid_column = :id` fails on
+  Aurora with "operator does not exist: uuid = character varying" unless the SQL casts or the parameter
+  carries `typeHint: 'UUID'`. Two things hide this:
+    - node-postgres sends parameters with no type at all, so every query in this repo was written relying
+      on inference;
+    - the popular community emulator sets PgJDBC's `stringtype=unspecified`, so code tested against it
+      passes and then fails in AWS.
+
+    A test double for a wire protocol is only worth having if it is as strict as the real thing where the
+    real thing is strict.
+
+- **`PREPARE` plus `pg_prepared_statements.parameter_types` is a way to ask Postgres what it would infer
+  for each `$n`,** without running the statement. It needs one connection for both steps, which over the
+  Data API means one transaction. Cast the result to `text[]` before reading it: `regtype[]` is not
+  among the result types the Data API documents, and `text[]` is.
+- **Kysely's `Driver` can be built on a stateless transport, with one exception.** A "connection" can
+  be a handle holding an optional transaction id. Queries and transactions map onto BeginTransaction,
+  ExecuteStatement with `transactionId`, and Commit/Rollback, savepoints included, as plain SQL inside the
+  transaction. What cannot map is session state outside a transaction, so refuse it before the call
+  rather than let it vanish.
+
+    The exception is Kysely's own Migrator. It takes a session-level advisory lock on `db.connection()`,
+    outside its transaction, and creates its bookkeeping tables before locking. Hand it a `Transaction`
+    that opens with `pg_advisory_xact_lock`. Two migrators that race into `CREATE TABLE IF NOT EXISTS` in
+    two open transactions do not tolerate each other the way autocommit does: the loser's transaction
+    aborts, and the next statement reports "current transaction is aborted", not the real cause.
+
+- **When Kysely's commit fails, it calls rollback.** A driver that clears the transaction handle before
+  committing turns that rollback into a "no transaction" error that replaces the commit's own error.
+- **A rollback that finds its transaction gone has already happened.** The Data API rolls back on its
+  own after three idle minutes. Treating `TransactionNotFoundException` on rollback as success keeps the
+  error that caused the rollback from being replaced by one about the rollback.
+- **A hoisted `vi.mock` factory runs once per file, not once per `vi.resetModules()`.** A test that
+  counts module loads with a counter in the factory sees only the FIRST load in the file. Every later
+  "this never loads" assertion then passes vacuously, depending on test order. Register counting mocks
+  with `vi.doMock` in `beforeEach`, after the reset, and prove it by mutation in both test orders (as
+  `packages/keel/src/adapters/real/index.test.ts` was).
+
+## Checking both infra shapes (2026-11-16, `feat/rds-data-api-infra`)
+
+- **`cdk synth` builds one shape: the one the app's params choose.** An opt-in shape is therefore never
+  built by any gate until someone deploys it. `infra/check-shapes.ts` constructs the stack once per
+  shape with CDK's own `Template`, and checks each against the runtime's list of required variables
+  (`DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`, imported by path).
+  `pnpm --filter infra synth` runs it, and so does CI. It needs no `knip.json` entry: knip finds it as an
+  entry through that script (`tsx check-shapes.ts`), and an explicit entry was reported as redundant.
+- **A CDK prop set to `false` is not the same as one left unset.** `enableDataApi: false` adds
+  `EnableHttpEndpoint: false` to a cluster that previously had no such property. That is a no-op update on
+  every existing stack, and a diff for reviewers to puzzle over. Spread the property in only when it is
+  true.
 
 ## Two small lessons from the audit clock and the cron route (2026-11-17, `fix/audit-clock-and-cron-route`)
 

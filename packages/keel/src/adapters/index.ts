@@ -90,7 +90,7 @@ if (isSimulated && process.env.NODE_ENV === 'production') {
     )
 }
 
-const real = appMode === 'real' ? (await import('./real/index')).createRealPorts() : null
+const real = appMode === 'real' ? await (await import('./real/index')).createRealPorts() : null
 
 export const auth: AuthPort = real?.auth ?? fakeAuth
 export const db: DbPort = real?.db ?? fakeDb

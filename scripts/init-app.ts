@@ -362,8 +362,16 @@ function renameApp(current: Identity, slug: string, displayName: string): void {
     rewrite('vitest.contract.config.ts', [[`'${dir}'`, `'${slug}'`]], 'contract app')
     // tsconfig.json deliberately needs NO rewrite: no path in it names an app. `@app-config/*`
     // points at packages/keel/test-fixture, and there is no `@/*` entry to repoint.
+    // config/params too: infra/app.ts reads `params.database.transport` to pick the network shape.
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
-        rewrite(file, [[`apps/${dir}/config/app`, `apps/${slug}/config/app`]], 'APP_SLUG import')
+        rewrite(
+            file,
+            [
+                [`apps/${dir}/config/app`, `apps/${slug}/config/app`],
+                [`apps/${dir}/config/params`, `apps/${slug}/config/params`],
+            ],
+            'app config imports',
+        )
     }
 
     // --- the docs -------------------------------------------------------------------------
@@ -516,8 +524,16 @@ function ejectShowcase(survivor: string, onDisk: string): void {
     )
     // tsconfig.json needs no rewrite here either — see the rename path. Its `@app-config/*` pointing
     // at packages/keel/test-fixture is what keeps `tsc` green through an eject.
+    // config/params moved to the survivor above (rescueFromShowcase), so the stack's import follows it.
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
-        rewrite(file, [[`apps/${SHOWCASE}/config/app`, `apps/${survivor}/config/app`]], 'APP_SLUG import')
+        rewrite(
+            file,
+            [
+                [`apps/${SHOWCASE}/config/app`, `apps/${survivor}/config/app`],
+                [`apps/${SHOWCASE}/config/params`, `apps/${survivor}/config/params`],
+            ],
+            'app config imports',
+        )
     }
 
     for (const doc of gatedDocs()) {

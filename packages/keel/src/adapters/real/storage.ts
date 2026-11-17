@@ -2,14 +2,15 @@ import {
     CopyObjectCommand,
     DeleteObjectsCommand,
     GetObjectCommand,
+    HeadObjectCommand,
     ListObjectsV2Command,
     PutObjectCommand,
     S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post'
-import { NotFoundError } from '../../ports/errors'
-import type { StoragePort, StoredObject } from '../../ports/storage'
+import { NotFoundError, PreconditionFailedError } from '../../ports/errors'
+import type { CopyOptions, StoragePort, StoredObject, StoredObjectInfo } from '../../ports/storage'
 
 /** S3's hard cap on keys in one DeleteObjects request. */
 const DELETE_BATCH_SIZE = 1000
@@ -46,6 +47,32 @@ export function createRealStorage(bucket: string, region: string): StoragePort {
             } catch (error) {
                 if ((error as { name?: string }).name === 'NoSuchKey') return null
                 throw error
+            }
+        },
+
+        async head(key): Promise<StoredObjectInfo | null> {
+            let result
+            try {
+                result = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+            } catch (error) {
+                // `NotFound` is the SDK's error for a HEAD 404, which has no body to say which of key and bucket
+                // is missing (AWS: "It's not possible to retrieve the exact exception"), so a missing bucket reads
+                // as null too. `NoSuchKey` for a stub or a future SDK that does say. A 403 (no `s3:ListBucket`)
+                // and everything else are not a missing object and reach the caller as they came.
+                const { name } = error as { name?: string }
+                if (name === 'NotFound' || name === 'NoSuchKey') return null
+                throw error
+            }
+            // A size of 0 or an invented date would let a caller's check pass on something S3 never said.
+            const { ContentLength, ContentType, ETag, LastModified } = result
+            if (ContentLength === undefined || ETag === undefined || LastModified === undefined) {
+                throw new Error(`storage head: S3 answered for ${key} without a ContentLength, ETag and LastModified`)
+            }
+            return {
+                size: ContentLength,
+                contentType: ContentType ?? 'application/octet-stream',
+                etag: ETag,
+                lastModified: LastModified,
             }
         },
 
@@ -95,7 +122,12 @@ export function createRealStorage(bucket: string, region: string): StoragePort {
             }
         },
 
-        async copy(from, to) {
+        async copy(from, to, options?: CopyOptions) {
+            // HTTP gives an empty If-Match no meaning and `*` the meaning "any version", so S3 could read either as
+            // "no condition" and copy unchecked, where the fake would refuse. No etag `head` returns is either.
+            if (options?.ifMatch !== undefined && (options.ifMatch.trim() === '' || options.ifMatch.trim() === '*')) {
+                throw new Error('storage copy: ifMatch must be the etag head returned, not empty and not "*"')
+            }
             // A copy onto itself changes nothing, and is nearly always two keys built the same way by mistake:
             // refuse it before spending a request, with the same error the fake gives.
             if (from === to) throw new Error(`storage copy: source and destination are the same key: ${from}`)
@@ -110,10 +142,25 @@ export function createRealStorage(bucket: string, region: string): StoragePort {
                         Key: to,
                         CopySource: copySourceFor(bucket, from),
                         MetadataDirective: 'COPY',
+                        // Only when asked for: S3 then copies only if the source's ETag is this one. The value
+                        // is exactly what `head` returned (an opaque string, quotes and all), never rebuilt.
+                        ...(options?.ifMatch !== undefined ? { CopySourceIfMatch: options.ifMatch } : {}),
                     }),
                 )
             } catch (error) {
-                const { name, message } = error as { name?: string; message?: string }
+                const { name, message, $metadata } = error as {
+                    name?: string
+                    message?: string
+                    $metadata?: { httpStatusCode?: number }
+                }
+                // The source is no longer the version `ifMatch` names: S3's 412. (The CopyObject reference gives
+                // 412 for its other conditional headers and no code for this one, which is HTTP's rule for a
+                // failed If-Match; the cutover row asks to confirm it.) Nothing was copied.
+                if (name === 'PreconditionFailed' || $metadata?.httpStatusCode === 412) {
+                    throw new PreconditionFailedError(
+                        `storage copy: ${from} is no longer the version ${options?.ifMatch ?? '(none given)'}; nothing was copied`,
+                    )
+                }
                 // A missing SOURCE. (A missing bucket is NoSuchBucket, a misconfiguration, and is not mapped.)
                 if (name === 'NoSuchKey') throw new NotFoundError(`storage object not found: ${from}`)
                 // One CopyObject copies at most 5 GB (AWS's CopyObject reference; UploadPartCopy is the route
