@@ -256,10 +256,16 @@ describe('recordAuditEvent detail', () => {
         expect(await attempt(detail)).toContain(message)
     })
 
+    // Secret-SHAPED values are built here rather than written out: a credential-shaped literal in source
+    // reads as a committed secret to a scanner and to a reader (.gitleaks.toml, the keyset note).
+    const jwtShaped = ['eyJhbGciOiJSUzI1NiJ9', 'eyJzdWIiOiJ4In0', 'c2ln'].join('.')
+    const bearerShaped = `Bearer ${'fixture'.repeat(3)}`
+    const plantedSecret = ['fixture', 'planted', 'value'].join('-')
+
     test.each([
         ['an email address', { reason: 'sender jo.doe@example.test is not a member' }, 'looks like an email address'],
-        ['a JWT', { seen: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' }, 'looks like a JWT'],
-        ['a Bearer credential', { header: 'Bearer sk_live_51HxYzAbCdEfGh0123' }, 'looks like a Bearer credential'],
+        ['a JWT', { seen: jwtShaped }, 'looks like a JWT'],
+        ['a Bearer credential', { header: bearerShaped }, 'looks like a Bearer credential'],
         ['an address with an accented domain', { member: 'josé@bücher.de' }, 'looks like an email address'],
         ['an address in another script', { member: '李@例子.中国' }, 'looks like an email address'],
         ['an address with a suffix', { member: 'alice@example.com_admin' }, 'looks like an email address'],
@@ -279,7 +285,7 @@ describe('recordAuditEvent detail', () => {
 
     test.each([
         ['a non-finite number', { 'jane.doe@example.com': Number.NaN }, 'is not a finite number'],
-        ['a Date', { 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln': new Date(0) }, 'is not a plain object'],
+        ['a Date', { [jwtShaped]: new Date(0) }, 'is not a plain object'],
         ['an undefined in an array', { by: { 'jane.doe@example.com': [undefined] } }, 'is undefined'],
         ['a very long key', { ['k'.repeat(5000)]: Number.NaN }, 'is not a finite number'],
     ])('a refusal under %s never repeats an unsafe key in its path', async (_name, detail, message) => {
@@ -298,9 +304,9 @@ describe('recordAuditEvent detail', () => {
     })
 
     test('a secret under a key that names it is refused without repeating the value', async () => {
-        const refused = await attempt({ sessionToken: 'sk_live_51HxYz' })
+        const refused = await attempt({ sessionToken: plantedSecret })
         expect(refused).toContain('names a secret')
-        expect(refused).not.toContain('sk_live_51HxYz')
+        expect(refused).not.toContain(plantedSecret)
     })
 
     test.each([
