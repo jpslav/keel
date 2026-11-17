@@ -52,8 +52,23 @@ const MUTATING_VERBS: readonly string[] = ['POST', 'PUT', 'PATCH', 'DELETE']
 // Next.js routes route.ts/tsx/js/jsx/mjs. All of them, or the scan is bypassable by filename.
 const ROUTE_FILE = /^route\.(?:mjs|[jt]sx?)$/
 
-/** The extensions one extensionless module specifier can land on; two of them beside each other is ambiguous. */
+/** The extensions one extensionless module specifier can land on, in TypeScript's resolution or the bundler's. */
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
+
+/**
+ * Every file the module TypeScript resolved to could have been, by the bundler's rules: `impl` with any source
+ * extension, `impl/index` with any, and `impl/package.json` (whose `main` the bundler may follow). For a resolved
+ * `impl/index.ts`, the module is `impl`.
+ */
+function moduleCandidates(resolvedFile: string): string[] {
+    const stem = resolvedFile.replace(/\.[cm]?[jt]sx?$/, '')
+    const base = path.basename(stem) === 'index' ? path.dirname(stem) : stem
+    return [
+        ...SOURCE_EXTENSIONS.map((ext) => base + ext),
+        ...SOURCE_EXTENSIONS.map((ext) => path.join(base, `index${ext}`)),
+        path.join(base, 'package.json'),
+    ].filter((file) => existsSync(file))
+}
 
 export interface ScanRoot {
     /** Human label: disambiguates identical route paths across roots. */
@@ -77,8 +92,9 @@ export interface ScanRoot {
  *   For a guard that wraps the handler, reaching it is not enough: the guard has to be what Next calls.
  * - `calls`: the handler reaches a call to one of `callees` (dotted names, `auth.updateProfile`).
  * - `opens-with-simulated-404`: the handler's FIRST statement is `if (!isSimulated)` and its branch does
- *   nothing but return or throw a response built from inert values (`return new Response(null, { status:
- *   404 })`, `return Response.json(…)`, `throw new NotFoundError(…)`), so the real-mode path does nothing.
+ *   nothing but return or throw a response built from literals (`return new Response(null, { status: 404 })`,
+ *   `return Response.json(…)`, `throw new NotFoundError(…)`), and no parameter runs code before it (a default),
+ *   so the real-mode path does nothing.
  */
 export type Gate =
     | { kind: 'wrapped-by'; callees: readonly string[] }
@@ -192,7 +208,8 @@ export function describeGate(gate: Gate): string {
             return `the handler reaches a call to an imported ${names(gate.callees)} on its own path`
         case 'opens-with-simulated-404':
             return (
-                'the handler opens with `if (!isSimulated) return new Response(null, { status: 404 })` (an imported ' +
+                'the handler takes no parameter that runs code (a default) and opens with ' +
+                '`if (!isSimulated) return new Response(null, { status: 404 })` (an imported ' +
                 '`isSimulated`, and a branch that only returns or throws a response built from inert values)'
             )
     }
@@ -325,12 +342,14 @@ class RootScanner {
         if (/\.d\.[cm]?ts$/.test(resolved.resolvedFileName)) {
             return `'${specifier}' resolves to a declaration file (${resolved.resolvedFileName}), which has no handler body to read`
         }
-        // TypeScript prefers `impl.ts` where Next's bundler may load `impl.js` beside it: with two candidates for
-        // the one module, the scan cannot know which file is served, so it reads neither.
-        const stem = resolved.resolvedFileName.replace(/\.[cm]?[jt]sx?$/, '')
-        const twins = SOURCE_EXTENSIONS.map((ext) => stem + ext).filter((file) => existsSync(file))
-        if (twins.length > 1) {
-            return `'${specifier}' could load any of ${twins.map((f) => path.basename(f)).join(', ')}, and the scan cannot tell which Next serves`
+        // TypeScript and Next's bundler do not pick the same file from every layout: TypeScript prefers `impl.ts`
+        // where the bundler may load `impl.js` beside it, skips `impl.mjs` for an extensionless specifier and reads
+        // `impl/index.ts` instead, and follows a package.json's `types` where the bundler follows `main`. With more
+        // than one candidate for the one module, the scan cannot know which file is served, so it reads none.
+        const candidates = moduleCandidates(resolved.resolvedFileName)
+        if (candidates.length > 1) {
+            const names = candidates.map((file) => path.relative(path.dirname(from.fileName), file)).join(', ')
+            return `'${specifier}' could load any of ${names}, and the scan cannot tell which Next serves`
         }
         const loaded = this.load(resolved.resolvedFileName)
         return typeof loaded === 'string' ? `'${specifier}' (${resolved.resolvedFileName}): ${loaded}` : loaded
@@ -392,6 +411,13 @@ class RootScanner {
             if (isReassigned(src, decl)) {
                 return {
                     reason: 'the handler is a function the file reassigns, so the declaration is not what Next calls',
+                }
+            }
+            if (isRedeclared(decl)) {
+                return {
+                    reason:
+                        'the handler is declared more than once in its scope, and the last declaration is the one that ' +
+                        'runs; declare it once',
                 }
             }
             return { src, fn: decl }
@@ -463,6 +489,8 @@ class Reach {
     invoke(fn: ts.FunctionLikeDeclaration): void {
         if (this.invoked.has(fn)) return
         this.invoked.add(fn)
+        // Calling a generator runs none of its body; it only makes an iterator.
+        if (fn.asteriskToken) return
         // Parameter defaults are not visited: one runs only when its argument is missing, which for a handler
         // depends on what Next passes, and for a helper on the caller. Not counting them fails closed.
         if (!fn.body) return
@@ -530,7 +558,9 @@ class Reach {
         if (!ts.isIdentifier(e)) return undefined
         const decl = declarationOf(this.src, e)
         if (!decl) return undefined
-        if (ts.isFunctionDeclaration(decl)) return decl.body && !isReassigned(this.src, decl) ? decl : undefined
+        if (ts.isFunctionDeclaration(decl)) {
+            return decl.body && !isReassigned(this.src, decl) && !isRedeclared(decl) ? decl : undefined
+        }
         if (ts.isVariableDeclaration(decl) && isConst(decl) && decl.initializer) {
             const init = unwrap(decl.initializer)
             if (isFunctionLiteral(init)) return init
@@ -788,6 +818,32 @@ function isConst(decl: ts.VariableDeclaration): boolean {
     return (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0
 }
 
+/**
+ * A function declared twice in one scope, or also declared as a `var` (`function check() {…} function check() {}`,
+ * `var check = …`): TypeScript rejects both, but nothing typechecks a route.js, and at run time the LAST one is what
+ * the name holds. An overload signature has no body and is not a second declaration.
+ */
+function isRedeclared(decl: ts.FunctionDeclaration): boolean {
+    // Read from the syntax, not the binder: in a JS file the binder gives `function check` and `var check` separate
+    // symbols, and an exported function its own export symbol, so neither shows as a second declaration there.
+    const name = decl.name?.text
+    if (name === undefined) return false
+    let scope: ts.Node = decl.parent
+    while (!ts.isSourceFile(scope) && !ts.isFunctionLike(scope)) scope = scope.parent
+    let count = 0
+    const walk = (node: ts.Node): void => {
+        if (node !== scope && (ts.isFunctionLike(node) || ts.isClassLike(node))) {
+            // A nested function's NAME belongs to this scope; nothing inside it does.
+            if (ts.isFunctionDeclaration(node) && node.body !== undefined && node.name?.text === name) count++
+            return
+        }
+        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) count++
+        ts.forEachChild(node, walk)
+    }
+    walk(scope)
+    return count > 1
+}
+
 function isReassigned(src: Source, decl: ts.FunctionDeclaration): boolean {
     const symbol = decl.name ? src.checker.getSymbolAtLocation(decl.name) : undefined
     return symbol !== undefined && src.reassigned.has(symbol)
@@ -1033,7 +1089,7 @@ function breaksOut(body: ts.Node, labels: readonly string[], unlabeled: boolean,
  */
 function opensWithSimulated404(src: Source, fn: ts.FunctionLikeDeclaration): boolean {
     if (!fn.body || !ts.isBlock(fn.body)) return false
-    if (fn.parameters.some((p) => !ts.isIdentifier(p.name) || p.initializer !== undefined)) return false
+    if (!fn.parameters.every(runsNothing)) return false
     const [first] = fn.body.statements
     if (!first || !ts.isIfStatement(first)) return false
     const condition = unwrap(first.expression)
@@ -1042,7 +1098,21 @@ function opensWithSimulated404(src: Source, fn: ts.FunctionLikeDeclaration): boo
     return isInertExit(src, first.thenStatement)
 }
 
+/**
+ * A parameter that runs no code when the handler is called: no default anywhere in it, and no computed key in a
+ * destructuring pattern. Next's own `(request, { params })` is fine; `{ params = wipe() }` is not.
+ */
+function runsNothing(p: ts.ParameterDeclaration | ts.BindingElement): boolean {
+    if (p.initializer !== undefined) return false
+    if (ts.isBindingElement(p) && p.propertyName !== undefined && ts.isComputedPropertyName(p.propertyName))
+        return false
+    if (ts.isIdentifier(p.name)) return true
+    return p.name.elements.every((element) => ts.isOmittedExpression(element) || runsNothing(element))
+}
+
 const RESPONSE_CONSTRUCTORS = ['Response', 'NextResponse']
+/** A global constructor that may be thrown from the gate: an `Error`, which does nothing when built. */
+const GLOBAL_ERROR = /^(?:[A-Z][A-Za-z]*)?Error$/
 const RESPONSE_FACTORIES = ['Response.json', 'Response.redirect', 'NextResponse.json', 'NextResponse.redirect']
 
 /** `return <response>` or `throw new X(…)`, alone or alone in a block, built from literals only. */
@@ -1056,14 +1126,26 @@ function isInertExit(src: Source, s: ts.Statement): boolean {
         return name !== undefined && allowed.includes(name) && (e.arguments ?? []).every((a) => isLiteralValue(src, a))
     }
     if (ts.isThrowStatement(s)) {
+        // An imported constructor falls under the gate-name trust (gateName); a global must be an Error, since
+        // other globals (a WebSocket) do I/O when built.
         const e = unwrap(s.expression)
+        if (!ts.isNewExpression(e)) return false
+        const name = globalOrGateName(src, e.expression)
+        const global = isGlobal(src, e.expression)
         return (
-            ts.isNewExpression(e) &&
-            globalOrGateName(src, e.expression) !== undefined &&
+            name !== undefined &&
+            (!global || GLOBAL_ERROR.test(name)) &&
             (e.arguments ?? []).every((a) => isLiteralValue(src, a))
         )
     }
     return false
+}
+
+/** The callee's head is declared nowhere in the file. */
+function isGlobal(src: Source, callee: ts.Expression): boolean {
+    let head = unwrap(callee)
+    while (ts.isPropertyAccessExpression(head)) head = unwrap(head.expression)
+    return ts.isIdentifier(head) && declarationOf(src, head) === undefined
 }
 
 /** A callee's dotted name when its head is a global (declared nowhere in the file), or its gate name if imported. */

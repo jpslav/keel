@@ -190,6 +190,14 @@ describe('the export forms a mutating handler can take', () => {
             expect: { POST: 'authorized', DELETE: 'open' },
         },
         {
+            name: 'a re-export into a directory with only an index',
+            files: {
+                'route.ts': "export { POST } from './impl'",
+                'impl/index.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }`,
+            },
+            expect: { POST: 'authorized' },
+        },
+        {
             name: 'a re-export through a tsconfig `paths` alias',
             files: {
                 'route.ts': "export { POST } from '@/impl'",
@@ -452,6 +460,25 @@ describe('what the analyser refuses, and says why', () => {
                 'b.ts': "export { POST } from './a'",
             },
             expect: { POST: /leads back to itself/ },
+        },
+        {
+            name: 'a re-export TypeScript reads from impl/index.ts while the bundler loads impl.mjs',
+            files: {
+                'route.ts': "export { POST } from './impl'",
+                'impl.mjs': 'export async function POST() {}',
+                'impl/index.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }`,
+            },
+            expect: { POST: /could load any of impl\.mjs, impl\/index\.ts/ },
+        },
+        {
+            name: 'a re-export into a directory whose package.json the bundler may follow',
+            files: {
+                'route.ts': "export { POST } from './impl'",
+                'impl/package.json': JSON.stringify({ types: './index.ts', main: './served.js' }),
+                'impl/index.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }`,
+                'impl/served.js': 'export async function POST() {}',
+            },
+            expect: { POST: /could load any of impl\/index\.ts, impl\/package\.json/ },
         },
         {
             name: 'a route file that is no module at all',
@@ -877,6 +904,26 @@ describe("what counts as a handler's own path", () => {
             expect: 'open',
         },
         {
+            name: 'in a same-file generator that is called',
+            files: post('check()', `function* check() { ${CALL} }\n`),
+            expect: 'open',
+        },
+        {
+            name: 'in a same-file async generator that is called',
+            files: post('check()', `async function* check() { ${CALL} }\n`),
+            expect: 'open',
+        },
+        {
+            name: 'in a generator expression that is called',
+            files: post('check()', `const check = function* () { ${CALL} }\n`),
+            expect: 'open',
+        },
+        {
+            name: 'in a generator passed to a wrapper',
+            files: post(`return wrap(function* () { ${CALL} })`, 'declare const wrap: Function\n'),
+            expect: 'open',
+        },
+        {
             name: 'in a same-file function two calls deep, through a cycle',
             files: post('a()', `function a(): void { b() }\nfunction b(): void { if (cond) a(); ${CALL} }\n`),
             expect: 'authorized',
@@ -1043,6 +1090,24 @@ describe("what counts as a handler's own path", () => {
                 "/** @import { authorize } from 'keel/authz/authorize' */\nexport async function POST() { authorize() }",
         })[0]
         expect(route?.handlers.map((h) => [h.verb, outcome(h)])).toEqual([['POST', 'open']])
+    })
+
+    it('a route.js helper declared twice, or also as a var, is not followed: the last one is what runs', () => {
+        const twice = scanTree({
+            'route.js': `${AUTHORIZE}export async function POST() { function check() { authorize() } function check() {} check() }`,
+        })[0]
+        expect(twice?.handlers.map((h) => outcome(h))).toEqual(['open'])
+        const asVar = scanTree({
+            'route.js': `${AUTHORIZE}export async function POST() { function check() { authorize() } var check = () => {}; check() }`,
+        })[0]
+        expect(asVar?.handlers.map((h) => outcome(h))).toEqual(['open'])
+    })
+
+    it('a route.js handler declared twice in its scope is refused', () => {
+        const route = scanTree({
+            'route.js': `${AUTHORIZE}export async function POST() { authorize() }\nfunction POST() {}`,
+        })[0]
+        expect(route?.handlers[0]?.refusal).toMatch(/declared more than once/)
     })
 
     it('a route.js that reassigns its handler is refused', () => {
@@ -1241,11 +1306,24 @@ describe('the facts a gate is judged on', () => {
                 `${SIM}declare const db: any\nexport async function POST(r: Request, c: unknown, x = db.wipe()) { if (!isSimulated) return new Response(null) }`,
             ).opensWithSimulated404,
         ).toBe(false)
-        expect(
+        // Next's own `(request, { params })` runs nothing; a default or a computed key anywhere in a pattern does.
+        const params = (signature: string) =>
             factsOf(
-                `${SIM}export async function POST(r: Request, { params }: { params: unknown }) { if (!isSimulated) return new Response(null) }`,
-            ).opensWithSimulated404,
-        ).toBe(false)
+                `${SIM}declare const db: any\nexport async function DELETE(${signature}) { if (!isSimulated) return new Response(null) }`,
+                'DELETE',
+            ).opensWithSimulated404
+        expect(params('r: Request, { params }: { params: unknown }')).toBe(true)
+        expect(params('r: Request, { params: { id } }: any')).toBe(true)
+        expect(params('r: Request, [a, , b]: any')).toBe(true)
+        expect(params('r: Request, { params = db.wipe() }: any')).toBe(false)
+        expect(params('r: Request, { params: { id = db.wipe() } }: any')).toBe(false)
+        expect(params('r: Request, [a = db.wipe()]: any')).toBe(false)
+        expect(params('r: Request, { [db.wipe()]: x }: any')).toBe(false)
+        // A global that is not an Error does work when built; an Error does not.
+        expect(gate("if (!isSimulated) throw new WebSocket('ws://example.invalid')")).toBe(false)
+        expect(gate("if (!isSimulated) throw new TypeError('not here')")).toBe(true)
+        expect(gate("if (!isSimulated) throw new Error('not here')")).toBe(true)
+        expect(gate('if (!isSimulated) throw new Errors()')).toBe(false)
         expect(
             factsOf(
                 `${SIM}export async function POST(request: Request, ...rest: unknown[]) { if (!isSimulated) return new Response(null) }`,
