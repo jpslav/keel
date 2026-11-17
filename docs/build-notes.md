@@ -1425,8 +1425,8 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
 - **A fence that names a directory must name every extension ESLint lints there.** Every fence glob said
   `*.{ts,tsx}`, so a `.mjs` file in `apps/*/src` or `packages/keel/src` could import a vendor SDK, read
   `process.env` or take the raw db handle with a green `pnpm lint`. ESLint lints eight extensions here,
-  not six: typescript-eslint's recommended config adds `.mts` and `.cts`, which `keel/public-surface` had
-  missed too. The globs now take their extensions from one constant (`SRC_EXT`). Carve-outs do NOT: a test
+  not six: typescript-eslint's recommended config names `.mts` and `.cts` beside `.ts` and `.tsx`, and
+  `keel/public-surface` had missed those two as well. The globs now take their extensions from one constant (`SRC_EXT`). Carve-outs do NOT: a test
   carve-out names what vitest runs (`*.test.{ts,tsx}`), a story carve-out what Ladle loads, and
   `next.config.*` the four names Next reads, so a `.test.mjs` or a `next.config.cjs` stays fenced.
 - **`.cjs` is linted as CommonJS**, where `import` does not parse, and `react/jsx-no-literals` can only be

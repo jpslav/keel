@@ -8,9 +8,9 @@ import reactPlugin from 'eslint-plugin-react'
 import reactHooksPlugin from 'eslint-plugin-react-hooks'
 import typescriptEslint from 'typescript-eslint'
 
-// EVERY extension a fence below names. ESLint lints all eight in this repo (typescript-eslint's
-// recommended config adds .mts and .cts to the core three), so a fence that names a DIRECTORY has to
-// hold for each of them. The fences used to say `*.{ts,tsx}`, which let a `.mjs` file in apps/*/src or
+// EVERY extension a fence below names. ESLint lints all eight in this repo (its own defaults are .js,
+// .mjs and .cjs, typescript-eslint's recommended config adds .ts, .tsx, .mts and .cts, and the react
+// block below adds .jsx), so a fence that names a DIRECTORY has to hold for each of them. The fences used to say `*.{ts,tsx}`, which let a `.mjs` file in apps/*/src or
 // packages/keel/src import a vendor SDK, read process.env or take the raw db handle with a green
 // `pnpm lint`; nothing in the tree did, and nothing would have said so if something had. Every fence glob
 // takes its extensions from here. The test and story carve-outs do NOT (TEST_FILES and STORY_FILES):
@@ -141,7 +141,7 @@ const appCodePattern = {
 // They travel TOGETHER, as getDbSelectors, and no block lists them one by one. A block that listed them
 // one by one dropped the computed form for every route, page and component (the a11y block below, which
 // is the last no-restricted-syntax block for those files, so its list was the one that counted), and
-// `db['getDb']()` passed lint in a route handler while the selector sat unused two blocks above.
+// `db['getDb']()` passed lint in a route handler although the two blocks before it listed the selector.
 const getDbSelector = {
     selector: 'MemberExpression[property.name="getDb"]',
     message:
@@ -474,9 +474,9 @@ const eslintConfig = [
         files: ['**/migrations/**/*.ts', 'spikes/**/*.ts'],
         rules: { '@typescript-eslint/no-explicit-any': 'off' },
     },
-    // Every extension, not the four JSX is usually written in: the i18n block below bans literals in
-    // `.mjs` screens too, and `react/jsx-no-literals` cannot be configured for a file this block, which
-    // registers the plugin, does not match.
+    // Every extension, not the four this block used to name: the i18n block below bans literals in `.mjs`
+    // screens too, and `react/jsx-no-literals` cannot be configured for a file this block, which registers
+    // the plugin, does not match (ESLint throws "Could not find plugin").
     {
         files: [`**/*.${SRC_EXT}`],
         plugins: {
@@ -760,9 +760,9 @@ const eslintConfig = [
         },
     },
     // Adapters are fenced against app content too, but MAY import vendor SDKs (that is their job) — so
-    // this block carries appCodePattern only (no vendorSdkPattern). It is the ONLY no-restricted-imports
-    // block matching packages/keel/src/adapters (the ports-boundary block above ignores it), and it
-    // replaces the framework fence above for them.
+    // this block carries appCodePattern only (no vendorSdkPattern). The ports-boundary block above ignores
+    // packages/keel/src/adapters, and the framework fence above matches it but comes earlier, so this
+    // block's list is the one that counts there.
     {
         files: [`${KEEL_ADAPTERS_GLOB}/*.${SRC_EXT}`],
         rules: {

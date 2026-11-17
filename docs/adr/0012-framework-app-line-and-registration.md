@@ -500,3 +500,18 @@ Rejected alternatives:
   `eslint.config.mjs` says beside them.
 
 `docs/recipes/app-owned-adapter.md` is the how-to, and `/new-port` now asks whose port it is first.
+
+## Addendum (2026-11-16, later): the fences cover every extension, and selectors travel as sets
+
+The trap named under "The fence" bit a third time, on `no-restricted-syntax` rather than
+`no-restricted-imports`: the last block for routes, pages and components re-listed two of the three
+`getDb` selectors, so `db['getDb']()` passed lint in a route handler. Selectors that implement one rule now
+travel as one array (`getDbSelectors`, `runModeEnvSelectors`), so a block can drop a whole rule but not one
+form of it. Re-listing shared PATTERNS on `no-restricted-imports` is unchanged.
+
+Every fence in `eslint.config.mjs` also named `*.{ts,tsx}`, which left `.js`, `.jsx`, `.mjs`, `.cjs`,
+`.mts` and `.cts` files on both sides of the line unfenced. The fences now take their extensions from one
+constant, `SRC_EXT`, and hold for all eight. The carve-outs do not: each names what its runner loads (vitest's
+`*.test.{ts,tsx}`, Ladle's stories, Next's four `next.config` names, Next's instrumentation hooks), so a
+file nothing loads under that name keeps every ban. `tests/lint/extensions.test.ts` and
+`tests/lint/tenancy.test.ts` pin both.
