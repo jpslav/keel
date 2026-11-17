@@ -71,4 +71,14 @@ test('compose inbound email → ticket appears in the queue → audit trail show
     await page.getByTestId('simulator-tab-events').click()
     await expect(page.getByTestId('audit-list')).toContainText('inbound-email.received')
     await expect(page.getByTestId('audit-list')).toContainText('ticket.created')
+
+    // 5) The newest intake row is the bogus one, and its detail says why, in the closed vocabulary. It is
+    //    shown as text inside the expanded row's JSON, never as markup.
+    const newestIntake = page
+        .getByTestId('audit-list')
+        .locator('[data-testid^="audit-toggle-"]')
+        .filter({ hasText: 'inbound-email.received' })
+        .first()
+    await newestIntake.click()
+    await expect(page.getByTestId('audit-list').locator('pre')).toContainText('"cause": "no-handler"')
 })

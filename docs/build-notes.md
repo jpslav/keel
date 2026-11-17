@@ -1806,3 +1806,12 @@ the panel is the element that carries it.
   An Aurora instance takes its encryption from its cluster, so that warning is a false positive and
   nothing is set on the instance. This repo's synth runs no such linter, so there is nothing in the stack
   to suppress it.
+
+## jsonb refuses some JSON, and rewrites the rest (2026-11-17, `feat/audit-detail`)
+
+- **Postgres's jsonb refuses a NUL and an unpaired surrogate, and `JSON.stringify` writes both.**
+  `JSON.stringify({ s: 'a\u0000b' })` is valid JSON, and jsonb refuses it as an "unsupported Unicode
+  escape sequence". A lone `\uD800` is refused as "invalid input syntax for type json" (probed on pglite,
+  Postgres 18.6). So "it serialized" is not "it will store": `recordAuditEvent` checks both before it
+  writes. jsonb also rewrites what it stores: `{"a":1e2}` reads back as `{"a": 100}`, with a space after
+  each colon and comma. A byte bound in SQL measures that text, not the one the writer sent.
