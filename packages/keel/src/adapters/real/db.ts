@@ -34,12 +34,16 @@ const pgTypes: CustomTypesConfig = {
 /**
  * AUTHORED — CUTOVER (`cloud-accounts`): typechecked, never run against Aurora. The migrator
  * Lambda and the app share this adapter; connection details come from DATABASE_URL (Secrets
- * Manager-injected in deployed environments).
+ * Manager-injected in deployed environments). This is the default transport (`DATABASE_TRANSPORT=pg`),
+ * for a Lambda inside the database's VPC; the RDS Data API one is ./db-data-api.ts.
  */
 export function createRealDb(databaseUrl: string): DbPort {
     const pool = new Pool({ connectionString: databaseUrl, max: 5, types: pgTypes })
-    const db = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) })
+    return dbPortFor(new Kysely<DB>({ dialect: new PostgresDialect({ pool }) }))
+}
 
+/** One port shape for both transports: they differ in how SQL reaches Postgres, never in what it says. */
+export function dbPortFor(db: Kysely<DB>): DbPort {
     return {
         getDb() {
             return db

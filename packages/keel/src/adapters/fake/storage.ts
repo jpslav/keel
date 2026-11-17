@@ -1,9 +1,16 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, open, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { NotFoundError } from '../../ports/errors'
-import type { StoragePort, StoredObject, UploadConstraints, UploadTarget } from '../../ports/storage'
+import { NotFoundError, PreconditionFailedError } from '../../ports/errors'
+import type {
+    CopyOptions,
+    StoragePort,
+    StoredObject,
+    StoredObjectInfo,
+    UploadConstraints,
+    UploadTarget,
+} from '../../ports/storage'
 import { stageCopy, writeFileAtomic, writeFileAtomicSync, type StagedCopy } from './atomic-write'
 import { dataDir } from './data-dir'
 
@@ -33,6 +40,24 @@ function isReserved(key: string): boolean {
 /** True for a regular file. A directory is not an object, though `existsSync` says yes to it. */
 function isFile(file: string): boolean {
     return statSync(file, { throwIfNoEntry: false })?.isFile() === true
+}
+
+/**
+ * Size, modification time and ETag of ONE version of a file. All three come from a single open handle, so a
+ * writer that renames a new file over this one (every write here does) leaves the handle on the old inode:
+ * the size and the hash are of the same bytes. The ETag is a double-quoted SHA-256 of the bytes, shaped like
+ * S3's (quotes included) so a caller that mishandles the quotes fails here too; it is opaque by contract.
+ */
+async function inspect(file: string): Promise<{ size: number; mtime: Date; etag: string }> {
+    const handle = await open(file, 'r')
+    try {
+        const { size, mtime } = await handle.stat()
+        const hash = createHash('sha256')
+        for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk as Buffer)
+        return { size, mtime, etag: `"${hash.digest('hex')}"` }
+    } finally {
+        await handle.close()
+    }
 }
 
 /** Every file under `dir`, as `/`-separated paths relative to `root`. A missing `dir` is empty. */
@@ -162,7 +187,11 @@ export const fakeStorage: StoragePort = {
         }
     },
 
-    async copy(from, to) {
+    async copy(from, to, options?: CopyOptions) {
+        // Refused first, as the real adapter refuses it (see there: S3 could read an empty or `*` as no condition).
+        if (options?.ifMatch !== undefined && (options.ifMatch.trim() === '' || options.ifMatch.trim() === '*')) {
+            throw new Error('storage copy: ifMatch must be the etag head returned, not empty and not "*"')
+        }
         // `to` is checked as `put` checks a key it writes; `from` as `get` checks one it reads (a reserved
         // name is never an object, so it is a missing source, not an invalid one). Either can still be an
         // escape, which resolveKey refuses with the same error as everywhere else.
@@ -191,6 +220,14 @@ export const fakeStorage: StoragePort = {
         }
         const [sidecar, body] = staged as [StagedCopy, StagedCopy]
         try {
+            // The precondition is checked on the staged copy of the body, which is the very bytes about to be
+            // published: what lands is exactly the version the etag names, even if a writer replaces the source
+            // meanwhile. (S3 evaluates `CopySourceIfMatch` with the copy; this is the fake's equivalent.)
+            if (options?.ifMatch !== undefined && (await inspect(body.file)).etag !== options.ifMatch) {
+                throw new PreconditionFailedError(
+                    `storage copy: ${from} is no longer the version ${options.ifMatch}; nothing was copied`,
+                )
+            }
             // The sidecar first and the body LAST. The body is what makes a key exist (`get` and `list` both look
             // for it), so `to` appears only once it is complete, with its content type already in place. The
             // other order would leave a window where a new `to` has a body and no sidecar, and `get` would throw
@@ -203,6 +240,24 @@ export const fakeStorage: StoragePort = {
             await body.publish()
         } catch (error) {
             await Promise.all(staged.map((copy) => copy.discard()))
+            throw error
+        }
+    },
+
+    async head(key): Promise<StoredObjectInfo | null> {
+        if (isReserved(key)) return null
+        const file = resolveKey(key)
+        if (!isFile(file)) return null
+        try {
+            const [{ size, mtime, etag }, meta] = await Promise.all([
+                inspect(file),
+                readFile(`${file}${META_SUFFIX}`, 'utf8'),
+            ])
+            const { contentType } = JSON.parse(meta) as { contentType: string }
+            return { size, contentType, etag, lastModified: mtime }
+        } catch (error) {
+            // Deleted between the check and the read: it is gone, as `get` finding no file would say.
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !isFile(file)) return null
             throw error
         }
     },

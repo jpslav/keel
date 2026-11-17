@@ -21,10 +21,12 @@ the interesting reports are about that shape being wrong:
   convention, not the guarantee; the guarantee is the reachability check described below. Postgres
   row-level
   security enforces it with `ENABLE` + `FORCE ROW LEVEL SECURITY` and both a `USING` and a `WITH CHECK`
-  clause. All access runs inside `db.withTenant()`, which does `SET LOCAL ROLE app_user` first so the
-  policy cannot be bypassed by a superuser connection. **A way to read or write across tenants is the
+  clause. All access runs inside `db.withTenant()`, which first sets the role to `app_user` for the
+  transaction (`set_config('role', 'app_user', true)`, the same as `SET LOCAL ROLE`) so the policy
+  cannot be bypassed by a superuser connection. **A way to read or write across tenants is the
   most serious thing you can find here.** The proofs live in `packages/keel/src/db/rls-proofs.ts` and
-  run against both pglite and real Postgres.
+  run against pglite, against real Postgres, and against real Postgres through the RDS Data API
+  transport's emulator.
 
     **The word "every" above is enforced, not asserted.** `packages/keel/src/db/rls-coverage.ts` reads
     the database catalog after the registered migrations have run and fails if **anything `app_user`

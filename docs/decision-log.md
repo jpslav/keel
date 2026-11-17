@@ -1884,6 +1884,119 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   the other syntax bans there. A story beside a fake was given it back, since the static form was already
   banned in stories.
 
+## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
+
+- **JP decided, 2026-11-16: it lives in keel, as an opt-in.** Tenant isolation through any transport is
+  keel's to prove. So the transport sits beside the `pg` one in `packages/keel/src/adapters/real/`. `pg`
+  stays the default, and the Data API is chosen per deployment.
+- **The switch is `DATABASE_TRANSPORT=pg|data-api`.** Each app records it as `params.database.transport`
+  in its `config/params.ts`. It is never inferred from which variables are set, and an unknown value
+  throws. `DATABASE_URL` left `REQUIRED_ENV`: each transport's variables come from `DATABASE_ENV`
+  (`packages/keel/src/adapters/real/database-transport.ts`), so only on `data-api` do its three replace it.
+  "Transport" rather than "driver": both paths are Kysely over Postgres, and what differs is how the SQL
+  travels.
+- **Loaded only when chosen.** `db-data-api.ts` is reached by dynamic import alone, so a `pg` deployment
+  never loads the RDS Data SDK. `packages/keel/src/adapters/real/index.test.ts` proves it by watching the
+  module loads. A static import of the module was watched turning it red, whichever test runs first.
+- **`withTenant` sets the role and the tenant in one statement**, with `set_config('role', 'app_user', true)`
+  beside the tenant's `set_config` (ADR-0004 addendum). On the Data API, every statement is an HTTPS call.
+- **Hand-written, not `kysely-data-api`.** That package peers on `kysely ^0.27`, sends parameters untyped
+  and turns `date` into a `Date`. ADR-0002 hand-rolled the pglite dialect for the same kind of reason.
+- **Parameters are typed by PREPARE, not by guessing.** Guessing a `UUID` type hint from the value breaks
+  `set_config`'s text argument as soon as a tenant id is passed to it. Postgres's own inference, read back
+  once per SQL shape, gives node-postgres's semantics exactly. Rejected as well: inlining escaped literals.
+  It would be safe if escaped correctly, but ADR-0004 keeps the tenant id a real parameter on purpose.
+- **SDK retries off (`maxAttempts: 1`); resume retried by hand.** AWS warns that retrying a statement
+  whose call timed out can write twice. A paused Serverless v2's `DatabaseResumingException` means the
+  request never ran, so the dialect retries that one alone, for about 15 seconds.
+- **Errors carry `code` and `constraint`.** They are read from a stated SQLSTATE when the Data API gives
+  one, and otherwise from Postgres's wording. Reports differ on whether the Data API includes the
+  SQLSTATE, and the showcase's ticket-reference retry keys on `23505`.
+- **Proven through a strict emulator; the live proof is deferred.** `pnpm test:contract` runs the
+  migrations, the full RLS suite and a pg-parity battery through the dialect against
+  `packages/keel/src/adapters/real/rds-data-emulator.ts`. The live check is `docs/runbooks/data-api.md`,
+  for the `data-api` cutover row. The community `local-data-api` emulator was rejected: it binds untyped
+  strings as `unknown`, so it passes exactly the queries Aurora rejects.
+- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. That
+  transaction opens with `pg_advisory_xact_lock` on Kysely's lock id. Kysely's own session-level lock
+  would be dropped by the connection reset, and Kysely creates its tables before locking at all. A
+  single statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs
+  on the `pg` transport from inside the VPC. The pre-PR review found the lock gap. A race test of two
+  migrators on an empty database, which first failed on Kysely's create-before-lock, proves the fix.
+- **The emulator lives in `packages/keel/src/adapters/real/`, not in `test-fixture/`.** It needs `pg` and
+  the RDS Data SDK, which only an adapters directory may import. Test-only modules in `src/` have
+  precedent in `rls-proof-runner.ts`. Nothing in an app or a deployment imports it, and knip would report
+  it if nothing did.
+- **Review rounds 1 and 2 (Opus) found the same shape twice, so it was swept rather than run a third time.**
+  An explicit CAST truncates or pads where node-postgres's untyped parameter is refused: first
+  `char(n)`/`bit(n)`, whose inferred type printed as `character`/`bit` (length 1), then domains over
+  `char`/`varchar`/`bit`. The sweep found the divergence only in length-bearing types: inferred base types
+  carry no length, and a domain is the only other way a length reaches the cast. So the dialect now walks
+  each domain down to its base type and prints it with `format_type(…, -1)`. The parity battery covers
+  `char(3)`, `bit(4)`, `char(3)[]` and two domains, and a too-long domain value is refused on both
+  transports.
+- **The same rounds found two transaction-state bugs, both fixed and pinned.** A transaction Postgres had
+  aborted (a caught statement error) was reported as committed; it now throws Kysely's
+  `AbortedTransactionError`, as the `pg` driver does. And a raw `ROLLBACK TO SAVEPOINT`, the recovery
+  available inside `withTenant`, did not count as recovery.
+- **Declined: invalidating the type cache.** A statement that fails inside a transaction has already
+  aborted it, so a retry with fresh types could only help outside one. It is an accepted limit (ADR-0002
+  addendum): deploys replace processes.
+- **Round 2's fixes were reviewed as a diff, not by a third general round** (Opus): its findings were one
+  more instance of round 1's shape, now swept, and one defect in round 1's fix. The diff review found
+  nothing at MEDIUM. Fixed from its LOWs: EXPLAIN is recognised after a comment, as `ANALYSE`, and before
+  a parenthesised statement; a contract test now runs a parameterised EXPLAIN through the dialect, which
+  nothing did; and the too-long-value test asserts each refusal's reason, not merely that something
+  failed. Accepted as limits (ADR-0002 addendum): an explicit `::domain` cast in the SQL, and a colon
+  before a column name, as in `a[lo:hi]`.
+- **An independent cold review (2026-11-17, on a different model) found no tenant-isolation or injection
+  defect.** The manager decided on every finding, and all were made:
+    - A leading `;` hid COMMIT from the guard, and a statement after a `;` was never looked at, so `;commit`
+      inside `withTenant` ended the tenant's transaction. Now one scanner (`sqlSegments`) says where code
+      is, for the dialect and the emulator alike. A multistatement is refused before calling, and the
+      emulator refuses one as AWS does, before running any of it.
+    - The emulator's own colon scanner was weaker than the dialect's (E-strings, nested comments). It now
+      uses the dialect's.
+    - Parameter types expire after five minutes. Within them a type change is silent; ADR-0002 says so.
+    - A commit counts only when CommitTransaction answers "Transaction Committed".
+    - The runbook now proves migrations through the Data API on an empty database, sends statements on
+      ended transaction ids, and asks whether AWS accepts 0001's `DO` block. If it does not, 0001 changes;
+      that is written down, not built.
+    - The 1 MiB response cap meeting a page of unbounded text is an accepted limit.
+
+## The Data API network shape in the infra draft (2026-11-16, `feat/rds-data-api-infra`)
+
+- **The stack takes `params.database.transport`, passed in by `infra/app.ts`.** It does not read its own
+  CDK context. One value decides both what the app's runtime does and what network it gets, so the two
+  cannot disagree. It is a prop rather than an import inside the stack so that `infra/check-shapes.ts`
+  can build both shapes.
+- **On `data-api`, the VPC still exists, but holds only the database.** The subnets are isolated, with
+  no NAT gateway and no internet gateway. A cluster has to live in a VPC. Nothing else in the stack needs
+  a route out of one once the Lambdas run outside it.
+- **The `pg` shape stays the default.** The Data API transport is proven only through its emulator until
+  its cutover row closes, and a socket is faster per statement. Its limits (45 seconds per call, 1 MiB
+  per response, an hour per transaction) are the app's limits on that shape.
+- **CDK's `grantDataApiAccess`, not a hand-written policy.** It grants exactly the five `rds-data`
+  actions on the cluster's ARN, plus read on its secret, as the synthesized `data-api` shape shows.
+  `BatchExecuteStatement` is among them although the dialect never sends it; it allows nothing that
+  `ExecuteStatement` does not. The `data-api-access` cutover row checks the deployed policy, and that a
+  role without it is refused.
+- **Both shapes are checked by a gate.** `pnpm --filter infra synth`, which CI runs, now also runs
+  `infra/check-shapes.ts`. It found what review found missing: nothing built the `data-api` shape, and
+  nothing tied its environment to `DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`.
+  knip needs no entry for it: it reads the `synth` script.
+- **The gate checks the way in, not only the wiring** (the independent cold review, 2026-11-17). It passed
+  with `secretsmanager:GetSecretValue` on `*` and the database port open to `0.0.0.0/0`. Now every
+  Secrets Manager grant must name the cluster's own secret alone, on both shapes; every `rds-data` grant
+  must name this cluster alone; and on `data-api` the database's security group must admit nothing. The
+  grants are read from every IAM policy, managed policy and role's inline policy in the stack, after the
+  mechanical re-check showed a second stack secret, a managed policy and an inline policy slipping past an
+  earlier version. The review's re-check then showed `Action: "*"` on `Resource: "*"` passing, because
+  statements were picked by the text `rds-data:` or `secretsmanager:`. Now a statement counts if it can
+  grant the service at all: a wildcard action that reaches it, or any `NotAction`. Since the contents of an
+  AWS-managed policy cannot be read from the template, a role may attach only the two Lambda execution
+  policies. Each check was seen red by a mutation of the stack.
+
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 
 - **Three packages raised past their advisories, staying on their current majors.** `@sentry/nextjs`
@@ -2148,6 +2261,79 @@ runbook and clicking fifteen things in the right order.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
 
+## Storage port: `head(key)` and `copy`'s `ifMatch` (2026-11-17, `storage-head`)
+
+Requested because `copy` alone cannot serve a finalize step that re-checks each staged file's size and content
+type before making it live: the port could only read them by fetching the whole object. A metadata read is a
+generic primitive (S3 `HeadObject`; a stat in the fake).
+
+- **Named `head`, after the port's verbs.** `put`, `get` and `delete` are HTTP verbs already; `head` is `get`
+  without the body and is S3's own name for it. `stat` would have been the filesystem's.
+- **It returns `StoredObjectInfo { size, contentType, etag, lastModified }`.** Size and content type are what
+  finalize needs. The etag is there so the check can be tied to the copy (below); it pins the bytes, so the size
+  check is exact, while the content-type check stays advisory, because neither adapter's etag covers the content
+  type (a rewrite with identical bytes and another type keeps it). A flow that must hold the type relies on the
+  upload target's `eq Content-Type` condition. `lastModified` is the one
+  field nobody asked for; both adapters give it truthfully and a stat without a time looks wrong, but nothing
+  else depends on it.
+- **The etag is opaque.** AWS's own reference calls it "an opaque identifier", so callers compare two for equality
+  and pass one back UNCHANGED as `ifMatch`; the port promises no format and not whether rewriting identical
+  bytes changes it. Real: exactly what S3 sent, quotes included. Fake: a quoted SHA-256 of the bytes, shaped like
+  S3's so a caller that mishandles the quotes fails here too. The fake computes size, modification time and hash
+  from ONE open handle, so a writer that renames a new file over the old one cannot make them describe two
+  versions; the cost is that a fake `head` reads the whole file.
+- **A missing object is `null`, as for `get`; `copy` throws.** A read has a natural "nothing" to return, so a
+  caller asks `if (!info)`; `copy` has nothing to return and a silent no-op would hide a lost file. Both
+  adapters agree: the real one maps S3's `NotFound` (the SDK's error for a HEAD 404) and `NoSuchKey`; the fake
+  answers `null` for anything that is not a regular file (a directory, a bookkeeping name).
+- **What S3's HEAD cannot say.** A HEAD response has no body, so AWS gives only a generic status ("It's not
+  possible to retrieve the exact exception"): a missing BUCKET, which S3 also reports as a 404 (not stated on the HeadObject page, so the
+  cutover row confirms it), could not be told apart and reads as `null`, where `put` or `get` would surface it. A 403 (the role lacks `s3:ListBucket`, so a missing key is not a 404) is not
+  mapped and throws, as in `copy`. A response without a size, ETag or date throws: defaulting a size to 0
+  would let a maximum-size check pass on something S3 never said.
+- **A stat-then-copy check is advisory; `ifMatch` makes it exact.** The object can change between the two
+  calls, so `copy(from, to, { ifMatch: info.etag })` copies only if the source is still that version, else throws
+  the new `PreconditionFailedError` and copies nothing. Real: S3's `CopySourceIfMatch`, which S3 evaluates with
+  the copy. Fake: it compares the staged copy's hash, the very bytes about to be published, so the bytes that land
+  are exactly the ones that matched even if a writer replaces the source mid-copy (a test races exactly that). The order
+  of the other checks is same key, missing source, precondition (the real adapter leaves the last two to S3, whose order for a
+  missing source with an `ifMatch` is unconfirmed; the cutover row asks). An `ifMatch` that is empty or `*` is refused first of all, on both adapters, with a
+  plain `Error`: HTTP gives an empty If-Match no meaning and `*` the meaning "any version", so S3 could read either as no
+  condition and copy unchecked where the fake refuses (what S3 does with them is unverified, and no etag `head` returns is
+  either). No route glue maps the new error; the caller says
+  409 or 412.
+- **412 is inferred, not read.** The CopyObject reference states 412 for its other conditional headers and gives no
+  code for `x-amz-copy-source-if-match`, which is HTTP's rule for a failed If-Match. The adapter maps the name
+  `PreconditionFailed` or a bare 412, and the cutover row `storage-head` asks to confirm it.
+- **No IAM change** (`HeadObject` needs `s3:GetObject` per AWS; `grantReadWrite` has `s3:GetObject*` and
+  `s3:List*`), **no static-demo twin** (no storage port there). **Not done:** `copy` returning the new object's
+  info, a create-only copy (`ifNoneMatch`), and reading a specific version.
+- **The finalize sequence an app uses:**
+
+    ```ts
+    import { NotFoundError, PreconditionFailedError } from 'keel/ports/errors'
+
+    const info = await storage.head(stagedKey)
+    if (!info) return (await storage.head(finalKey)) ? alreadyFinalized : stagedFileVanished
+    if (info.size > MAX_BYTES || info.contentType !== EXPECTED_TYPE) {
+        await storage.delete([stagedKey])
+        return rejected
+    }
+    try {
+        // exactly the version that was checked, copied server-side
+        await storage.copy(stagedKey, finalKey, { ifMatch: info.etag })
+    } catch (error) {
+        if (error instanceof PreconditionFailedError) return changedAfterTheCheck // re-head, or reject
+        if (error instanceof NotFoundError) return stagedFileVanished
+        throw error
+    }
+    await storage.delete([stagedKey]) // idempotent
+    ```
+
+    A retry after a copy that succeeded and a delete that failed finds the staged file again, gets the same etag,
+    and converges over `finalKey`. A retry after both succeeded gets `null` from `head(stagedKey)`, which the
+    first line of the snippet reads as "already finalized" by checking `head(finalKey)`.
+
 ## The migrating role may switch to `app_user` (2026-11-16, `fix/grant-app-user-to-owner`)
 
 The design is in ADR-0004's addendum of the same date.
@@ -2203,6 +2389,53 @@ The design is in ADR-0004's addendum of the same date.
   their memberships are cluster-wide. Restored into another cluster, the ledger says 0001 and 0015 ran, so
   neither runs again, and neither `app_user` nor anyone's switch to it came along. The
   `db-role-not-superuser` cutover row says what to do before and after a restore.
+
+## JSX banned in keel/core; paths into apps/ fenced; getDb as a string banned (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **JSX in keel/core is banned with a rule of its own, `keel/no-jsx-in-core`,** reported for each outermost
+  element or fragment, so a disable comment on one does not hide the next. Banning `*.{tsx,jsx}` files under
+  core was the alternative. It was rejected because the extension is not what imports React: the JSX is.
+- **A path into app code is judged by where it lands, not how it is spelled.** `keel/no-path-to-app-code`
+  resolves a relative or absolute specifier against the importing file, following symlinks, and reports it if it
+  lands in `apps/` or `packages/seed/`. The first version was a `regex` on the spelling (an `apps/` segment anywhere in a
+  specifier). It closed the seam for `@app-config/apps/…`; round 1's fix, which kept `@` specifiers out of it, let
+  `@scope/../../apps/…` through; and each review round found a spelling it missed. Listing the two
+  apps' directories was rejected too: an adopter renames and adds apps.
+- **A `..` in any package or alias specifier is banned** (`bareTraversalPattern`), not only after
+  `@app-config/`: no package specifier has a reason to climb, and TypeScript resolves one that does out of
+  node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where pnpm links the apps
+  and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
+- **A specifier two patterns match is two findings, in both halves.** The declarationless half now reports every
+  pattern a specifier matches, as `no-restricted-imports` does. The alternative, exempting from the traversal ban
+  what the alias pattern "already bans", was tried and rejected: written as spellings, the exemptions let
+  `@\..\..\apps\…` and then `@//../../apps/…` through, because the alias group matches neither.
+- **The app's aliases are a `regex`, not a `group`** (`^(@[\\/]|@app[\\/]+seed([\\/]|$))`). A fuzz of 7,069 specifier
+  spellings against TypeScript's resolver found `@//domain/tickets` past the `@/*` group, whose gitignore syntax
+  does not match an empty segment. The regex matches every specifier the group did on the fuzz's corpus, plus the
+  empty-segment and backslash spellings, which no published package uses.
+- **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing,
+  and so are keys that define a member. Strings the computed and destructure selectors already report are left
+  to them, so each finding is reported once. A spy's key (`vi.spyOn(db, 'getDb')`) is exempt in a test file
+  only: a spy calls through, so anywhere else it is the raw handle.
+- **Two gaps stay documented and filed, not fixed:** a hand-written `.mjs` in the generated styles directory
+  (`.claude/future-tasks/generated-styles-mjs-unlinted.md`), and the vendor ban's two halves reading the list
+  differently (`.claude/future-tasks/vendor-ban-matcher-parity.md`).
+
+## App-owned lint exceptions (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **An app's exceptions to a fence live in `apps/<app>/lint-exceptions.mjs`**, read by `eslint.config.mjs` for
+  every app at load. The alternative, an exact path in `eslint.config.mjs`, stops matching after `pnpm init-app`: the path named
+  the app's directory, which `pnpm init-app` renames without rewriting keel's config. Every upstream change to the
+  file would also conflict with the adopter's edit.
+- **Only `keel/no-raw-db-handle` takes one.** It is the one fence the docs tell an adopter to except a module
+  from. The recipe and `/new-port` still say to add a vendor to `vendorSdkPattern` in `eslint.config.mjs`. That
+  widens a ban rather than excepting a file, and is left where it is.
+- **Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.**
+  The alternative was warning on a broad glob. It was rejected because a warning is easy to scroll past, while a
+  failed load names the entry. A Next route's `[locale]` is escaped, so the path matches literally.
+- **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
+  end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
+  cannot swap the exceptions; that guards against accidents and is not a boundary.
 
 ## Audit rows carry a `detail` (2026-11-17, `feat/audit-detail`)
 

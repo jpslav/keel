@@ -26,8 +26,10 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   tables or vocabulary fails to build). A change to keel is not done until BOTH apps are green. The
   app extends the framework through the `@app-config/*` seam — register new subjects, jobs, event kinds, tables, and migrations there, and
   **never edit a framework base union or registry**. Lint-enforced: inside `packages/keel` the
-  fence bans the app's `@/*` alias and `@app/seed` outright, by `import()` and in a type `import('…')`
-  as well as in a declaration; the `@app-config/*` alias is the only channel back.
+  fence bans the app's `@/*` alias, `@app/seed`, a relative or absolute path (or `file:` URL) that lands in `apps/` or
+  `packages/seed`, a `..` in any package or alias specifier, and any specifier through `node_modules`, by
+  `import()` and in a type `import('…')` as well as in a declaration; the `@app-config/*` alias is the only
+  channel back.
 - **keel's OWN tests run against keel's own app seam, never an app's** — `packages/keel/test-fixture`
   (outside `packages/keel/src` because that tree is what `keel/*` resolves to and what ships; the
   fixture is neither). Living outside that tree buys NO exemption: every gate names `test-fixture/**`
@@ -58,7 +60,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   tests), so the app's registry and fakes cannot read it; reading the run mode in an app's real adapters;
   a static import of an app's `adapters/real` anywhere in the app outside `real/` itself; and any import of
   `real/` from a fake. That the registry uses `isSimulated` is convention: lint cannot follow a value.
-- **`keel/core` is pure TypeScript** — no framework imports. Lint-enforced.
+- **`keel/core` is pure TypeScript** — no framework imports, and no JSX (it compiles to an import of
+  `react/jsx-runtime`). Lint-enforced.
 - **Screens are router-agnostic** — framework screens in `packages/keel/src/components`, app
   screens in `apps/*/src/components`; files under `apps/*/src/app` are thin wrappers. This keeps the `file://` static
   demo buildable — don't put logic in route files.
@@ -80,7 +83,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
 - `pnpm verify` does NOT run `test:contract`, jscpd, coverage, or gitleaks — CI runs those
   (`.github/workflows/checks.yml`). **Any migration/db change: run `pnpm test:contract` yourself** (the
   same RLS proofs on real Postgres, for the contract app AND keel's fixture seam, each in its own
-  database); after renumbering/renaming a migration, wipe local `.data` first.
+  database — keel's twice, once through the `pg` driver and once through the RDS Data API driver and its
+  emulator); after renumbering/renaming a migration, wipe local `.data` first.
   **Also wipe `apps/*/.data` after changing `packages/seed`** — the app seeder is guarded by "does this
   world have any rows yet", so new seed rows are invisible on an existing world and only CI sees them.
 - **A list that can grow pages through `keel/db/keyset`** — never a hand-rolled `LIMIT`/`OFFSET`. The
@@ -95,8 +99,9 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `apps/*/src`, in keel's screens and in keel's fixture (`keel/no-raw-db-handle`, deny-by-default: a new
   directory is covered before anyone names it; tests outside routes, screens and the fixture are the one
   exception).
-  A module that truly needs the raw client is a named, reasoned exception in `eslint.config.mjs`, never a
-  directory. New tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
+  A module that truly needs the raw client is a named, reasoned exception in its app's own
+  `apps/<app>/lint-exceptions.mjs` (path relative to the app, one existing file per entry, never a glob or a
+  directory); nobody edits `eslint.config.mjs` for it. New tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
   migrations are numbered ≥1001; framework migrations 0001–0999 live in
   `packages/keel/src/db/migrations` — ADR-0012).
 - **Every mutating route handler (POST/PUT/PATCH/DELETE) must call `authorize(...)`**

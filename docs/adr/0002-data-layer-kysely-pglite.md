@@ -70,3 +70,171 @@ rejected by `WITH CHECK`; and scoped writes visible. Two of its findings are loa
    `NULLIF(current_setting('app.current_tenant', true), '')::uuid`, which makes an unset tenant context
    mean zero rows rather than an error. Getting that backwards turns a fail-closed design into a
    500-on-every-request design, and only a real transaction sequence reveals it.
+
+## Addendum (2026-11-16): an opt-in second transport, the RDS Data API
+
+Production can now reach Aurora two ways, chosen per deployment by `DATABASE_TRANSPORT`. Each app records
+the choice as `params.database.transport` in its `config/params.ts`, and the deployment sets the variable
+from it.
+
+- **`pg`, the default:** node-postgres over a socket, from a Lambda inside the database's VPC.
+- **`data-api`, opt-in:** the Amazon RDS Data API over HTTPS, from a Lambda outside any VPC and with no
+  NAT gateway.
+
+Both sit behind the same `db` port and run the same migrations, the same `withTenant` and the same RLS
+policies. The trigger was an adopter running its console Lambda outside any VPC.
+
+**JP's decision (2026-11-16): the Data API transport lives in keel, as an opt-in.** The reason: tenant
+isolation through any transport is keel's to prove, so the proof belongs beside the policies it relies
+on, not in an adopter's fork. Being opt-in means three things:
+
+- **`pg` stays the default.** An unknown transport fails rather than falling back to it.
+- **The transport is loaded only when chosen.** `packages/keel/src/adapters/real/db-data-api.ts` is
+  reached only by dynamic import, from `createRealPorts` and the migrator. So a `pg` deployment never
+  loads the RDS Data SDK, which `packages/keel/src/adapters/real/index.test.ts` proves by watching the
+  module loads.
+- **Dev never reaches it.** `pnpm dev` and the static demo never import the real adapters at all.
+
+The SDK sits inside the vendor fence. The transport adds five internal modules to `packages/keel` and
+publishes none, so the internal count `docs/adopting.md` states rises by five (`public-surface.test.ts`
+holds that number to the truth).
+
+**Tenant context through the Data API — what is known, and how.** `runWithTenant` sets the role and the
+tenant transaction-locally, then runs the caller's queries. Through the Data API every statement is a
+separate `ExecuteStatement` call, all sharing one `transactionId`.
+
+- **AWS documents** that the Data API pools connections and resets each one with `DISCARD ALL` before
+  reusing it (Aurora User Guide, "Session management with Amazon RDS Data API"). So nothing session-level
+  survives between calls outside a transaction.
+- **AWS states** that an explicit transaction is what keeps session state between calls: "If the
+  transaction is not used, there is no guarantee these API calls will use the same connection, and the
+  session state changes would be cleared" (AWS Database Blog, "Enforce row-level security with the RDS
+  Data API", 15 May 2024).
+- **Postgres guarantees** the rest. A transaction lives on one backend, transaction-scoped settings last
+  until COMMIT or ROLLBACK, and `DISCARD ALL` cannot run inside a transaction block.
+
+So the settings `withTenant` relies on persist across every statement of one Data API transaction, and
+are gone after it. That is documented and inferred, **not yet observed on a live cluster**.
+`docs/runbooks/data-api.md` is the exact procedure that proves it; it closes the `data-api` cutover row.
+
+Because each statement is a round trip, `withTenant` now sets the role and the tenant in ONE statement:
+`set_config('role', 'app_user', true)`, which is `SET LOCAL ROLE`, beside the tenant's `set_config`.
+ADR-0004's addendum of the same date records that change. Setup is one round trip on every transport.
+
+**The dialect is hand-written, as the pglite one is.** The community `kysely-data-api` (MIT, last
+published March 2025) declares `kysely ^0.27` against keel's 0.29. More decisively, it sends parameters
+untyped and returns `date` as a `Date`. Those two choices break keel's queries and its dates-are-strings
+rule respectively.
+
+**Parameters are typed by asking Postgres.** keel's SQL relies on node-postgres sending every parameter
+untyped, so Postgres infers `$1` from context. The Data API cannot do that: an untyped string arrives as
+`varchar`, and `uuid = varchar` is an error on Aurora. A per-value guess at a type hint would break
+`set_config`'s text argument the moment a tenant id looked like a uuid. So the dialect PREPAREs each SQL
+shape once per process, again once its entry is five minutes old (the accepted limits below), and reads
+Postgres's own inference from `pg_prepared_statements.parameter_types`. It then sends every value as a
+string inside an explicit `CAST(:name AS <type>)`. That reproduces node-postgres's semantics rather than
+approximating them. It is also how arrays get through at all: the Data API rejects array parameters, but
+an array literal cast to `uuid[]` is a string. The type in the cast never carries a length, and a domain
+is replaced by the type it is built on. An explicit cast to `char(3)`, `bit(4)` or a domain over
+`varchar(3)` truncates or pads a value that does not fit, where node-postgres's untyped parameter is
+checked on assignment and refused. Casting to the bare base type leaves that check to the same assignment.
+So a too-long value stored in a column or passed to a function fails the same way on both transports, and
+a domain's CHECK still runs. A warm process pays nothing extra until a shape's entry expires. A new or
+expired SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE) and five
+outside one, which also needs its own short transaction.
+
+**What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
+
+- transaction control written in SQL, even after a leading `;` (`;commit`);
+- more than one statement in one call, which the Data API refuses as well (a `;` in code, by the same
+  scanner that finds placeholders, with more SQL after it);
+- session state outside a transaction (`SET`, `SET ROLE`, `PREPARE`, temporary tables,
+  `set_config(…, false)`, session-level advisory locks);
+- streaming.
+
+**A commit is what CommitTransaction says it was.** Its `transactionStatus` must read "Transaction
+Committed", the value AWS's own CLI example shows (the API reference lists none); a rollback answer throws
+Kysely's `AbortedTransactionError`, and anything else throws. Step 1 of `docs/runbooks/data-api.md` records
+what a live cluster sends.
+
+**The migration lock is transaction-scoped.** Kysely's own migration lock is a session-level
+`pg_advisory_lock` on a separate connection, and it creates its bookkeeping tables before locking at all.
+On the Data API that lock would be released by the connection reset before the migrations ran. So the
+Data API port runs the Migrator inside one transaction that opens with `pg_advisory_xact_lock`. It uses
+Kysely's own lock id, so a `pg` migrator and a Data API migrator also exclude each other. A second
+migrator waits for at most the 45-second call timeout and then fails loudly.
+
+**A failed commit keeps its own error.** A deferred constraint's `23505` comes back with its `code` and
+`constraint`, not as a complaint from the rollback Kysely sends after a failed commit.
+
+AWS's own limits surface as errors, never as truncation:
+
+- a 1 MiB response cap;
+- a 45-second call timeout;
+- a transaction that ends after three idle minutes or one hour (the `BeginTransaction` API reference;
+  the doc comment in `@aws-sdk/client-rds-data` 3.1169.0 still says 24 hours);
+- SQL of at most 65,536 characters;
+- a paused cluster that takes more than about 15 seconds to resume, which the dialect stops retrying.
+
+The Data API returns database errors as a message, sometimes ending `; SQLState: 23505` and sometimes
+not. So the dialect sets `code` and `constraint` the way node-postgres does. It reads them from the
+stated SQLSTATE, or else from Postgres's own wording for the errors code acts on. The showcase's
+ticket-reference retry keys on `23505`.
+
+**Proof without AWS.** `pnpm test:contract` gains a third run,
+`packages/keel/src/adapters/real/rds-data.contract.test.ts`. It runs the migrations and the full RLS proof
+suite through the dialect, against `packages/keel/src/adapters/real/rds-data-emulator.ts`. The emulator is
+a test-only stand-in that executes each call on real Postgres with the Data API's documented semantics,
+and it is deliberately strict:
+
+- an untyped string binds as `varchar`;
+- array parameters are refused;
+- connections are reset with `DISCARD ALL`;
+- errors carry no SQLSTATE.
+
+Four negative controls prove that strictness: varchar binding, array refusal, the connection reset, and
+SQLSTATE-less errors. So the dialect's casts and its error handling are what make the proofs pass. A
+battery writes and reads every column type keel uses through both transports. It requires identical rows
+both ways: what each reads, and what each wrote. Two migrators racing on an empty database prove the
+lock. Nothing in
+`pnpm dev` changes: dev, the e2e suite and the static demo still run on pglite fakes. The emulator is a
+contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
+emulators".
+
+**Some limits are accepted rather than closed.** Only the last can arise in the SQL keel and its two
+apps send.
+
+- **The inferred types are cached for five minutes, and within them a schema change is SILENT.** A
+  migration that changes a parameter's type while a process keeps serving is answered with the old type
+  until the entry expires (`TYPE_CACHE_TTL_MS` in `packages/keel/src/adapters/real/rds-data-dialect.ts`).
+  Nothing fails: a `date` column changed to `timestamptz` goes on receiving midnight through the Data API,
+  where `pg` stores the instant. The contract suite shows both the silent case and the expiry. Expiry
+  bounds the window; it does not close it. After a migration that changes a column's type, restart the
+  app or wait five minutes before relying on the new type.
+- **An explicit cast to a length-bearing domain, written in the SQL, truncates.** In
+  `${value}::code3`, where `code3` is a domain over `char(3)`, the value reaches that cast already
+  converted to the base type. The cast is explicit, so it truncates, where node-postgres refuses the value.
+  Storing the value in a domain column, or passing it to a function, refuses it on both transports.
+- **A colon directly before a name, outside a literal, is read as a parameter.** That is how the
+  emulator models the Data API, and step 2 of `docs/runbooks/data-api.md` checks it on AWS. The dialect
+  parenthesizes its own placeholders, so `a[1:$1]` works, but an array slice bounded by a column,
+  `a[lo:hi]`, fails loudly. Write `a[lo : hi]`.
+- **A statement PREPARE cannot take, such as `CALL proc($1)`,** cannot be described, so with parameters
+  it fails loudly. An EXPLAIN is described by the statement it explains.
+- **A SQL-standard function body is refused as more than one statement.** A `CREATE FUNCTION` whose
+  body is `BEGIN ATOMIC select 1; select 2; END` is one statement, but the scanner does not parse
+  `BEGIN ATOMIC`, and a `;` inside it has more SQL after it. It fails loudly. A dollar-quoted body
+  (`AS $$ … $$`) is unaffected. No migration of keel or its two apps has a `BEGIN ATOMIC` body.
+- **A response over 1 MiB fails, where `pg` would return it.** Rows are bounded in count, not in bytes:
+  a keyset page of rows with unbounded text (a page of tickets with large bodies) can pass on `pg` and
+  fail on this transport. The fix belongs to the query: a smaller page, or narrower columns for the list
+  with the large field fetched one row at a time. Step 3 of `docs/runbooks/data-api.md` records the error
+  AWS sends. It also asks whether a single row over 64 KB, a limit AWS's troubleshooting page lists, fails
+  on Aurora PostgreSQL; if it does, such a field cannot be read through this transport at all.
+
+**Not proven, and owed by the `data-api` cutover row:**
+
+- AWS's exact wire format, which the emulator takes from PgJDBC conventions (column type names, the
+  `timestamptz` string, error wording);
+- that PREPARE and `pg_prepared_statements` work through the Data API;
+- the retry on a paused Serverless v2's `DatabaseResumingException`.
