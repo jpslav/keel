@@ -39,7 +39,34 @@ const pgTypes: CustomTypesConfig = {
  */
 export function createRealDb(databaseUrl: string): DbPort {
     const pool = new Pool({ connectionString: databaseUrl, max: 5, types: pgTypes })
+    // Every client gets its own listener as it connects, for its whole life, idle or checked out.
+    pool.on('connect', (client) => client.on('error', logConnectionError))
+    // pg-pool re-emits an IDLE client's error on the pool. The client's listener above has logged it, and
+    // any other error the pool emits (a failed connect, a client being removed) has already reached the
+    // caller that asked for it, so this listener exists only so the event is not an uncaught exception.
+    pool.on('error', () => undefined)
     return dbPortFor(new Kysely<DB>({ dialect: new PostgresDialect({ pool }) }))
+}
+
+/**
+ * A pooled connection the server ended: a failover, a reboot, an idle-session timeout, a socket dropped
+ * while the Lambda sat frozen between invocations. pg reports it as an 'error' EVENT on the client, and an
+ * event with no listener is an uncaught exception, which crashes the process: between requests if the
+ * connection was idle, in the middle of one if a transaction held it. pg-pool listens to idle clients only,
+ * and Kysely adds no listener to the client it checks out, which it does for every transaction, every
+ * `withTenant` and the migrator's run. So every client gets this listener. If a query or transaction was
+ * using the connection, that query fails with its own error as usual. Either way, the pool drops the dead
+ * client and the next query opens a fresh one.
+ *
+ * Logged with `console.warn`, which reaches CloudWatch in Lambda. keel has no logger port, and Sentry is
+ * loaded only when a DSN is configured (../sentry/init.ts), so the adapter does not import it. Only the
+ * error's code and message are logged (57P01 is "terminating connection due to administrator command").
+ * They carry no credentials, unlike the error object itself, whose `client` holds the password. The Data
+ * API transport has no such pool: it speaks HTTPS through the SDK, whose failures reject the call that
+ * made them.
+ */
+function logConnectionError(error: Error & { code?: string }): void {
+    console.warn(`keel db: a pooled database connection ended (${error.code ?? 'no code'}: ${error.message})`)
 }
 
 /** One port shape for both transports: they differ in how SQL reaches Postgres, never in what it says. */
