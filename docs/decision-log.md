@@ -2542,3 +2542,8 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
   else, and `init-app` rewrote its paths on every rename or eject. Each app's deployment now lives in the app
   (`apps/<app>/infra/`), the reusable code in `@strake/cdk`, and nothing at the root names an app. The starter
   gets one too. An adopter whose infrastructure spans several apps, as Pages' does, keeps its own root `infra/`.
+- **D2 reopened, the same day.** The independent design review found that an npm organization `strake` already
+  exists and is not JP's (the registry answers `/-/org/strake/package`, though every package name under it is a
+  404), and that Strake is an existing project. JP is choosing another name. It is reserved on npm first (step
+  zero in ADR-0014's plan: organization ownership confirmed, placeholders published, trusted publishing set up),
+  and only then written into the repository.
