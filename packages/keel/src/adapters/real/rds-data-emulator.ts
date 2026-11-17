@@ -70,6 +70,11 @@ export class RdsDataEmulator implements RdsDataClientLike {
             // Raw text for every type: the emulator does its own typing, as the Data API does.
             types: { getTypeParser: () => (value: string) => value },
         })
+        // An IDLE pooled connection the server ends is the pool's to drop and replace, as the Data API's own
+        // pool does. A test's `DROP DATABASE … WITH (FORCE)`, such as the owner pass's teardown, ends it with
+        // 57P01, and with no listener pg-pool's 'error' event fails the whole run as an unhandled error.
+        // A connection that is IN USE still fails its statement as before.
+        this.#pool.on('error', () => undefined)
     }
 
     async send(command: RdsDataCommand): Promise<unknown> {

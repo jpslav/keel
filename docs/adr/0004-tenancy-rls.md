@@ -257,3 +257,22 @@ by exact path. That path names the app's directory, which `pnpm init-app` rename
 and an adopter's edit to that file conflicts with every later keel update to it. So an app lists its exceptions in its own
 `apps/<app>/lint-exceptions.mjs`, by path relative to the app, and `eslint.config.mjs` reads every app's when it
 loads. Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.
+
+## Addendum (2026-11-17): the non-superuser pass runs through the Data API too
+
+The addendum on who may switch to `app_user` left the pass on `pg` alone ("It does not yet"). It now also
+runs through the RDS Data API (`packages/keel/src/adapters/real/rds-data.contract.test.ts`).
+
+- Every connection the pass opens goes through the dialect, to an emulator logged in as that login, as on
+  Aurora, where the secret is the login. Only `admin` stays on `pg`: it creates the owner, grants it the
+  creator's membership where `app_user` already exists, and tears everything down.
+- The owner migrates the Data API's way, in one transaction behind a transaction-scoped lock, through a
+  `migrate` hook the pass gained. Its default is still `migrateToLatest`.
+- The test also reads the calls the owner's emulator received while the migrations ran. They must be one
+  transaction, opening with the transaction-scoped lock, every statement on that one id, ending in a
+  commit. `withTenant`'s role switch must have arrived inside a transaction too. The owner migrating or
+  connecting over `pg` instead turns it red.
+- In that file `app_user` already exists, created by its superuser migration, so the pass takes the
+  reused-server branch: the owner is granted exactly the creator's measured membership, and 0015 adds SET.
+- Without 0015 it fails with the production error, `permission denied to set role "app_user"`, as the
+  `pg` passes do.
