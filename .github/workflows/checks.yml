@@ -42,7 +42,9 @@ jobs:
             - run: pnpm --filter spike-kysely-pglite test
 
     # The anti-drift job: the SAME migrations + RLS proof suite that unit tests run on pglite,
-    # against real Postgres (locally that's embedded-postgres; here a service container).
+    # against real Postgres (locally that's embedded-postgres; here a service container). One server, and a
+    # database of its own for every app under apps/ (discovered, so an ejected app is covered) and for keel's
+    # fixture: two migration sets cannot share a database (tests/support/contract-postgres.ts).
     contract:
         runs-on: ubuntu-latest
         services:
