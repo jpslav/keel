@@ -13,8 +13,8 @@ export interface StoredObjectInfo {
      * An OPAQUE identifier of this version of the object. Compare two for equality; pass one back UNCHANGED
      * as `copy`'s `ifMatch`; never parse it or assume a format or a length. Heads of one key that give different
      * `etag`s mean its bytes changed in between. The same `etag` means the same BYTES, not that the object was
-     * not rewritten: a rewrite with identical bytes and another content type keeps it on the fake, and on S3
-     * that depends on how the object is stored, so rely on neither. Compare etags only between heads of the SAME
+     * not rewritten: a rewrite with identical bytes and another content type keeps it on the fake, and S3
+     * promises nothing about it, so rely on neither. Compare etags only between heads of the SAME
      * key: the port does not promise that a copy has its source's etag (the fake's does). The real adapter returns S3's ETag exactly as S3 sent it (quotes included);
      * the fake returns a quoted SHA-256 of the bytes.
      */
@@ -115,16 +115,17 @@ export interface StoragePort {
      * An object's size, content type, ETag and last-modified time WITHOUT its bytes (S3 `HeadObject`; the
      * fake stats the file, reads its sidecar and hashes the body). `null` when nothing is stored at `key`, as
      * for `get`: a read has a natural "nothing" to return, so a caller asks `if (!info)`. (`copy` throws
-     * instead, because it has nothing to return.) Like `get`, it never mistakes a bookkeeping name or a
-     * directory for an object.
+     * instead, because it has nothing to return.) A bookkeeping name is `null` as it is for `get`; so is a
+     * directory, where the fake's `get` throws on one (it answers ENOENT for the missing sidecar).
      *
      * A check made from this is ADVISORY: the object can change between `head` and whatever the caller does
      * next. To act on exactly the version that was checked, pass `info.etag` as `copy`'s `ifMatch`.
      *
      * Real adapter: needs `s3:GetObject`, and `s3:ListBucket` for a missing key to be a 404; without it S3
      * answers 403, which is not mapped and throws (AWS's HeadObject reference). A HEAD response has no body, so
-     * S3 gives only a generic status ("It's not possible to retrieve the exact exception"): a missing BUCKET is
-     * also a 404, and reads as `null` here as a missing key does. A response without a size, ETag or
+     * S3 gives only a generic status ("It's not possible to retrieve the exact exception"): a missing BUCKET, which S3 also
+     * reports as a 404 (not stated on the HeadObject page; the cutover row confirms it), could not be told
+     * apart, and reads as `null` here as a missing key does. A response without a size, ETag or
      * last-modified time throws rather than reporting a size of 0.
      */
     head(key: string): Promise<StoredObjectInfo | null>

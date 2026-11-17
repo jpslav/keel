@@ -2174,8 +2174,8 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
   adapters agree: the real one maps S3's `NotFound` (the SDK's error for a HEAD 404) and `NoSuchKey`; the fake
   answers `null` for anything that is not a regular file (a directory, a bookkeeping name).
 - **What S3's HEAD cannot say.** A HEAD response has no body, so AWS gives only a generic status ("It's not
-  possible to retrieve the exact exception"): a missing BUCKET is also a 404 and reads as `null`, where `put` or
-  `get` would surface it. A 403 (the role lacks `s3:ListBucket`, so a missing key is not a 404) is not
+  possible to retrieve the exact exception"): a missing BUCKET, which S3 also reports as a 404 (not stated on the HeadObject page, so the
+  cutover row confirms it), could not be told apart and reads as `null`, where `put` or `get` would surface it. A 403 (the role lacks `s3:ListBucket`, so a missing key is not a 404) is not
   mapped and throws, as in `copy`. A response without a size, ETag or date throws: defaulting a size to 0
   would let a maximum-size check pass on something S3 never said.
 - **A stat-then-copy check is advisory; `ifMatch` makes it exact.** The object can change between the two
