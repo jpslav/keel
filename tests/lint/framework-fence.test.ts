@@ -1,5 +1,8 @@
+import { symlinkSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
+import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
+import { makeTestTmpDir } from '../support/tmp-dir'
 import {
     APP,
     APP_CODE_DYNAMIC,
@@ -13,6 +16,8 @@ import {
     fired,
     JSX_IN_CORE,
     lint,
+    NODE_MODULES_DYNAMIC,
+    NODE_MODULES_STATIC,
     VENDOR_DYNAMIC,
 } from './lint-text'
 
@@ -42,11 +47,13 @@ describe('the framework/app fence holds outside declarations', () => {
         ['require()', "export const seed = require('@app/seed/world')\n"],
         ['a type-position import()', "export type Ticket = import('@/domain/tickets').Ticket\n"],
         ['typeof import()', "export type Seed = typeof import('@app/seed')\n"],
+        ['import = require()', "import seed = require('@app/seed')\nexport { seed }\n"],
     ]
+    const TYPESCRIPT_ONLY = ['a type-position import()', 'typeof import()', 'import = require()']
 
     describe.each([...KEEL, FIXTURE, 'packages/keel/src/components/kv-panel.mjs'])('%s', (file) => {
-        // A `.mjs` file has no type positions, so it gets the runtime forms only.
-        const applicable = file.endsWith('.mjs') ? forms.filter(([form]) => !form.includes('type')) : forms
+        // A `.mjs` file has no type positions and no `import =`, so it gets the JavaScript forms only.
+        const applicable = file.endsWith('.mjs') ? forms.filter(([form]) => !TYPESCRIPT_ONLY.includes(form)) : forms
         it.each(applicable)('may not reach app content by %s', async (_form, code) => {
             expect(fired(await lint(file, code), APP_CODE_DYNAMIC)).toBe(1)
         })
@@ -84,6 +91,7 @@ describe('keel/core stays framework-free outside declarations', () => {
         ['require()', "export const ui = require('@mantine/core')\n"],
         ['a type-position import()', "export type Node = import('react').ReactNode\n"],
         ['next-intl', "export const load = () => import('next-intl/server')\n"],
+        ['import = require()', "import React = require('react')\nexport { React }\n"],
     ])('may not reach a framework by %s', async (_form, code) => {
         expect(fired(await lint(CORE, code), CORE_DYNAMIC)).toBe(1)
     })
@@ -135,11 +143,20 @@ describe('the two halves of each fence read the group the same way', () => {
         '@scope/../../apps/showcase/src/domain/tickets',
         '@SCOPE/../../apps/showcase/src/domain/tickets',
         'lodash/../../packages/seed/src/index',
+        '.x/../../apps/showcase/src/domain/tickets',
+        '.pnpm/../../apps/showcase/src/domain/tickets',
         // ...but not one that does not climb, nor one appCodePattern already bans whole (one finding, not two)
         '@app-config/apps/registry',
         '@app-config/x..y',
         '@/../domain/tickets',
         '@app/seed/../world',
+        // a package reached through node_modules, where pnpm links the apps and the seed (nodeModulesPathPattern)
+        '.pnpm/node_modules/showcase/src/domain/tickets',
+        'node_modules/@app/seed',
+        '../../../../node_modules/.pnpm/node_modules/showcase/src/domain/tickets',
+        '..\\..\\NODE_MODULES\\showcase',
+        // ...but not a name that merely contains it
+        './node_modules-cache/x',
     ]
     const halves: [string, string, Fence, Fence][] = [
         ['keel/core', 'packages/keel/src/core/kv.ts', CORE_STATIC, CORE_DYNAMIC],
@@ -243,6 +260,9 @@ describe('a path into app code crosses the framework/app fence too', () => {
             '@app-config/x/../../seed',
             '@scope/../../apps/showcase/src/domain/tickets',
             'lodash/../../packages/seed/src/index',
+            // a name that starts with a dot is a package name, not a path: only `./` and `../` are relative
+            '.x/../../apps/showcase/src/domain/tickets',
+            '.pnpm/../../apps/showcase/src/domain/tickets',
         ])('may not climb out of a package or alias with %s, in either half', async (specifier) => {
             const at = JSON.stringify(specifier)
             const declared = `import { seed } from ${at}\nexport { seed }\n`
@@ -250,6 +270,61 @@ describe('a path into app code crosses the framework/app fence too', () => {
             const loaded = `export const load = () => import(${at})\n`
             expect(fired(await lint(file, loaded), BARE_TRAVERSAL_DYNAMIC)).toBe(1)
         })
+    })
+
+    // pnpm links every workspace package into node_modules/.pnpm/node_modules, the apps and the seed among them,
+    // so a specifier through node_modules reaches app code by where pnpm put it rather than by its name, whether
+    // it is spelled as a package or as a path. nodeModulesPathPattern bans it in both halves; the path rule
+    // leaves it to that pattern, so it is one finding, not two.
+    describe.each([...KEEL, FIXTURE])('%s', (file) => {
+        it.each([
+            '.pnpm/node_modules/showcase/src/domain/tickets',
+            'node_modules/@app/seed/src/index',
+            pathFrom(file, 'node_modules/.pnpm/node_modules/showcase/src/domain/tickets'),
+            pathFrom(file, 'node_modules/.pnpm/node_modules/@app/seed/src/index').replaceAll('/', '\\'),
+        ])('may not reach a package through node_modules with %s, in either half', async (specifier) => {
+            const at = JSON.stringify(specifier)
+            const declared = await lint(file, `import { seed } from ${at}\nexport { seed }\n`)
+            expect(fired(declared, NODE_MODULES_STATIC)).toBe(1)
+            expect(fired(declared, APP_CODE_PATH)).toBe(0)
+            const loaded = await lint(file, `export const load = () => import(${at})\n`)
+            expect(fired(loaded, NODE_MODULES_DYNAMIC)).toBe(1)
+            expect(fired(loaded, APP_CODE_PATH)).toBe(0)
+        })
+    })
+
+    it('a name that merely contains node_modules is not one', async () => {
+        const code =
+            "import { a } from './node_modules-cache/x'\nimport { b } from '@scope/my_node_modules'\nexport { a, b }\n"
+        const findings = await lint('packages/keel/src/server-lib/kv.ts', code)
+        expect(fired(findings, NODE_MODULES_STATIC)).toBe(0)
+    })
+
+    // The path is judged by where it really lands. Opened through a symlink to the checkout, as an editor's
+    // workspace can be, every file's path starts somewhere the config's own directory does not; resolved
+    // lexically, `../../../../apps/…` would then land outside the repo and in no app at all.
+    it('through a symlink to the checkout, a path into apps/ is still one', async () => {
+        const link = path.join(makeTestTmpDir('fence-symlink-'), 'checkout')
+        symlinkSync(process.cwd(), link, 'dir')
+        try {
+            const eslint = new ESLint({ cwd: link })
+            const file = 'packages/keel/src/server-lib/kv.ts'
+            const lintThrough = async (code: string) => {
+                const [result] = await eslint.lintText(code, { filePath: path.join(link, file) })
+                expect(
+                    result.messages.filter((m) => !m.ruleId),
+                    'not actually linted',
+                ).toEqual([])
+                return result.messages.map((m) => ({ rule: m.ruleId as string, message: m.message }))
+            }
+            const into = JSON.stringify(pathFrom(file, 'apps/showcase/src/domain/tickets'))
+            expect(fired(await lintThrough(`export const load = () => import(${into})\n`), APP_CODE_PATH)).toBe(1)
+            const out = JSON.stringify(pathFrom(file, 'tests/support/tmp-dir'))
+            expect(fired(await lintThrough(`export const load = () => import(${out})\n`), APP_CODE_PATH)).toBe(0)
+        } finally {
+            // the link, never what it points at: the scratch directory's own removal must find nothing to follow
+            unlinkSync(link)
+        }
     })
 })
 
@@ -290,14 +365,19 @@ describe('keel/core holds no JSX', () => {
 
 // The vendor fence's declarationless rule gained the type position too: `import type` of a vendor SDK is
 // banned by no-restricted-imports, and the inline form was not.
-describe('a vendor SDK named in a type import() is still a vendor import', () => {
-    const code = "export type Client = import('@aws-sdk/client-s3').S3Client\n"
+describe('a vendor SDK named in a type import(), or by import = require(), is still a vendor import', () => {
+    const forms = [
+        ['a type import()', "export type Client = import('@aws-sdk/client-s3').S3Client\n"],
+        ['import = require()', "import s3 = require('@aws-sdk/client-s3')\nexport { s3 }\n"],
+    ]
+    const outside = [`${APP}/src/domain/kv.ts`, 'packages/keel/src/server-lib/kv.ts', FIXTURE]
+    const inside = [`${APP}/src/adapters/real/kv.ts`, 'packages/keel/src/adapters/real/kv.ts']
 
-    it.each([`${APP}/src/domain/kv.ts`, 'packages/keel/src/server-lib/kv.ts', FIXTURE])('%s may not', async (file) => {
-        expect(fired(await lint(file, code), VENDOR_DYNAMIC)).toBe(1)
+    it.each(outside)('%s may not', async (file) => {
+        for (const [form, code] of forms) expect(fired(await lint(file, code), VENDOR_DYNAMIC), form).toBe(1)
     })
 
-    it.each([`${APP}/src/adapters/real/kv.ts`, 'packages/keel/src/adapters/real/kv.ts'])('%s may', async (file) => {
-        expect(fired(await lint(file, code), VENDOR_DYNAMIC)).toBe(0)
+    it.each(inside)('%s may', async (file) => {
+        for (const [form, code] of forms) expect(fired(await lint(file, code), VENDOR_DYNAMIC), form).toBe(0)
     })
 })

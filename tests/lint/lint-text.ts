@@ -82,6 +82,11 @@ export const BARE_TRAVERSAL_DYNAMIC: Fence = {
     rule: 'keel/no-dynamic-app-import',
     fragment: 'a `..` in a package or alias',
 }
+export const NODE_MODULES_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'never through node_modules' }
+export const NODE_MODULES_DYNAMIC: Fence = {
+    rule: 'keel/no-dynamic-app-import',
+    fragment: 'never through node_modules',
+}
 export const JSX_IN_CORE: Fence = {
     rule: 'keel/no-jsx-in-core',
     fragment: 'JSX compiles to an import of react/jsx-runtime',

@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import js from '@eslint/js'
@@ -36,8 +36,9 @@ const STORY_FILES = '**/*.stories.{js,jsx,ts,tsx}'
 //
 // Each entry names ONE existing file under the app's src/ and says why. Anything else fails the config load,
 // naming the app's file and the entry: a glob, a directory, a path out of the app, a missing reason, a rule
-// that takes no exceptions, or a file that no longer exists. So an exception cannot quietly widen, and a stale
-// one cannot linger. The path is matched literally (a Next route's `[locale]` is not a glob).
+// that takes no exceptions, or a file that no longer exists. So an exception cannot quietly widen or outlive the
+// file it names (one that outlives its NEED is still the app's to delete). The path is matched literally (a Next
+// route's `[locale]` is not a glob).
 const APP_EXCEPTION_RULES = ['keel/no-raw-db-handle']
 const GLOB_SPECIALS = /[*?[\]{}()!+@]/g
 export async function loadAppLintExceptions(root) {
@@ -50,7 +51,9 @@ export async function loadAppLintExceptions(root) {
         const fail = (why) => {
             throw new Error(`apps/${app}/lint-exceptions.mjs: ${why}`)
         }
-        const { default: exceptions } = await import(pathToFileURL(source).href)
+        // Keyed by the file's mtime, so a process that loads this config again (an editor's lint server, a
+        // test) reads the file as it is now, not the module it cached the first time.
+        const { default: exceptions } = await import(`${pathToFileURL(source).href}?mtime=${statSync(source).mtimeMs}`)
         if (!exceptions || typeof exceptions !== 'object' || Array.isArray(exceptions)) {
             fail('its default export must be an object mapping a rule id to its entries')
         }
@@ -79,7 +82,12 @@ export async function loadAppLintExceptions(root) {
 }
 // KEEL_LINT_EXCEPTIONS_ROOT is for tests/lint/app-lint-exceptions.test.ts alone: it points the loader at a
 // scratch tree, so the test can see an app's exception reach the rule without writing into this repo's apps/.
-const appLintExceptions = await loadAppLintExceptions(process.env.KEEL_LINT_EXCEPTIONS_ROOT ?? import.meta.dirname)
+// It is read only under vitest (which sets VITEST), so a variable left in a shell cannot quietly swap one app's
+// exceptions for another tree's. That is a guard against accidents, not a boundary: whoever sets environment
+// variables for `pnpm lint` can as easily edit this file.
+const appLintExceptions = await loadAppLintExceptions(
+    (process.env.VITEST && process.env.KEEL_LINT_EXCEPTIONS_ROOT) || import.meta.dirname,
+)
 
 // Shared by the boundary blocks below. NOTE: eslint rule config merges by OBJECT KEY — a later
 // block's 'no-restricted-imports' REPLACES an earlier one for matching files. Any block that
@@ -182,21 +190,39 @@ const appCodePattern = {
         'Framework code (packages/keel) must reach app content only through the seam — import from the ' +
         "@app-config/* alias (apps/*/src/app-config/*), never the app's @/* alias or @app/seed (ADR-0012).",
 }
-// A package or alias specifier that climbs out of itself with `..`: `@app-config/../seed` resolves to the app's
-// seed through the one door the fence leaves open, `@scope/../../apps/showcase/…` and
-// `lodash/../../packages/seed/src/index` resolve (TypeScript, Node and webpack alike) out of node_modules into
-// app code, and no package specifier has a reason to say `..`. Banned in any specifier that is not a path (does
-// not start with `.`, `/` or `\`), bar `@/` and `@app/seed`, which appCodePattern already bans whole (one finding,
-// not two). A relative or absolute PATH is keelNoPathToAppCodeRule's: it resolves the path instead of reading it.
+// HOW A SPECIFIER CAN REACH APP CODE, every way, and which piece of the fence holds each. Three review rounds
+// each found a new spelling, so the fence is built from this list rather than from the spellings:
+//  1. an alias: `@/…` and `@app/seed…` (appCodePattern);
+//  2. a PATH (`./`, `../`, `/`, `\`): wherever it is spelled to go, it lands somewhere, symlinks and all
+//     (keelNoPathToAppCodeRule resolves it and asks where);
+//  3. a package or alias specifier that climbs out of itself with `..` (bareTraversalPattern);
+//  4. a specifier through a `node_modules` directory, where pnpm links every workspace package, the apps and
+//     the seed included (nodeModulesPathPattern);
+//  5. an app's package by name: keel depends on no app package, so a bare `showcase` resolves to nothing.
+//
+// (3) `@app-config/../seed` resolves to the app's seed through the one door the fence leaves open, and
+// `@scope/../../apps/…`, `.x/../../apps/…` and `lodash/../../packages/seed/src/index` resolve (TypeScript, Node
+// and webpack alike) out of node_modules into app code; no package specifier has a reason to say `..`. Banned
+// in any specifier that is not a `./`, `../`, `/` or `\` path (a path is (2)'s), bar `@/` and `@app/seed`,
+// which (1) already bans whole (one finding, not two).
 const bareTraversalPattern = {
-    regex: String.raw`^(?![.\\/])(?!@[\\/])(?!@app[\\/]seed([\\/]|$))(.*[\\/])?\.\.([\\/]|$)`,
+    regex: String.raw`^(?!\.{1,2}([\\/]|$))(?![\\/])(?!@[\\/])(?!@app[\\/]seed([\\/]|$))(.*[\\/])?\.\.([\\/]|$)`,
     message:
         'Framework code (packages/keel) must reach app content only through the seam — a `..` in a package or ' +
         'alias specifier climbs out of it, into app code the seam does not register. Import the module directly ' +
         '(ADR-0012).',
 }
-// Together, as the merge-trap rule for selectors asks: every block that fences app content lists both.
-const appCodePatterns = [appCodePattern, bareTraversalPattern]
+// (4) `.pnpm/node_modules/showcase/src/…`, or `../../node_modules/.pnpm/node_modules/@app/seed/…`: a package
+// reached by where pnpm put it rather than by its name. Nothing in keel imports through node_modules.
+const nodeModulesPathPattern = {
+    regex: String.raw`(^|[\\/])node_modules([\\/]|$)`,
+    message:
+        'Framework code (packages/keel) must reach app content only through the seam, and imports a package by its ' +
+        'name, never through node_modules: pnpm links every workspace package there, the apps and the seed among ' +
+        'them (ADR-0012).',
+}
+// Together, as the merge-trap rule for selectors asks: every block that fences app content lists all three.
+const appCodePatterns = [appCodePattern, bareTraversalPattern, nodeModulesPathPattern]
 // keel/core is pure TypeScript (ADR-0006). Named once: the core block bans it in declarations and
 // `keel/no-dynamic-framework-import-in-core` everywhere else, from this one list.
 const coreFrameworkPattern = {
@@ -263,7 +289,9 @@ const getDbDestructureSelector = {
 //  - a TypeScript type position (`Pick<DbPort, 'getDb'>`), which loads nothing.
 //  - in a TEST FILE only, a spy's key (`vi.spyOn(db, 'getDb')`), which is how a route test asserts the raw
 //    handle is never taken. A spy calls through to the original, so anywhere else it IS the raw handle; the
-//    rule checks the file name for this one (keelNoRawDbHandleRule).
+//    rule checks the file name for this one (keelNoRawDbHandleRule). RESIDUAL, accepted: in a test the spy calls
+//    through too, so a route test that calls it (`vi.spyOn(db, 'getDb')()`) does take the handle. The ban guards
+//    the code under test; a test that reaches past it is a review matter.
 const getDbStringSelector = {
     selector:
         ':matches(Literal[value="getDb"], TemplateLiteral[expressions.length=0][quasis.0.value.cooked="getDb"])' +
@@ -487,8 +515,8 @@ const keelNoDirectMkdtempRule = {
 // keel's own server-lib, while CLAUDE.md called the vendor boundary lint-enforced. It went unnoticed
 // because nothing in the tree did it; it mattered once app-owned adapters made `await import('./real/…')`
 // the house idiom one directory away. Static imports stay with `no-restricted-imports`
-// (vendorSdkPattern); this rule covers `import()`, `require()` and vitest/jest's `importActual`,
-// `requireActual`, `importMock` and `requireMock` with the SAME list, read from vendorSdkPattern.group,
+// (vendorSdkPattern); this rule covers `import()`, `require()`, `import m = require()` and vitest/jest's
+// `importActual`, `requireActual`, `importMock` and `requireMock` with the SAME list, read from vendorSdkPattern.group,
 // so there is no second list to drift. `createRequire(...)(…)` and `module.require(…)` are out of reach.
 //
 // The specifier must be a literal (or a template with no expressions). A computed one —
@@ -510,8 +538,8 @@ const isVendorSpecifier = (specifier) =>
     )
 
 // Every import a declaration-only ban cannot see, checked against one predicate: `import()`, `require()`,
-// vitest/jest's `importActual`, `requireActual`, `importMock` and `requireMock`, and a type-position
-// `import('…')` (TSImportType, whose specifier is `source` in the typescript-eslint this repo pins). A rule
+// TypeScript's `import m = require('…')`, vitest/jest's `importActual`, `requireActual`, `importMock` and
+// `requireMock`, and a type-position `import('…')` (TSImportType, whose specifier is `source` in the typescript-eslint this repo pins). A rule
 // built here takes no options, so the merge trap has nothing to replace.
 //
 // NOT covered: `vi.mock`/`vi.doMock` and jest's. A mock names a module and, given a factory, never loads it;
@@ -529,6 +557,9 @@ const declarationlessVisitors = (check) => ({
     ImportExpression: (node) => check(node.source),
     TSImportType: (node) => check(node.source),
     'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
+    // TypeScript's `import m = require('…')`: tsc refuses it under this repo's `"module": "esnext"`, but a
+    // lint rule does not lean on another gate's settings.
+    TSExternalModuleReference: (node) => check(node.expression),
     // A test inside the fence loads the real module with these, exactly as with import().
     'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
         (node) => check(node.arguments[0]),
@@ -577,7 +608,8 @@ const keelNoDynamicVendorImportRule = declarationlessImportBan({
 // dependencies so the static and declarationless bans cannot read one group two ways. That includes the
 // group syntax's quirks: a bare name matches at any depth, so core's `react` also bans `@x/react` and
 // `./react`, in both. If ESLint ever stops depending on `ignore`, this line throws when the config loads.
-// A `regex` pattern (appPathPattern) is read as that rule reads one too: a RegExp with the `iu` flags.
+// A `regex` pattern (bareTraversalPattern, nodeModulesPathPattern) is read as that rule reads one too: a RegExp
+// with the `iu` flags.
 const ignore = createRequire(createRequire(import.meta.url).resolve('eslint'))('ignore')
 const patternMatcher = (pattern) => {
     if (pattern.regex) {
@@ -608,15 +640,29 @@ const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
 // see. This rule resolves the path against the importing file and reports it if it lands in an app (`apps/`) or
 // the app's seed package (`packages/seed/`, which `@app/seed` names). Every other path out of packages/keel stays
 // open: keel's tests reach the repo's `tests/support/` helpers that way. Matching ignores case, as macOS's file
-// system does. A specifier that is not a path is the pattern fence's (bareTraversalPattern for a `..` in one).
+// system does, and follows symlinks: the path is judged by where it really lands, so neither a symlink into app
+// code nor a checkout opened through a symlinked directory (an editor's workspace, say) moves it out of reach.
+// A specifier that is not a path is the pattern fence's (bareTraversalPattern for a `..` in one), and so is a
+// path through node_modules (nodeModulesPathPattern), which this rule leaves alone: one finding, not two.
 // One rule, its own id, for declarations and everything else alike, so the merge trap has nothing to replace.
 const APP_CODE_DIRS = ['apps', 'packages/seed']
+const REPO_ROOT = realpathSync(import.meta.dirname).toLowerCase()
+const throughNodeModules = new RegExp(nodeModulesPathPattern.regex, 'iu')
+// Where `target` really is: symlinks resolved through its deepest existing ancestor, because a specifier names a
+// module without its extension, or one that does not exist yet.
+const realPathOf = (target) => {
+    const missing = []
+    let existing = target
+    while (!existsSync(existing) && dirname(existing) !== existing) {
+        missing.unshift(basename(existing))
+        existing = dirname(existing)
+    }
+    return join(realpathSync(existing), ...missing)
+}
 const appCodeDirOfPath = (filename, specifier) => {
-    if (!/^(\.{1,2}([\\/]|$)|[\\/])/.test(specifier)) return undefined
-    const target = resolve(dirname(filename), specifier.replaceAll('\\', '/'))
-    const fromRoot = relative(import.meta.dirname, target)
-        .replaceAll('\\', '/')
-        .toLowerCase()
+    if (!/^(\.{1,2}([\\/]|$)|[\\/])/.test(specifier) || throughNodeModules.test(specifier)) return undefined
+    const target = realPathOf(resolve(dirname(filename), specifier.replaceAll('\\', '/')))
+    const fromRoot = relative(REPO_ROOT, target.toLowerCase()).replaceAll('\\', '/')
     return APP_CODE_DIRS.find((dir) => fromRoot === dir || fromRoot.startsWith(`${dir}/`))
 }
 /** @type {import('eslint').Rule.RuleModule} */
@@ -642,7 +688,6 @@ const keelNoPathToAppCodeRule = {
             ImportDeclaration: (node) => check(node.source),
             ExportNamedDeclaration: (node) => check(node.source),
             ExportAllDeclaration: (node) => check(node.source),
-            TSExternalModuleReference: (node) => check(node.expression),
             ...declarationlessVisitors(check),
         }
     },

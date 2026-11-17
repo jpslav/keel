@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, utimesSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
@@ -64,6 +64,18 @@ describe('an app lists its own exceptions, by path relative to the app', () => {
         expect(listed?.rules?.['no-console']).toBeUndefined()
         expect(sibling?.rules?.['no-console']).toBeDefined()
     })
+
+    it('an edited exceptions file is read afresh, not served from the module cache', async () => {
+        const [first, second] = ['src/domain/maintenance.ts', 'src/domain/archive.ts']
+        const root = tree('acme', entry(first), [first, second])
+        expect((await loadAppLintExceptions(root))[RAW_DB]).toEqual([`apps/acme/${first}`])
+        const source = path.join(root, 'apps/acme/lint-exceptions.mjs')
+        writeFileSync(source, `export default ${entry(second)}\n`)
+        // a later mtime, set rather than waited for, so a coarse file-system clock cannot hide the edit
+        const later = new Date(Date.now() + 60_000)
+        utimesSync(source, later, later)
+        expect((await loadAppLintExceptions(root))[RAW_DB]).toEqual([`apps/acme/${second}`])
+    })
 })
 
 describe('anything that could widen an exception fails the config load', () => {
@@ -99,26 +111,40 @@ describe('anything that could widen an exception fails the config load', () => {
 // The wiring, end to end: the repo's real config, reading a scratch tree's exceptions (KEEL_LINT_EXCEPTIONS_ROOT),
 // lets the listed file through the tenancy ban and nothing else. A child process, so the config loads fresh.
 describe('a listed module passes the tenancy ban, and an unlisted one still fails it', () => {
-    const lintAs = (root: string, file: string) => {
+    // Two findings in one module: the raw handle, and a process.env read, which no app exception touches. The
+    // second is what shows the listed module was linted at all, rather than ignored wholesale.
+    const PURGE = 'export const purge = (db) => db.getDb()\nexport const region = process.env.AWS_REGION\n'
+    const lintAs = (root: string, file: string, env: NodeJS.ProcessEnv = process.env) => {
         const eslintBin = path.join(process.cwd(), 'node_modules/eslint/bin/eslint.js')
-        try {
-            execFileSync(process.execPath, [eslintBin, '--stdin', '--stdin-filename', file, '--format', 'json'], {
-                cwd: process.cwd(),
-                env: { ...process.env, KEEL_LINT_EXCEPTIONS_ROOT: root },
-                input: 'export const purge = (db) => db.getDb()\n',
-                stdio: ['pipe', 'pipe', 'pipe'],
-            })
-            return []
-        } catch (error) {
-            const [result] = JSON.parse((error as { stdout: Buffer }).stdout.toString())
-            return result.messages.map((m: { ruleId: string }) => m.ruleId)
-        }
+        const run = spawnSync(process.execPath, [eslintBin, '--stdin', '--stdin-filename', file, '--format', 'json'], {
+            cwd: process.cwd(),
+            env: { ...env, KEEL_LINT_EXCEPTIONS_ROOT: root },
+            input: PURGE,
+            encoding: 'utf8',
+        })
+        // 0 is clean and 1 is findings; anything else (2: the config did not load) has no report to read
+        expect([0, 1], run.stderr).toContain(run.status)
+        const [result] = JSON.parse(run.stdout) as [{ messages: { ruleId: string | null; message: string }[] }]
+        expect(
+            result.messages.filter((m) => !m.ruleId),
+            `${file} was not actually linted`,
+        ).toEqual([])
+        return result.messages.map((m) => m.ruleId)
     }
+    const listed = 'src/domain/maintenance.ts'
 
     it('in a scratch app called acme', () => {
-        const listed = 'src/domain/maintenance.ts'
         const root = tree('acme', entry(listed), [listed])
-        expect(lintAs(root, `apps/acme/${listed}`)).not.toContain(RAW_DB)
+        const passed = lintAs(root, `apps/acme/${listed}`)
+        expect(passed).not.toContain(RAW_DB)
+        expect(passed).toContain('no-restricted-syntax')
         expect(lintAs(root, 'apps/acme/src/domain/other.ts')).toContain(RAW_DB)
+    })
+
+    it("outside vitest the variable is not read, and the repo's own apps decide", () => {
+        const root = tree('acme', entry(listed), [listed])
+        const outsideVitest = { ...process.env }
+        delete outsideVitest.VITEST
+        expect(lintAs(root, `apps/acme/${listed}`, outsideVitest)).toContain(RAW_DB)
     })
 })
