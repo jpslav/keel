@@ -200,8 +200,43 @@ export function generalizeAppCitations(text: string, isMissing: (path: string) =
  * The asymmetry matters: allowing the parent fallback for directories too would let `src/app-confgi`
  * pass on the strength of `src/` existing, which defeats the point.
  */
-export function resolves(path: string): boolean {
-    if (existsSync(path)) return true
+export function resolves(path: string, root = '.'): boolean {
+    if (namesAbsentReferenceApp(path, root)) return true
+    if (existsSync(join(root, path))) return true
     const looksLikeFile = basename(path).includes('.')
-    return looksLikeFile && existsSync(dirname(path))
+    return looksLikeFile && existsSync(join(root, dirname(path)))
+}
+
+/**
+ * keel's two reference apps, which a doc may cite by name: every scaffold command points at
+ * `apps/showcase/…` for its worked example, and the adoption guide describes `apps/starter`.
+ *
+ * In the TEMPLATE both exist, so a citation of either is checked like any other and a broken one fails.
+ * In an ADOPTED tree they usually do not: `pnpm init-app --eject-showcase` deletes the showcase and a
+ * rename moves the starter. `init-app` repoints the citations it finds on the day it runs, but an upstream
+ * merge (ADR-0013) later brings in NEW text that names them again, and the gate went red on a citation
+ * nobody in the adopter's repo wrote, the first time a recipe cited the starter's sign-in page.
+ *
+ * So a citation under `apps/showcase/` or `apps/starter/` whose app is not in this tree is a reference to
+ * keel's own app, which cannot be checked here and is not this repo's to fix. It resolves.
+ *
+ * "In this tree" means the app's `package.json` exists, NOT that its directory does. A merge adds any new
+ * file upstream puts under `apps/showcase/` even after you deleted the app (git reports a conflict for a
+ * file you deleted and upstream edited, and silently resurrects one that is new), so a directory holding a
+ * single stray file would otherwise switch this rule off and turn the gate red on the next doc. A local
+ * `apps/starter/node_modules` left behind by a rename does the same. The package manifest is what makes it an
+ * app, and a stray file cannot fake it.
+ * Everything else stays strict: the adopter's own app (`apps/console/…`), a path in `packages/keel`, and
+ * either reference app for as long as it is present. The reference apps are a closed list on purpose:
+ * `init-app` reserves `showcase` as an app slug, and an adopter who keeps the name `starter` has the
+ * directory, so their own citations of it are still checked.
+ *
+ * Here, and not in the test, because `init-app` asks `resolves` which citations are gone before it
+ * generalizes them to `apps/<app>/…`: one rule means the rewriter and the gate cannot disagree.
+ */
+const REFERENCE_APP = /^apps\/(showcase|starter)(?:\/|$)/
+
+function namesAbsentReferenceApp(path: string, root: string): boolean {
+    const app = REFERENCE_APP.exec(path)?.[1]
+    return app !== undefined && !existsSync(join(root, 'apps', app, 'package.json'))
 }
