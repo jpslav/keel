@@ -2649,7 +2649,7 @@ verify` does not either), so the ejected suite is proven by hand here and by the
 
 ## ADR-0014's open decisions, decided by JP (2026-11-17, `docs/adr-package-model`)
 
-ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, and the same day added D8 to D10 and revised D3, in a chat with the
+ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, and the same day added D8 to D11 and revised D3, in a chat with the
 keel manager session, which relayed them to the session writing the ADR. The ADR records each with its reasons.
 
 - **D1, registry: public npm.** GitHub Packages was the alternative. It needs a classic personal access token to
@@ -2711,3 +2711,8 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
   was the alternative, and it was rejected because the records are append-only. The npm organization `sssb` was created by the `safeinsights-bot` npm account, its sole owner for now, since JP
   has no personal npm account (CanopyCMS is set up the same way). That single owner is recorded as a known risk,
   and adding a second, human owner is an account action for when a maintainer has an npm account. In-flight `jpslav/keel` PRs land before the copy.
+- **D11, the same day: no more manual npm publishes.** Every passkey approval is friction JP wants gone. The
+  packages already exist, so the release workflow modeled on CanopyCMS's `publish.yml` and a trusted publisher on
+  every package, `create-sssb` included, move to right after the rename (ADR-0014's P1b), the last passkey round.
+  Pages' prereleases are GitHub-release tarballs, which involve no npm publish; iteration happens on an
+  integration branch, and npm sees only real releases.
