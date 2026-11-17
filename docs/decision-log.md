@@ -1949,6 +1949,20 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   nothing did; and the too-long-value test asserts each refusal's reason, not merely that something
   failed. Accepted as limits (ADR-0002 addendum): an explicit `::domain` cast in the SQL, and a colon
   before a column name, as in `a[lo:hi]`.
+- **An independent cold review (2026-11-17, on a different model) found no tenant-isolation or injection
+  defect.** The manager decided on every finding, and all were made:
+    - A leading `;` hid COMMIT from the guard, and a statement after a `;` was never looked at, so `;commit`
+      inside `withTenant` ended the tenant's transaction. Now one scanner (`sqlSegments`) says where code
+      is, for the dialect and the emulator alike. A multistatement is refused before calling, and the
+      emulator refuses one as AWS does, before running any of it.
+    - The emulator's own colon scanner was weaker than the dialect's (E-strings, nested comments). It now
+      uses the dialect's.
+    - Parameter types expire after five minutes. Within them a type change is silent; ADR-0002 says so.
+    - A commit counts only when CommitTransaction answers "Transaction Committed".
+    - The runbook now proves migrations through the Data API on an empty database, sends statements on
+      ended transaction ids, and asks whether AWS accepts 0001's `DO` block. If it does not, 0001 changes;
+      that is written down, not built.
+    - The 1 MiB response cap meeting a page of unbounded text is an accepted limit.
 
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 
