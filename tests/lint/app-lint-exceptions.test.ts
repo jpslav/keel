@@ -75,6 +75,7 @@ describe('anything that could widen an exception fails the config load', () => {
         ['a path outside src/', entry('config/params.ts'), ['config/params.ts'], /path under the app's src/],
         ['backslashes', entry('src\\domain\\maintenance.ts'), ['src/domain/maintenance.ts'], /path under/],
         ['no reason', entry('src/domain/maintenance.ts', '  '), ['src/domain/maintenance.ts'], /needs a reason/],
+        ['no file', `{ ${JSON.stringify(RAW_DB)}: [{ reason: 'purges every tenant' }] }`, [], /names no file/],
         [
             'a rule that takes no exceptions',
             `{ 'keel/no-dynamic-app-import': [{ file: 'src/x.ts', reason: 'r' }] }`,
