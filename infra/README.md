@@ -45,7 +45,9 @@ admits nothing.
 
 It reads what each bundled Lambda really holds, too: the bundles that synth's own esbuild produced with the
 tsconfig the stack passes. No bundle may hold code from `packages/keel/test-fixture`, and the migrator's
-must carry every one of the app's own migrations. Every database cluster must be encrypted at rest
+must carry every one of the app's own migrations, by its registry's names. It must also name the framework's
+and the app's migration registries in esbuild's path comments, so a minified bundle fails instead of
+passing unread. Every database cluster must be encrypted at rest
 (`StorageEncrypted`), on both shapes. The stack bundles with the APP's tsconfig
 (`APP_TSCONFIG` in `stack.ts`). The root `tsconfig.json` points `@app-config/*` at keel's test fixture,
 and a migrator bundled with it would ship the fixture's migrations instead of the app's.

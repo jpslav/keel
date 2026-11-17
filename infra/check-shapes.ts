@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import * as cdk from 'aws-cdk-lib'
 import { Template } from 'aws-cdk-lib/assertions'
@@ -23,9 +24,13 @@ const check = (ok: boolean, message: string) => {
     if (!ok) problems.push(message)
 }
 
-/** A shape's template, and the directory its synth staged assets in (bundles included). */
+/**
+ * A shape's template, and the directory its synth staged assets in (bundles included). The directory is
+ * this check's own, never `CDK_OUTDIR`, so removing it afterwards cannot touch a real `cdk.out`.
+ */
 function synthesize(transport: Transport): { all: Record<string, Resource>; assembly: string } {
-    const app = new cdk.App({ context: { environment: 'Staging' } })
+    const outdir = mkdtempSync(path.join(tmpdir(), 'keel-shape-check-'))
+    const app = new cdk.App({ outdir, context: { environment: 'Staging' } })
     const stack = new AppStack(app, `ShapeCheck-${transport}`, { databaseTransport: transport })
     const all = Template.fromStack(stack).toJSON().Resources as Record<string, Resource>
     return { all, assembly: app.synth().directory }
@@ -50,10 +55,28 @@ function bundles(all: Record<string, Resource>, assembly: string): Map<string, s
     return found
 }
 
-/** The app's own migrations, by registry name: the files beside the app seam's migration index. */
-const APP_MIGRATIONS = readdirSync(path.join(path.dirname(APP_TSCONFIG), 'src/app-config/db/migrations'))
-    .filter((file) => /^\d+_.+\.ts$/.test(file))
-    .map((file) => file.replace(/\.ts$/, ''))
+/** The app's directory, relative to the repo root: where esbuild's path comments place its modules. */
+const APP_DIR = path.relative(path.join(__dirname, '..'), path.dirname(APP_TSCONFIG))
+
+/**
+ * The app's own migrations, by the names its registry gives them (the keys Kysely records), read from the
+ * app seam's migration index rather than guessed from file names.
+ */
+const APP_MIGRATIONS = [
+    ...readFileSync(path.join(path.dirname(APP_TSCONFIG), 'src/app-config/db/migrations/index.ts'), 'utf8').matchAll(
+        /['"](\d+_[^'"]+)['"]\s*:/g,
+    ),
+].map((match) => match[1]!)
+
+/**
+ * The sources a migrator bundle must name, as esbuild's per-module path comments: the framework's
+ * registry and the app's. Requiring them makes the checks fail CLOSED: a minified bundle carries no such
+ * comments, and so fails here instead of passing every check that reads them.
+ */
+const MIGRATOR_SOURCES = [
+    'packages/keel/src/db/migrations/index.ts',
+    `${APP_DIR}/src/app-config/db/migrations/index.ts`,
+]
 
 function lambda(all: Record<string, Resource>, name: 'Server' | 'Migrator') {
     const found = Object.entries(all).find(
@@ -207,6 +230,12 @@ for (const transport of ['pg', 'data-api'] as const) {
     }
     const migratorCode = [...built].find(([id]) => id.startsWith('Migrator'))?.[1]
     check(migratorCode !== undefined, label('the migrator is bundled by this synth'))
+    for (const source of MIGRATOR_SOURCES) {
+        check(
+            migratorCode?.includes(`// ${source}\n`) === true,
+            label(`the migrator's bundle names ${source} (an unminified bundle, built from the app's seam)`),
+        )
+    }
     for (const name of APP_MIGRATIONS) {
         check(
             migratorCode?.includes(`"${name}"`) === true,
