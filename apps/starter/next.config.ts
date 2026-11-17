@@ -17,6 +17,19 @@ const nextConfig: NextConfig = {
     transpilePackages: ['keel'],
     // Native/WASM server deps stay external so their runtime file loading keeps working.
     serverExternalPackages: ['@electric-sql/pglite', 'pg'],
+    // Without this, `next dev` writes an AGENTS.md into the app whenever it detects an AI coding agent,
+    // and an agent's `pnpm verify` leaves it untracked. keel's agent guide is the root CLAUDE.md
+    // (decision-log, 2026-11-16). Option defined in
+    // node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/agentRules.md
+    agentRules: false,
+    experimental: {
+        // Off because `pnpm dev` must make no network calls (CLAUDE.md). By default every `next dev`
+        // outside CI queries npm's advisory feed for the installed next (so does `next build` run by an
+        // agent or at a prompting terminal), and an agent's run stops when an advisory matches
+        // (build-notes, 2026-11-16). Option defined in
+        // node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/agentUpgrade.md
+        agentUpgrade: false,
+    },
 }
 
 export default withNextIntl(nextConfig)
