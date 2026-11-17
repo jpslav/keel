@@ -3,7 +3,7 @@ updates:
     - package-ecosystem: npm
       directory: /
       schedule:
-          interval: weekly
+          interval: monthly
       # the same supply-chain cooldown pnpm-workspace.yaml applies at install time
       # (minimumReleaseAge: 2880 min = 2 days), rounded up by a day here
       cooldown:
@@ -15,4 +15,4 @@ updates:
     - package-ecosystem: github-actions
       directory: /
       schedule:
-          interval: weekly
+          interval: monthly
