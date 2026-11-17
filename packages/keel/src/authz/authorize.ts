@@ -10,6 +10,7 @@ import {
     type SubjectType,
     defineAbilitiesFor,
 } from '../core/abilities'
+import type { OrgIdentity } from '../db/org-lookup'
 import type { AuthPort, AuthUser } from '../ports/auth'
 import { ForbiddenError } from '../ports/errors'
 import type { ServiceIdentity } from '../service-auth/verify'
@@ -61,9 +62,10 @@ export function abilityActorFromUser(user: AuthUser, activeOrgId: string): Abili
  * the credential nor derived from it, and it reads on every call, so a person who has been removed or
  * demoted is judged by what they are now.
  *
- * `org.id` and `org.slug` must come from the SAME organizations row: the standing is read by slug, the
- * way the auth port names orgs, and applied to the id every sameOrg check compares. Resolve one from the
- * other (`orgIdForSlug`) rather than taking either from the request.
+ * `org` must be ONE organizations row's id and slug (`OrgIdentity`): the standing is read by slug, the way
+ * the auth port names orgs, and applied to the id every sameOrg check compares. Get it from
+ * `orgIdentityForSlug` (keel/db/org-lookup), or from the inbound context's `ctx.org`, never by pairing
+ * two values, and never from the request.
  *
  * Returns null when the person is no longer an active member of that org: their credential is dead. A
  * route that uses this should answer 401 (throw `AuthRequiredError`); the inbound-email handlers, its
@@ -78,7 +80,7 @@ export async function abilityActorFromCredential(
     auth: Pick<AuthPort, 'getMember'>,
     input: {
         userId: string
-        org: { id: string; slug: string }
+        org: OrgIdentity
         credential: { kind: Exclude<PersonCredentialKind, 'session'>; id: string }
     },
 ): Promise<AbilityActor | null> {

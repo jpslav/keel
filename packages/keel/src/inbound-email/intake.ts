@@ -129,6 +129,7 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
             tenantId: org.tenantId,
             orgId: org.orgId,
             orgSlug: org.orgSlug,
+            org: { id: org.orgId, slug: org.orgSlug },
             fromEmail,
             subject,
             bodyText,

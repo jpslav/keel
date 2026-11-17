@@ -25,7 +25,7 @@ export const supportHandler = async (ctx: InboundContext): Promise<InboundHandle
 
     const actor = await abilityActorFromCredential(ctx.auth, {
         userId: sender.id,
-        org: { id: ctx.orgId, slug: ctx.orgSlug },
+        org: ctx.org,
         credential: { kind: 'inbound-email', id: ctx.emailId },
     })
     if (!actor) {

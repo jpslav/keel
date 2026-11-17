@@ -20,6 +20,29 @@ export async function orgIdForSlug(db: DbPort, tenantId: string, orgSlug: string
 }
 
 /**
+ * An org's uuid AND slug, read together from ONE `organizations` row. `abilityActorFromCredential` reads a
+ * person's standing by slug (the auth port names orgs that way) and applies it to the id every sameOrg
+ * check compares, so a pair taken from two places could carry one org's role into another's.
+ */
+export interface OrgIdentity {
+    id: string
+    slug: string
+}
+
+/** {@link OrgIdentity} for a slug within a tenant, from one row; null when the tenant has no such org. */
+export async function orgIdentityForSlug(db: DbPort, tenantId: string, orgSlug: string): Promise<OrgIdentity | null> {
+    await db.ready()
+    const row = await db
+        .getDb()
+        .selectFrom('organizations')
+        .select(['id', 'slug'])
+        .where('tenant_id', '=', tenantId)
+        .where('slug', '=', orgSlug)
+        .executeTakeFirst()
+    return row ? { id: row.id, slug: row.slug } : null
+}
+
+/**
  * Resolves an org uuid back to its slug + name — the reverse of orgIdForSlug, same RLS-free raw read.
  * Used by the scheduled digest handler, which knows its job's org_id but needs the slug to
  * find recipients (@app/seed people) and the name for the digest copy. Null when the org is gone.
