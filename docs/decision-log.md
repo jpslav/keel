@@ -2689,6 +2689,15 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
   organization's package list names `@sssb/core`, `@sssb/create`, `@sssb/tools`, `@sssb/eslint-plugin` and
   `@sssb/cdk`, which gives P14 a package to configure a trusted publisher on; `@sssb/app-config` stays
   unpublished.
+- **D2's framework name, the same day: `@sssb/kit`, not `@sssb/core`.** As `@sssb/core`, keel's own `core`
+  module would have read `@sssb/core/core/…`; as `@sssb/kit` it reads `@sssb/kit/core/…`. Apps import
+  `@sssb/kit/…` directly, and in the repository the framework moves to `packages/kit`, beside `packages/cdk`.
+  `@sssb/core` stays as a deprecated, unused placeholder saying the framework package is `@sssb/kit`. ADR-0014
+  now calls its conformance checks "the conformance suite", so "kit" only means the package. `safeinsights-bot` published
+  `@sssb/kit` and a `create-sssb` guard the same day, and deprecated `@sssb/core` ("Not used. The SSSB framework
+  package is @sssb/kit."). npm accepted `create-sssb`: its bin prints "SSSB's generator is @sssb/create. Run: npm create @sssb"
+  and exits 1, which covers the mistype `npm create sssb`. The docs run the CLI as `pnpm exec sssb`, never
+  `npx sssb`.
 - **D3 revised, the same day: copyright assigned to Rice University.** JP transfers keel's copyright to SafeInsights,
   that is Rice University. The `LICENSE` line becomes "Copyright (c) 2026 Rice University", MIT unchanged. The line
   records an assignment JP makes, and changes only once JP has executed it, before the first release candidate.
