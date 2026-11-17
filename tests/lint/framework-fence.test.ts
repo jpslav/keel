@@ -181,7 +181,8 @@ describe('a relative path into apps/ crosses the framework/app fence too', () =>
     })
 
     it('an app reaching another app by path is not this fence’s business', async () => {
-        const code = "export const load = () => import('../../../../starter/src/seed')\n"
+        // from apps/any-app/src/domain/, four levels up is the repo root: a path with an apps/ segment
+        const code = "export const load = () => import('../../../../apps/starter/src/seed')\n"
         expect(fired(await lint(`${APP}/src/domain/kv.ts`, code), APP_PATH_DYNAMIC)).toBe(0)
     })
 })
