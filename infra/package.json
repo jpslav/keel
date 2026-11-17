@@ -5,7 +5,7 @@
     "license": "MIT",
     "description": "CDK app (Lambda Web Adapter pattern, ADR-0001). A draft you take over at cutover.",
     "scripts": {
-        "synth": "cdk synth --quiet",
+        "synth": "cdk synth --quiet && pnpm exec tsx check-shapes.ts",
         "diff": "cdk diff"
     },
     "dependencies": {
