@@ -383,6 +383,65 @@ describe('what the analyser refuses, and says why', () => {
             expect: { '*': /module\.exports/ },
         },
         {
+            name: 'a route file that uses export =',
+            files: { 'route.ts': 'const handlers = { async POST() { return Response.json({}) } }\nexport = handlers' },
+            expect: { '*': /export =/ },
+        },
+        {
+            name: 'a handler the file destructures a new value into',
+            files: {
+                'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\n;[POST] = [async () => {}]`,
+            },
+            expect: { POST: /reassigns/ },
+        },
+        {
+            name: 'a handler the file object-destructures a new value into',
+            files: {
+                'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\n;({ open: POST } = { open: async () => {} })`,
+            },
+            expect: { POST: /reassigns/ },
+        },
+        {
+            name: 'a handler a for-of loop assigns',
+            files: { 'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\nfor (POST of []) {}` },
+            expect: { POST: /reassigns/ },
+        },
+        {
+            name: 'a handler a destructuring default assigns',
+            files: {
+                'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\n;[POST = async () => {}] = []`,
+            },
+            expect: { POST: /reassigns/ },
+        },
+        {
+            name: 'a handler a spread target assigns',
+            files: { 'route.ts': `${AUTHORIZE}${DECLS}export function DELETE() { ${CALL} }\n;({ ...DELETE } = {})` },
+            expect: { DELETE: /reassigns/ },
+        },
+        {
+            name: 'a re-export with a .ts and a .js beside each other',
+            files: {
+                'route.ts': "export { POST } from './impl'",
+                'impl.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }`,
+                'impl.js': 'export async function POST() {}',
+            },
+            expect: { POST: /could load any of impl\.ts, impl\.js/ },
+        },
+        {
+            name: 'a re-export of the route itself',
+            files: { 'route.ts': "export { POST } from './route'" },
+            expect: { POST: /leads back to itself/ },
+        },
+        {
+            name: 'a re-export cycle through two modules',
+            files: {
+                'route.ts': "export { POST } from './a'",
+                'a.ts': "export { POST } from './b'",
+                'b.ts': "export { POST } from './a'",
+            },
+            expect: { POST: /leads back to itself/ },
+        },
+        {
             name: 'a route file that is no module at all',
             files: { 'route.ts': 'const x = 1' },
             expect: { '*': /not an ES module/ },
@@ -645,6 +704,55 @@ describe("what counts as a handler's own path", () => {
             files: post(`l: switch (cond) { default: if (cond) break l; return 1 }\n${CALL}`),
             expect: 'authorized',
         },
+        {
+            name: 'after nested labels, a break naming the outer',
+            files: post(`a: b: { break a }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after nested labels, a break naming the inner',
+            files: post(`a: b: { break b }\n${CALL}`),
+            expect: 'authorized',
+        },
+        { name: 'after nested labels that return', files: post(`a: b: { return 1 }\n${CALL}`), expect: 'open' },
+        {
+            name: 'in a do condition after a body that returns',
+            files: post(`do { return 1 } while (${CALL})`),
+            expect: 'open',
+        },
+        {
+            name: 'in a do condition after a body that can continue',
+            files: post(`do { if (cond) continue; return 1 } while (${CALL})`),
+            expect: 'authorized',
+        },
+        {
+            name: 'in a labeled do condition a continue names',
+            files: post(`l: do { for (;;) { continue l } } while (${CALL})`),
+            expect: 'authorized',
+        },
+        {
+            name: 'in a do condition after a body that falls through',
+            files: post(`do {} while (${CALL})`),
+            expect: 'authorized',
+        },
+        {
+            name: 'in a for incrementor after a body that returns',
+            files: post(`for (;; ${CALL}) { return 1 }`),
+            expect: 'open',
+        },
+        {
+            name: 'in a for incrementor after a body that can continue',
+            files: post(`for (;; ${CALL}) { if (cond) continue; return 1 }`),
+            expect: 'authorized',
+        },
+        { name: 'in a constant if condition that calls', files: post(`if (void ${CALL}) {}`), expect: 'authorized' },
+        {
+            name: 'in a constant while condition that calls',
+            files: post(`while (void ${CALL}) {}`),
+            expect: 'authorized',
+        },
+        { name: 'in a constant ?: condition that calls', files: post(`;(void ${CALL}) ? 1 : 2`), expect: 'authorized' },
+        { name: 'left of a dead &&', files: post(`;(void ${CALL}) && 1`), expect: 'authorized' },
         { name: 'after return', files: post(`return Response.json({})\n${CALL}`), expect: 'open' },
         { name: 'after throw', files: post(`throw new Error('no')\n${CALL}`), expect: 'open' },
         { name: 'in the returned expression', files: post(`return ${CALL}`), expect: 'authorized' },
@@ -787,6 +895,11 @@ describe("what counts as a handler's own path", () => {
         {
             name: 'a same-file helper the file reassigns',
             files: post('check()', `function check() { ${CALL} }\ncheck = () => {}\n`),
+            expect: 'open',
+        },
+        {
+            name: 'a same-file helper a for-in loop assigns',
+            files: post('check()', `function check() { ${CALL} }\nfor (check in {}) {}\n`),
             expect: 'open',
         },
         {
@@ -947,9 +1060,16 @@ describe('the facts a gate is judged on', () => {
         expect(factsOf(`${WITH_X}export const POST = (withX<{ id: string }>(async () => {})) as never`).wrappedBy).toBe(
             'withX',
         )
+        // A namespace import's head is dropped: `respond.withWebhookSecret(…)` is `withWebhookSecret`.
         expect(factsOf("import * as a from './w'\nexport const POST = a.b.withX(async () => {})").wrappedBy).toBe(
-            'a.b.withX',
+            'b.withX',
         )
+        expect(
+            factsOf("import * as respond from './w'\nexport const POST = respond.withX(async () => {})").wrappedBy,
+        ).toBe('withX')
+        expect(
+            factsOf("import * as respond from './w'\nexport const POST = respond(async () => {})").wrappedBy,
+        ).toBeNull()
         expect(factsOf(`${WITH_X}const inner = withX(async () => {})\nexport const POST = inner`).wrappedBy).toBe(
             'withX',
         )
@@ -987,6 +1107,25 @@ describe('the facts a gate is judged on', () => {
                 'export async function DELETE() { other.elsewhere() }',
         )
         expect([...facts.calls].sort()).toEqual(['auth.updateProfile'])
+    })
+
+    it('calls reads a namespace member under its own name, and ignores an alias', () => {
+        const namespaced = factsOf(
+            "import * as adapters from 'keel/adapters/index'\nexport async function PUT() { adapters.auth.updateProfile() }",
+            'PUT',
+        )
+        expect([...namespaced.calls]).toEqual(['auth.updateProfile'])
+        const aliased = factsOf(
+            "import { other as auth } from 'keel/adapters/index'\nexport async function PUT() { auth.updateProfile() }",
+            'PUT',
+        )
+        expect([...aliased.calls]).toEqual([])
+        expect(
+            factsOf("import { identity as withX } from 'lib'\nexport const POST = withX(async () => {})").wrappedBy,
+        ).toBeNull()
+        expect(
+            factsOf("import { withX as withX } from 'lib'\nexport const POST = withX(async () => {})").wrappedBy,
+        ).toBe('withX')
     })
 
     it('calls ignores a local look-alike of a port', () => {
@@ -1067,6 +1206,65 @@ describe('the facts a gate is judged on', () => {
         expect(gate('if (!isSimulated) return db.Response(null)')).toBe(false)
         expect(gate('if (!isSimulated) return new Response(null)', `${SIM}const Response = class {}\n`)).toBe(false)
         expect(gate('if (!isSimulated) throw make()', `${SIM}declare const make: any\n`)).toBe(false)
+        // An alias is not the gate; a namespace member is.
+        expect(
+            gate('if (!isSimulated) return new Response(null)', "import { isDemoMode as isSimulated } from 'k'\n"),
+        ).toBe(false)
+        expect(
+            factsOf(
+                "import * as adapters from 'keel/adapters/index'\nexport async function POST() { if (!adapters.isSimulated) return new Response(null) }",
+            ).opensWithSimulated404,
+        ).toBe(true)
+        // Code that runs anyway in real mode: a local class's constructor, a parameter default or pattern, a
+        // value whose toJSON or getter runs when the response is built.
+        expect(gate("if (!isSimulated) throw new Gone('x')", `${SIM}class Gone { constructor(_: string) {} }\n`)).toBe(
+            false,
+        )
+        expect(
+            gate("if (!isSimulated) throw new NotFoundError('x')", `${SIM}import { NotFoundError } from 'k'\n`),
+        ).toBe(true)
+        expect(
+            factsOf(
+                `${SIM}declare const db: any\nexport async function POST(r: Request, c: unknown, x = db.wipe()) { if (!isSimulated) return new Response(null) }`,
+            ).opensWithSimulated404,
+        ).toBe(false)
+        expect(
+            factsOf(
+                `${SIM}export async function POST(r: Request, { params }: { params: unknown }) { if (!isSimulated) return new Response(null) }`,
+            ).opensWithSimulated404,
+        ).toBe(false)
+        expect(
+            factsOf(
+                `${SIM}export async function POST(request: Request, ...rest: unknown[]) { if (!isSimulated) return new Response(null) }`,
+            ).opensWithSimulated404,
+        ).toBe(true)
+        expect(
+            gate(
+                'if (!isSimulated) return Response.json(body, { status: 404 })',
+                `${SIM}const body = { toJSON() { return {} } }\n`,
+            ),
+        ).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json({ get x() { return 1 } })')).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json({ x() {} })')).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json({ ...o })', `${SIM}const o = {}\n`)).toBe(false)
+        expect(gate("if (!isSimulated) return Response.json({ ['k']: 1 })")).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json({ k })', `${SIM}const k = 1\n`)).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json([o])', `${SIM}const o = {}\n`)).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json(o.x)', `${SIM}const o = { x: 1 }\n`)).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(`a${1}`)')).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json(!1)')).toBe(false)
+        // Literals of every kind, nested, are fine; so is JSON.stringify of one.
+        expect(
+            gate(
+                "if (!isSimulated) return Response.json({ a: 'x', b: 1, c: -1, d: +2, e: true, f: false, g: null, h: undefined, i: [1, , 'y'], j: { k: 1n }, 'l': `m` }, { status: 404 })",
+            ),
+        ).toBe(true)
+        expect(
+            gate("if (!isSimulated) return new Response(JSON.stringify({ error: 'not-found' }), { status: 404 })"),
+        ).toBe(true)
+        expect(gate('if (!isSimulated) return new Response(JSON.stringify(o))', `${SIM}const o = {}\n`)).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(JSON.parse("1"))')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(undefined)', `${SIM}const undefined = 1\n`)).toBe(false)
         // A global that is not a response: `fetch` is undeclared like `Response`, and is not allowed.
         expect(gate("if (!isSimulated) return fetch('/wipe')")).toBe(false)
         expect(gate('if (!isSimulated) return new Map()')).toBe(false)
@@ -1125,18 +1323,22 @@ describe('judging a handler against a policy', () => {
         )
     })
 
-    it('holds an exempted handler to its gate, not to authorize', () => {
+    it('passes an exempted handler on its gate, or on authorize; the exemption is never a ban on authorizing', () => {
         expect(
             judge(route('hooks/a/route.ts'), { verb: 'POST', facts: facts({ wrappedBy: 'withSecret' }) }, policy),
         ).toBeUndefined()
-        const failure = judge(
-            route('hooks/a/route.ts'),
-            { verb: 'POST', facts: facts({ reachesAuthorize: true, wrappedBy: 'other' }) },
-            policy,
-        )
+        expect(
+            judge(
+                route('hooks/a/route.ts'),
+                { verb: 'DELETE', facts: facts({ reachesAuthorize: true, wrappedBy: 'other' }) },
+                policy,
+            ),
+        ).toBeUndefined()
+        const failure = judge(route('hooks/a/route.ts'), { verb: 'POST', facts: facts({ wrappedBy: 'other' }) }, policy)
         expect(failure).toMatch(
             /exemption that holds only when the handler is itself a call to an imported withSecret\(…\)/,
         )
+        expect(failure).not.toContain('HINT-TEXT')
     })
 
     it('an exact exemption wins over the prefix it sits under', () => {
