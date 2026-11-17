@@ -722,3 +722,13 @@ keel manager deciding each finding:
   records exactly that, or NULL. A synthetic actor a handler names is no longer recorded as an email
   credential.
 - **A banned person has no standing** (ADR-0003's addendum).
+
+## Addendum (2026-11-16, last): the fence holds outside declarations
+
+The framework/app fence and keel/core's framework ban were `no-restricted-imports` groups and nothing
+else, so they never saw `import()`, `require()` or a type-position `import('…')`. In keel's fixture,
+`export type T = import('@/domain/tickets').Ticket` linted clean: the type-only escape the fixture's fence
+exists to stop. `keel/no-dynamic-app-import` and `keel/no-dynamic-framework-import-in-core` now hold both
+fences there. They match each group through the same `ignore` matcher `no-restricted-imports` uses, so
+the two halves of a fence read a specifier the same way, and `tests/lint/framework-fence.test.ts` checks
+that specifier by specifier.

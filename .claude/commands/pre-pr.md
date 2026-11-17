@@ -7,7 +7,8 @@ description: Verify, run a subagent branch review against the house rules, fix f
 2. Spawn a read-only review subagent on the full branch diff vs `main`. Give it this checklist:
     - CLAUDE.md hard-rule violations: vendor SDK imports (static or `import()`) outside `packages/keel/src/adapters/` and
       `apps/*/src/adapters/real/`, `process.env` reads outside those two, framework imports in
-      `keel/core`, tenant queries not routed through `db.withTenant()`, hard-coded UI strings.
+      `keel/core`, tenant queries not routed through `db.withTenant()` (a raw `getDb()` anywhere in
+      `apps/*/src`, or a new `keel/no-raw-db-handle` exception in `eslint.config.mjs`), hard-coded UI strings.
     - Dead or speculative code.
     - Copy-paste that should be a shared function or component.
     - `apps/showcase/messages/en.json` vs `apps/showcase/messages/es.json` drift (missing keys, mismatched placeholders).
