@@ -213,7 +213,8 @@ describe('the time an audit event carries', () => {
         const path = await import('node:path')
         const clockFile = path.join(tmp, 'simulator', 'clock.json')
 
-        for (const bad of ['{"offsetMs": ', '{"offsetMs":1e16}']) {
+        // Unparsable; past the Date range (Invalid Date); and VALID instants Postgres rejects: year 33715 and year -29662.
+        for (const bad of ['{"offsetMs": ', '{"offsetMs":1e16}', '{"offsetMs":1e15}', '{"offsetMs":-1e15}']) {
             writeFileSync(clockFile, bad)
             const before = Date.now()
             const at = await recordedAt(fakeDb)

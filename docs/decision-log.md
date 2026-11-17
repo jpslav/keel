@@ -2473,6 +2473,12 @@ or as a package: the logic is in `packages/keel`, and the app holds thin wrapper
   Simulator controls are buttons; nothing polls. An automatic dev ticker would change when the showcase's e2e and
   demos see digests fire, so `docs/adopting.md` ("The scheduled tick") says how to tick by hand with the dev
   secret instead. A `pnpm tick` helper or an opt-in ticker is the next step if it is wanted.
+- **The audit write is total against a bad clock file; the tick is not, and that is left as it was.** A corrupt or
+  absurd `.data/simulator/clock.json` makes `fakeDb.now()` fall back to real time (any instant Postgres cannot
+  store counts as absurd: past year 9999 or before year 0), because an audited mutation has already committed
+  and must not answer 500 with no audit row. `runScheduledTick` calls `worldNow()` directly, so the same file
+  makes the cron route answer 500 until it is fixed, exactly as the showcase's route did before this change; a
+  tick that silently ran on real time would hide that the demo's clock is broken. Not worth a second fallback.
 - **Corrected figure:** the adopter guide said the starter imports 32 of keel's published subpaths; it was 33 before
   this change (every counting rule gives 33) and is 35 of 131 now from the starter's source, 37 counting its tests (the new cron route test imports
   `keel/adapters/fake/db` and `keel/adapters/fake/service-auth`), so from here on the figure depends on the rule: say which.
