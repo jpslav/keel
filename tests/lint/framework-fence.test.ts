@@ -1,5 +1,6 @@
 import { symlinkSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
 import { makeTestTmpDir } from '../support/tmp-dir'
@@ -19,6 +20,7 @@ import {
     NODE_MODULES_DYNAMIC,
     NODE_MODULES_STATIC,
     VENDOR_DYNAMIC,
+    VENDOR_STATIC,
 } from './lint-text'
 
 /**
@@ -47,13 +49,11 @@ describe('the framework/app fence holds outside declarations', () => {
         ['require()', "export const seed = require('@app/seed/world')\n"],
         ['a type-position import()', "export type Ticket = import('@/domain/tickets').Ticket\n"],
         ['typeof import()', "export type Seed = typeof import('@app/seed')\n"],
-        ['import = require()', "import seed = require('@app/seed')\nexport { seed }\n"],
     ]
-    const TYPESCRIPT_ONLY = ['a type-position import()', 'typeof import()', 'import = require()']
 
     describe.each([...KEEL, FIXTURE, 'packages/keel/src/components/kv-panel.mjs'])('%s', (file) => {
-        // A `.mjs` file has no type positions and no `import =`, so it gets the JavaScript forms only.
-        const applicable = file.endsWith('.mjs') ? forms.filter(([form]) => !TYPESCRIPT_ONLY.includes(form)) : forms
+        // A `.mjs` file has no type positions, so it gets the runtime forms only.
+        const applicable = file.endsWith('.mjs') ? forms.filter(([form]) => !form.includes('type')) : forms
         it.each(applicable)('may not reach app content by %s', async (_form, code) => {
             expect(fired(await lint(file, code), APP_CODE_DYNAMIC)).toBe(1)
         })
@@ -62,6 +62,14 @@ describe('the framework/app fence holds outside declarations', () => {
     it('a keel test may not load app content with vi.importActual either', async () => {
         const code = "import { vi } from 'vitest'\nexport const load = () => vi.importActual('@app/seed')\n"
         expect(fired(await lint('packages/keel/src/server-lib/kv.test.ts', code), APP_CODE_DYNAMIC)).toBe(1)
+    })
+
+    // TypeScript's `import m = require()` is a declaration to no-restricted-imports (TSImportEqualsDeclaration), so
+    // the pattern's own half bans it, and the declarationless rule leaves it alone: one finding, not two.
+    it.each([...KEEL, FIXTURE])('%s may not reach app content by import = require() either', async (file) => {
+        const findings = await lint(file, "import seed = require('@app/seed')\nexport { seed }\n")
+        expect(fired(findings, APP_CODE_STATIC)).toBe(1)
+        expect(fired(findings, APP_CODE_DYNAMIC)).toBe(0)
     })
 
     it('the seam stays open: @app-config/* by import() or in a type', async () => {
@@ -91,9 +99,14 @@ describe('keel/core stays framework-free outside declarations', () => {
         ['require()', "export const ui = require('@mantine/core')\n"],
         ['a type-position import()', "export type Node = import('react').ReactNode\n"],
         ['next-intl', "export const load = () => import('next-intl/server')\n"],
-        ['import = require()', "import React = require('react')\nexport { React }\n"],
     ])('may not reach a framework by %s', async (_form, code) => {
         expect(fired(await lint(CORE, code), CORE_DYNAMIC)).toBe(1)
+    })
+
+    it('nor by import = require(), which the declaration half bans: one finding, not two', async () => {
+        const findings = await lint(CORE, "import React = require('react')\nexport { React }\n")
+        expect(fired(findings, CORE_STATIC)).toBe(1)
+        expect(fired(findings, CORE_DYNAMIC)).toBe(0)
     })
 
     it('a library that is not a framework is fine', async () => {
@@ -145,6 +158,7 @@ describe('the two halves of each fence read the group the same way', () => {
         'lodash/../../packages/seed/src/index',
         '.x/../../apps/showcase/src/domain/tickets',
         '.pnpm/../../apps/showcase/src/domain/tickets',
+        '@\\..\\..\\apps\\showcase\\src\\domain\\tickets',
         // ...but not one that does not climb, nor one appCodePattern already bans whole (one finding, not two)
         '@app-config/apps/registry',
         '@app-config/x..y',
@@ -226,6 +240,19 @@ describe('a path into app code crosses the framework/app fence too', () => {
         expect(fired(await lint(FIXTURE, `export const load = () => import(${to})\n`), APP_CODE_PATH)).toBe(1)
     })
 
+    // Node loads a `file:` URL as the absolute path it names, so it is a path too, in any case of the scheme.
+    it.each([
+        ['into apps/', 'apps/showcase/src/domain/tickets.ts', 1],
+        ['into the seed package', 'packages/seed/src/index.ts', 1],
+        ['anywhere else', 'tests/support/tmp-dir.ts', 0],
+    ])('a file: URL %s', async (_where, target, expected) => {
+        const url = pathToFileURL(path.join(process.cwd(), target)).href
+        for (const spelled of [url, url.replace('file:', 'FILE:')]) {
+            const code = `export const load = () => import(${JSON.stringify(spelled)})\n`
+            expect(fired(await lint(FIXTURE, code), APP_CODE_PATH), spelled).toBe(expected)
+        }
+    })
+
     it('every other path out of keel stays open: its own modules, and the repo’s test helpers', async () => {
         const file = 'packages/keel/src/server-lib/kv.test.ts'
         const code = [
@@ -250,9 +277,9 @@ describe('a path into app code crosses the framework/app fence too', () => {
         expect(fired(await lint(file, code), APP_CODE_PATH)).toBe(0)
     })
 
-    // `@scope/../../apps/…` and `@app-config/../seed` are package and alias specifiers, not paths: Node, webpack
-    // and TypeScript resolve them out of node_modules or the seam into app code. bareTraversalPattern bans
-    // the `..`, in both halves (the parity table holds them together).
+    // `@scope/../../apps/…` and `@app-config/../seed` are package and alias specifiers, not paths: TypeScript and
+    // Node resolve them out of node_modules or the seam into app code. bareTraversalPattern bans the `..`, in both
+    // halves (the parity table holds them together), and each is one finding.
     describe.each([...KEEL, FIXTURE])('%s', (file) => {
         it.each([
             '@app-config/../seed',
@@ -263,16 +290,22 @@ describe('a path into app code crosses the framework/app fence too', () => {
             // a name that starts with a dot is a package name, not a path: only `./` and `../` are relative
             '.x/../../apps/showcase/src/domain/tickets',
             '.pnpm/../../apps/showcase/src/domain/tickets',
+            // only the forward-slash `@/` and `@app/seed` are appCodePattern's to ban; TypeScript reads a backslash
+            // as a slash, and so resolves these out of node_modules into app code as well
+            '@\\..\\..\\apps\\showcase\\src\\domain\\tickets',
+            '@app\\seed\\..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
         ])('may not climb out of a package or alias with %s, in either half', async (specifier) => {
             const at = JSON.stringify(specifier)
-            const declared = `import { seed } from ${at}\nexport { seed }\n`
-            expect(fired(await lint(file, declared), BARE_TRAVERSAL_STATIC)).toBe(1)
-            const loaded = `export const load = () => import(${at})\n`
-            expect(fired(await lint(file, loaded), BARE_TRAVERSAL_DYNAMIC)).toBe(1)
+            const declared = await lint(file, `import { seed } from ${at}\nexport { seed }\n`)
+            expect(fired(declared, BARE_TRAVERSAL_STATIC)).toBe(1)
+            expect(fired(declared, APP_CODE_STATIC), 'one finding, not two').toBe(1)
+            const loaded = await lint(file, `export const load = () => import(${at})\n`)
+            expect(fired(loaded, BARE_TRAVERSAL_DYNAMIC)).toBe(1)
+            expect(fired(loaded, APP_CODE_DYNAMIC), 'one finding, not two').toBe(1)
         })
     })
 
-    // pnpm links every workspace package into node_modules/.pnpm/node_modules, the apps and the seed among them,
+    // pnpm links the apps and the seed, among other workspace packages, into node_modules/.pnpm/node_modules,
     // so a specifier through node_modules reaches app code by where pnpm put it rather than by its name, whether
     // it is spelled as a package or as a path. nodeModulesPathPattern bans it in both halves; the path rule
     // leaves it to that pattern, so it is one finding, not two.
@@ -329,7 +362,7 @@ describe('a path into app code crosses the framework/app fence too', () => {
 })
 
 // JSX in keel/core imports react/jsx-runtime without naming it ("jsx": "react-jsx" in tsconfig.json), so
-// neither half of core's import ban can see it. The JSX itself is the finding, once per file.
+// neither half of core's import ban can see it. The JSX itself is the finding: each outermost element or fragment.
 describe('keel/core holds no JSX', () => {
     it.each([
         ['an element', 'export const C = () => <div>{1}</div>\n'],
@@ -365,19 +398,31 @@ describe('keel/core holds no JSX', () => {
 
 // The vendor fence's declarationless rule gained the type position too: `import type` of a vendor SDK is
 // banned by no-restricted-imports, and the inline form was not.
-describe('a vendor SDK named in a type import(), or by import = require(), is still a vendor import', () => {
-    const forms = [
-        ['a type import()', "export type Client = import('@aws-sdk/client-s3').S3Client\n"],
-        ['import = require()', "import s3 = require('@aws-sdk/client-s3')\nexport { s3 }\n"],
-    ]
-    const outside = [`${APP}/src/domain/kv.ts`, 'packages/keel/src/server-lib/kv.ts', FIXTURE]
-    const inside = [`${APP}/src/adapters/real/kv.ts`, 'packages/keel/src/adapters/real/kv.ts']
+describe('a vendor SDK named in a type import() is still a vendor import', () => {
+    const code = "export type Client = import('@aws-sdk/client-s3').S3Client\n"
 
-    it.each(outside)('%s may not', async (file) => {
-        for (const [form, code] of forms) expect(fired(await lint(file, code), VENDOR_DYNAMIC), form).toBe(1)
+    it.each([`${APP}/src/domain/kv.ts`, 'packages/keel/src/server-lib/kv.ts', FIXTURE])('%s may not', async (file) => {
+        expect(fired(await lint(file, code), VENDOR_DYNAMIC)).toBe(1)
     })
 
-    it.each(inside)('%s may', async (file) => {
-        for (const [form, code] of forms) expect(fired(await lint(file, code), VENDOR_DYNAMIC), form).toBe(0)
+    it.each([`${APP}/src/adapters/real/kv.ts`, 'packages/keel/src/adapters/real/kv.ts'])('%s may', async (file) => {
+        expect(fired(await lint(file, code), VENDOR_DYNAMIC)).toBe(0)
+    })
+})
+
+// The vendor ban's declaration half sees TypeScript's `import m = require()`, so the declarationless rule leaves it
+// alone: one finding, not two.
+describe('a vendor SDK reached by import = require() is one finding, from the declaration half', () => {
+    const code = "import s3 = require('@aws-sdk/client-s3')\nexport { s3 }\n"
+
+    it.each([`${APP}/src/domain/kv.ts`, 'packages/keel/src/server-lib/kv.ts', FIXTURE])('%s may not', async (file) => {
+        const findings = await lint(file, code)
+        expect(fired(findings, VENDOR_STATIC)).toBe(1)
+        expect(fired(findings, VENDOR_DYNAMIC)).toBe(0)
+    })
+
+    it.each([`${APP}/src/adapters/real/kv.ts`, 'packages/keel/src/adapters/real/kv.ts'])('%s may', async (file) => {
+        const findings = await lint(file, code)
+        expect(fired(findings, VENDOR_STATIC) + fired(findings, VENDOR_DYNAMIC)).toBe(0)
     })
 })
