@@ -1991,7 +1991,11 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   must name this cluster alone; and on `data-api` the database's security group must admit nothing. The
   grants are read from every IAM policy, managed policy and role's inline policy in the stack, after the
   mechanical re-check showed a second stack secret, a managed policy and an inline policy slipping past an
-  earlier version. Each check was seen red by a mutation of the stack.
+  earlier version. The review's re-check then showed `Action: "*"` on `Resource: "*"` passing, because
+  statements were picked by the text `rds-data:` or `secretsmanager:`. Now a statement counts if it can
+  grant the service at all: a wildcard action that reaches it, or any `NotAction`. Since the contents of an
+  AWS-managed policy cannot be read from the template, a role may attach only the two Lambda execution
+  policies. Each check was seen red by a mutation of the stack.
 
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 

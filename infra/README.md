@@ -37,8 +37,11 @@ CIDRs and rolls back. Changing shape later means a new stack and a snapshot rest
 `pnpm --filter infra synth` builds both shapes offline: `cdk synth` builds the one the params choose, then
 `check-shapes.ts` builds both and checks each against the runtime's list of required variables. It also
 checks the way in. In every IAM policy, managed policy and role's inline policy the stack defines, each
-Secrets Manager grant names the cluster's own secret alone and each `rds-data` grant names this cluster
-alone. On `data-api` the database's security group admits nothing.
+statement that can grant a Secrets Manager action names the cluster's own secret alone, and each that can
+grant an `rds-data` action names this cluster alone. A statement that "can grant" includes a wildcard
+action such as `*` and any `NotAction`. No role may attach an AWS-managed policy other than the two Lambda
+execution policies, whose contents the check cannot read. On `data-api` the database's security group
+admits nothing.
 
 ## Deploys — checks in CI, deploys in your own pipeline
 

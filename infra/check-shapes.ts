@@ -42,7 +42,7 @@ function lambda(all: Record<string, Resource>, name: 'Server' | 'Migrator') {
 
 const count = (all: Record<string, Resource>, type: string) => Object.values(all).filter((r) => r.Type === type).length
 
-type Statement = { Action?: unknown; Resource?: unknown }
+type Statement = { Effect?: unknown; Action?: unknown; NotAction?: unknown; Resource?: unknown }
 
 /** The permission documents a resource carries: a policy's, a managed policy's, or a role's inline ones. */
 function policyDocuments(resource: Resource): unknown[] {
@@ -57,14 +57,63 @@ function policyDocuments(resource: Resource): unknown[] {
 }
 
 /**
- * Every statement in the stack's IAM policies, managed policies and roles' inline policies whose actions
- * name `service`'s (`rds-data:`, `secretsmanager:`). Roles' trust policies grant nothing and are not read.
+ * Whether an IAM action pattern can name one of `service`'s actions. IAM matches `*` and `?` anywhere in
+ * an action, so `*`, `rds-data:*` and `rds*:Execute*` all reach `rds-data:ExecuteStatement`.
+ */
+function reaches(action: string, service: string): boolean {
+    const prefix = action.includes(':') ? action.slice(0, action.indexOf(':')) : action
+    const pattern = prefix
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.')
+    return new RegExp(`^${pattern}$`, 'i').test(service)
+}
+
+/**
+ * Every Allow statement in the stack's IAM policies, managed policies and roles' inline policies that can
+ * grant one of `service`'s actions (`rds-data`, `secretsmanager`): by naming one, by a wildcard that
+ * reaches one (`*` reaches every service), or by `NotAction`, which grants everything it does not name.
+ * Roles' trust policies grant nothing and are not read.
  */
 function grantsOf(all: Record<string, Resource>, service: string): Statement[] {
     return Object.values(all)
         .flatMap(policyDocuments)
         .flatMap((document) => ((document as { Statement?: unknown[] } | undefined)?.Statement ?? []) as Statement[])
-        .filter((s) => JSON.stringify(s.Action ?? '').includes(service))
+        .filter((s) => s.Effect !== 'Deny')
+        .filter((s) => {
+            if (s.NotAction !== undefined) return true
+            const actions = Array.isArray(s.Action) ? s.Action : [s.Action]
+            return actions.some((action) => typeof action === 'string' && reaches(action, service))
+        })
+}
+
+/**
+ * The AWS-managed policies a role may attach: the check cannot read their contents, so it allows only the
+ * two Lambda execution policies CDK attaches (logs, and network interfaces on `pg`), which grant neither
+ * service. A managed policy defined in the stack is read like any other (grantsOf).
+ */
+const KNOWN_AWS_POLICIES = ['service-role/AWSLambdaBasicExecutionRole', 'service-role/AWSLambdaVPCAccessExecutionRole']
+
+function unreadablePolicies(all: Record<string, Resource>): string[] {
+    const inStack = new Set(
+        Object.entries(all)
+            .filter(([, r]) => r.Type === 'AWS::IAM::ManagedPolicy')
+            .map(([id]) => id),
+    )
+    return Object.entries(all)
+        .filter(([, r]) => r.Type === 'AWS::IAM::Role')
+        .flatMap(([id, r]) =>
+            ((r.Properties?.ManagedPolicyArns as unknown[] | undefined) ?? [])
+                .filter((arn) => {
+                    const text = JSON.stringify(arn)
+                    const ref = (arn as { Ref?: string }).Ref
+                    if (ref !== undefined && inStack.has(ref)) return false
+                    return !KNOWN_AWS_POLICIES.some((name) =>
+                        new RegExp(`:iam::aws:policy/${name}"[\\]}]*$`).test(text),
+                    )
+                })
+                .map((arn) => `${id}: ${JSON.stringify(arn)}`),
+        )
 }
 
 /** The cluster's own secret: the attachment CDK makes for the cluster, and the secret it attaches. */
@@ -103,10 +152,15 @@ for (const transport of ['pg', 'data-api'] as const) {
 
     // The database secret is read by name, on both shapes: never a wildcard, never another secret.
     const secretIds = databaseSecretIds(all, clusterId)
-    const secretGrants = grantsOf(all, 'secretsmanager:')
+    const secretGrants = grantsOf(all, 'secretsmanager')
     check(
         secretIds.length > 0 && secretGrants.length > 0 && secretGrants.every((s) => namesOnly(s, secretIds)),
         label('every Secrets Manager grant names the cluster’s own secret alone'),
+    )
+    const unreadable = unreadablePolicies(all)
+    check(
+        unreadable.length === 0,
+        label(`no role attaches an AWS-managed policy the check cannot read: ${unreadable.join('; ')}`),
     )
 
     if (transport === 'data-api') {
@@ -120,9 +174,9 @@ for (const transport of ['pg', 'data-api'] as const) {
         check(cluster.EnableHttpEndpoint === true, label('the cluster has the Data API enabled'))
         check(count(all, 'AWS::EC2::NatGateway') === 0, label('no NAT gateway'))
         check(count(all, 'AWS::EC2::InternetGateway') === 0, label('no internet gateway'))
-        // Every statement granting a Data API action (in an `AWS::IAM::Policy`, see grantsOf) names this
-        // cluster, and nothing wider: the grant plus the secret is the whole way in on this shape.
-        const dataApiGrants = grantsOf(all, 'rds-data:')
+        // Every statement that can grant a Data API action (see grantsOf) names this cluster, and nothing
+        // wider: the grant plus the secret is the whole way in on this shape.
+        const dataApiGrants = grantsOf(all, 'rds-data')
         check(
             dataApiGrants.some((s) => JSON.stringify(s.Action).includes('rds-data:ExecuteStatement')),
             label('a role is granted rds-data:ExecuteStatement'),
