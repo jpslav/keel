@@ -1949,3 +1949,14 @@ the calls the work made that no plan anticipated.
     - the numbering test no longer requires an app migration, and the four-digit rule is in
       `docs/adopting.md`;
     - one ADR sentence about un-forced RLS was corrected in place, since the addendum is today's.
+- **The independent re-check found one regression of this PR's own (N1), and the manager made three more
+  calls.** N1: the validated actor was read through its prototype, but the judged one was `{ ...actor }`,
+  so a restricted admin built as a class with getters, or with `Object.create`, could author. The person
+  is now copied field by field by name, that copy is validated, and only it is judged. Seen failing
+  first. The three calls below are the MANAGER's, recorded as such and open to JP:
+    - Accepting terms (AgreementAcceptance `create`) takes a stated session. It is a legal act a person makes
+      in a browser, so it joins the session-only subjects, and the app hook may widen it.
+    - `nonSessionAdministration` may not widen to `inbound-email`, by type (`WidenableCredentialKind`) or
+      at run time. An email's From line is the weakest credential keel has.
+    - `OrgIdentity` is branded: `orgIdentityForSlug` is its only producer, and tests cast deliberately. The
+      inbound intake now gets `ctx.org` through it, at the cost of one more indexed read per email.

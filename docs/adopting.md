@@ -435,8 +435,10 @@ let non-session callers reach `authorize()` (ADR-0012, 2026-11-16 addendum):
 - An `AbilityActor` literal whose `manageAll` may be true must state its session:
   `credential: { kind: 'session', id: null }`. Without it the literal no longer compiles, because only a
   stated session wields `manageAll`. A literal with `manageAll: false` needs nothing, but without a
-  session credential it can no longer take an administrative action (inviting a member, changing the
-  org, managing a webhook endpoint).
+  session credential it can no longer take a session-only action (inviting a member, changing the org,
+  managing a webhook endpoint, accepting terms).
+- `abilityActorFromCredential` takes an `OrgIdentity`, and only `orgIdentityForSlug` (`keel/db/org-lookup`)
+  makes one: a hand-paired `{ id, slug }` no longer compiles.
 - A mutating route under `api/service/` must call `authorize(...)` with the actor `withServiceCaller`
   passes. The scan's message says how.
 

@@ -703,18 +703,21 @@ keel manager deciding each finding:
   with `manageAll: false` and any credential (or none), and one with a session credential and any
   `manageAll`. A literal that could set `manageAll` without stating a session is a compile error. The run
   time keeps refusing it. It was already failing closed, but silently.
-- **Administrative framework subjects take a session.** Inviting or managing members, changing the org,
-  and managing webhook endpoints are refused to any person whose credential is not a stated session. An
-  app widens one subject at a time on the seam, `nonSessionAdministration` (default `{}`); the export
-  joins the enumerated `abilities` value imports. Reads are not administration. Not listed: service keys
-  (no route mints one, and they are no ability subject), the self-only subjects, the system-managed ones,
-  and Job (a product action).
+- **Session-only framework subjects.** Inviting or managing members (Membership), changing the org (Org),
+  managing webhook endpoints (WebhookEndpoint) and accepting terms (AgreementAcceptance, a legal act) are
+  refused to any person whose credential is not a stated session. An app widens one subject at a time on
+  the seam, `nonSessionAdministration` (default `{}`); the export joins the enumerated `abilities` value
+  imports. It can never widen to `inbound-email`, by type (`WidenableCredentialKind`) and at run time.
+  Reads are not gated. Not listed: service keys (no route mints one, and they are no ability subject), the
+  other self-only subjects, the system-managed ones, and Job (a product action).
 - **A malformed actor is denied, not judged as a person.** Anything not a machine must be a well-formed
-  person (`kind` 'person' or absent, a real role, a boolean `restricted`), or it gets nothing. A machine
-  that lost its `kind` had been judged as a person with no role.
-- **One row gives an org's id and slug.** `abilityActorFromCredential` takes an `OrgIdentity`, from
-  `orgIdentityForSlug` (`keel/db/org-lookup`) or from the inbound context's `ctx.org`. The intake builds
-  `ctx.org` from the one row it resolved.
+  person (`kind` 'person' or absent, a real role, boolean `restricted` and `manageAll`, a credential with a
+  string kind), or it gets nothing. A machine that lost its `kind` had been judged as a person with no
+  role. The person is judged as a copy made by NAMING each field, so an actor whose fields are getters or
+  live on a prototype is judged by them, not by the empty result of `{ ...actor }`.
+- **One row gives an org's id and slug.** `abilityActorFromCredential` takes an `OrgIdentity`, which is
+  BRANDED: `orgIdentityForSlug` (`keel/db/org-lookup`) is its only producer, and the inbound intake gets
+  `ctx.org` through it as well. A hand-paired `{ id, slug }` does not compile.
 - **The handler reports the credential.** `InboundHandlerResult` carries `credential`, and the intake
   records exactly that, or NULL. A synthetic actor a handler names is no longer recorded as an email
   credential.

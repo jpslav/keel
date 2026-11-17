@@ -86,8 +86,8 @@ export function appMachineAbilityRules(): boolean {
 }
 
 /**
- * The framework's administrative subjects (inviting members, changing the org, managing webhook
- * endpoints) take a browser SESSION. Here an app may widen one of them to a non-session person
- * credential (a personal API token, say). This app widens none.
+ * The framework's session-only subjects (inviting members, changing the org, managing webhook endpoints,
+ * accepting terms) take a browser SESSION. Here an app may widen one of them to a non-session person
+ * credential (a personal API token, say; never an inbound email). This app widens none.
  */
 export const nonSessionAdministration: NonSessionAdministration = {}

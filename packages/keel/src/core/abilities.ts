@@ -166,7 +166,7 @@ interface PersonActorFields {
  * must STATE a session credential, because only a stated session wields it ({@link defineAbilitiesFor}
  * enforces that at run time too). Every other actor has `manageAll: false`:
  * - `credential`: how this person reached the app. Absent means NOT STATED, which is never read as a
- *   session: such an actor does not wield `manageAll`, takes no administrative action on a framework
+ *   session: such an actor does not wield `manageAll`, takes no session-only action on a framework
  *   subject, and records no credential in the audit trail. A literal that stands for a session says
  *   `{ kind: 'session', id: null }`, as `abilityActorFromUser` does.
  * - `manageAll`: the staff-org superpower, and it is LIVE. `abilityActorFromUser` sets it when the actor

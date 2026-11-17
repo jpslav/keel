@@ -108,7 +108,8 @@ export function appMachineAbilityRules(
 }
 
 /**
- * The framework's administrative subjects take a browser SESSION, unless widened here. The fixture
+ * The framework's session-only subjects (administration, and accepting terms) take a browser SESSION,
+ * unless widened here (never to an inbound email). The fixture
  * widens ONE, so keel's tests can show both sides: a badge (the personal-token shape) may manage webhook
  * endpoints, but still may not invite members or change the org.
  */

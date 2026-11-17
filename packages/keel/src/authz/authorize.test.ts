@@ -343,7 +343,8 @@ describe('authorize(actor, action, subject)', () => {
     })
 
     test('a person holding a non-session credential is judged as their session would be on product subjects', () => {
-        // Product subjects only: administration (Membership, Org, WebhookEndpoint) takes a session, and
+        // Product subjects only: administration (Membership, Org, WebhookEndpoint) and accepting terms
+        // (AgreementAcceptance) take a session, and
         // the staff org is a session's; both are the next cases.
         // The token's owner as abilityActorFromCredential builds them: the badge is the fixture's
         // personal-token shape. Ordinary rules answer exactly as for the same person's session.
