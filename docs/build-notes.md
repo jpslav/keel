@@ -1778,3 +1778,31 @@ the panel is the element that carries it.
   `packages/seed` and rewrites the citation `` `packages/seed` `` to the surviving app's seed directory
   (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that
   spelling: it passed the doc-path gate here, where the directory exists, and failed it in CI's adoption probe.
+
+## The migrator bundled the test fixture's migrations (2026-11-17, `fix/migrator-bundles-app-seam`)
+
+- **A tsconfig decides what a bundle contains, not only how it type-checks.** `infra/stack.ts` bundled
+  the migrator `NodejsFunction` with the root `tsconfig.json`. That file points `@app-config/*` at
+  `packages/keel/test-fixture`, as keel's own tests need, so esbuild composed the fixture's migrations
+  (`1001_dockets`…) into the framework's registry and none of the app's. Every gate stayed green: synth
+  only proves a bundle builds, and no test reads what it holds. The stack now bundles with the app's
+  tsconfig (`APP_TSCONFIG`), which `pnpm init-app` repoints on a rename or an eject.
+- **So the gate reads the bundles.** `infra/check-shapes.ts` finds each Lambda's bundle in the assembly
+  the synth just wrote, by the asset hash in its `S3Key`. A bundle holding `test-fixture` fails, and so
+  does a migrator bundle missing one of the app's migrations. The old line, put back, fails on all of it.
+  The migrator is the only bundled Lambda today. The server ships a prebuilt zip, and CDK's own
+  providers ship theirs.
+- **A gate that reads text must fail when the text is gone.** The fixture check relied on esbuild's
+  per-module path comments, and `minify: true` removes them, which would leave it passing whatever the
+  bundle held. So the migrator bundle must also NAME the framework's and the app's registries in those
+  comments, and a minified bundle fails. The app's migrations are read from its registry's keys, not
+  from file names, which a colocated test would add to. The check synthesizes into its own temp
+  directory, never `CDK_OUTDIR`, so cleaning up cannot delete a real `cdk.out`. CI's adoption probe now
+  runs `pnpm --filter infra synth` after `init-app`: without the tsconfig rewrite, the ejected app's
+  synth fails.
+- **Encryption at rest is asserted on the cluster, not the instance.** `storageEncrypted: true` was already
+  set on the Aurora cluster. The shape check now fails if any `AWS::RDS::DBCluster` lacks it, on either
+  shape. A CloudFormation linter's W9008 asks for `StorageEncrypted` on the writer `AWS::RDS::DBInstance`.
+  An Aurora instance takes its encryption from its cluster, so that warning is a false positive and
+  nothing is set on the instance. This repo's synth runs no such linter, so there is nothing in the stack
+  to suppress it.
