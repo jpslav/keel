@@ -122,6 +122,14 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         ['env as a quoted key', "export const mode = process['env'].APP_MODE\n"],
         ['env as a template-literal key', 'export const mode = process[`env`][`DEMO_MODE`]\n'],
         ['destructuring env as a quoted key', "const { E2E_BUILD } = process['env']\nexport const e2e = E2E_BUILD\n"],
+        [
+            'destructuring assignment from env as a quoted key',
+            "let mode\n;({ APP_MODE: mode } = process['env'])\nexport { mode }\n",
+        ],
+        [
+            'a parameter default of env as a template-literal key',
+            'export function mode({ DEMO_MODE } = process[`env`]) {\n    return DEMO_MODE\n}\n',
+        ],
     ])('a real adapter may not read the run mode itself (%s)', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, code), RUN_MODE)).toBe(1)
     })
@@ -158,6 +166,8 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         // the same object under another name
         const imported = "import { env } from 'node:process'\nexport const storeArn = env.KVS_ARN\n"
         expect(fired(await lint(file, imported), PROCESS_ENV)).toBe(1)
+        const quoted = "import { 'env' as e } from 'node:process'\nexport const storeArn = e.KVS_ARN\n"
+        expect(fired(await lint(file, quoted), PROCESS_ENV)).toBe(1)
     })
 
     // A template key is the name only when it has no expressions; `env${x}` could be anything.

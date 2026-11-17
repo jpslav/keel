@@ -72,6 +72,15 @@ describe('getDb: request-path code may not take the raw db handle, in any form',
         expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_COMPUTED)).toBe(0)
     })
 
+    // In a computed access an identifier is a variable, not the name, so the computed selector leaves it
+    // out (eslint.config.mjs, quotedKey). The dot selector still sees it, once.
+    it('db[getDb] with getDb a variable is reported once, not twice', async () => {
+        const code = "const getDb = 'withTenant'\nexport const load = (db) => db[getDb]()\n"
+        const findings = await lint(`${APP}/src/app/api/kv/route.ts`, code)
+        expect(fired(findings, GET_DB_COMPUTED)).toBe(0)
+        expect(fired(findings, GET_DB)).toBe(1)
+    })
+
     it('keel’s own db helpers may: they are what opens withTenant', async () => {
         expect(
             fired(await lint('packages/keel/src/db/kv.ts', 'export const load = (db) => db.getDb()\n'), GET_DB),

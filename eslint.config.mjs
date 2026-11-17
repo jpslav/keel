@@ -179,7 +179,7 @@ const processEnvSelector = {
     selector:
         `:matches(MemberExpression[object.name="process"]${anyKey('property', '"env"')}, ` +
         'ImportDeclaration[importKind!="type"][source.value=/^(node:)?process$/] > ' +
-        ':matches(ImportSpecifier[imported.name="env"], ImportDefaultSpecifier, ImportNamespaceSpecifier))',
+        `:matches(ImportSpecifier${anyKey('imported', '"env"')}, ImportDefaultSpecifier, ImportNamespaceSpecifier))`,
     message:
         "process.env is read ONLY inside an adapters directory — packages/keel/src/adapters, or an app's own " +
         'apps/<app>/src/adapters/real (CLAUDE.md) — deployment/service params come from the app ' +
