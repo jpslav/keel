@@ -1523,6 +1523,50 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   passed the `process.env` ban outright. A key wrapped in a TypeScript assertion (`['getDb' as const]`) is still out
   of reach.
 
+## An e2e wait that the page being left also passes (2026-11-16, `test/escalations-flake`)
+
+`escalations.spec.ts` failed or hit the 60 s test timeout in local `pnpm verify` on a loaded machine (load
+average 30 to 300) and was green in CI and alone. Two mechanisms, both invisible when the server answers
+fast:
+
+- **A "did it land?" check that the OLD document also satisfies lets the test race the switch.** An org
+  switch is a POST then `location.reload()`; a Simulator person switch is a POST then `location.assign()`.
+  Until the new document commits, the old page stays on screen and interactive. `switchOrg` asserted that
+  `escalations-card` was visible, which it is before and after. `switchPerson` waited on a URL regex the
+  page already matched and on `active-tenant`, which reads `Northwind Support` for Dana and for Sam alike.
+  Under load the gap is seconds wide, and the test went on as the previous person: the "member is read-only"
+  test saw Dana's `escalation-accept-*` button. Fix: `untilNewDocument` (`tests/e2e/support/new-document.ts`)
+  stamps the old `window` and waits for the stamp to vanish, the idiom `simulator-jobs` and
+  `simulator-snapshots` already hand-rolled; `pickOrg` now returns only once the switcher shows the picked
+  org's name; the person switch asserts `signed-in-as`.
+- **A bare `click()` inside `toPass` cannot be retried.** `createRequest` clicked the dropdown trigger, then
+  `getByRole('option').click()`. Clicks carry no timeout of their own, so on a page where the option never
+  arrives (the dropdown closed by the reload, or the option absent on the org being left) the click waited out
+  the 60 s test timeout and `toPass` never ran a second attempt; the trace showed one 56 s click. Each step
+  in the loop now has a 2 s timeout, and the trigger, which toggles the dropdown, is clicked only when the
+  option is not already visible.
+
+The hop to the dashboard after a person switch (`reachDashboard`, `support/people.ts`) clicks the nav button
+exactly once and only when the person landed elsewhere, after `data-hydrated` shows on the Simulator pill
+(closed) or panel (open; a person switch leaves it open). Gating on the pill alone hung on `/profile`, where
+the panel is the element that carries it.
+
+- **CPU load alone did not reproduce it; slow responses from the two switch routes did.** 16 `yes` loops on a
+  warm dev server at load ~200 passed the unfixed spec 12/12. Adding 1.5 s to `POST /api/simulator/viewpoint`
+  and `POST /api/auth/org` (a temporary edit, reverted) failed it 6/9, where the fixed spec passed 15/15. The
+  realistic trigger is a route's first, uncompiled hit on a loaded machine. To reproduce: delay those two
+  handlers, run `escalations.spec.ts` with `--repeat-each=3 --retries=0`, and expect red on the member and
+  bystander tests.
+- **A cold dev server at load ~250 can run a test out of its 60 s without any race.** The first test of a
+  cold run took 34 to 52 s end to end in six trials, and in two earlier trials that timed out, `signInAs`
+  alone took 42 and 52 s (`/en/dashboard` took 24 s to answer in one). That is the budget the config's
+  `timeout` comment describes, not a bug in a test. CI avoids it by running the production build
+  (`E2E_BUILD`).
+- `tests/e2e/destructive/notifications.spec.ts` carried the same two helper copies and got the same changes.
+  `tenancy.spec.ts`'s `switchPerson` has the same second hop, which waits on a URL it may already be on; its
+  first hop is sound because that switch changes the tenant name. It was left alone: with the old
+  `pickOrg` and the same 1.5 s latency, `tenancy.spec.ts` passed 10 of 10.
+
 ## A gate that is green at adoption time can be red at the next merge (2026-11-16, `fix/adopter-merge-friction`)
 
 - **Every adoption gate is checked on the day `init-app` runs, and the failure that matters comes later.**
