@@ -733,25 +733,26 @@ fences there. They match each group through the same `ignore` matcher `no-restri
 the two halves of a fence read a specifier the same way, and `tests/lint/framework-fence.test.ts` checks
 that specifier by specifier.
 
-## Addendum (2026-11-16, later still): every way a specifier reaches app code is fenced
+## Addendum (2026-11-16, later still): the fence holds each way a specifier reaches app code
 
 The fence banned the app's `@/*` alias and `@app/seed`, but `../../../apps/showcase/src/domain/tickets` from
 keel's fixture names the same file, and passed both halves of the fence. Each of three review rounds then found
 another spelling that passed, so the fence is now built from the ways a specifier can reach app code rather than
 from the spellings (`eslint.config.mjs`, the list above `bareTraversalPattern`):
 
-- **A relative or absolute path.** `keel/no-path-to-app-code` resolves it against the importing file, following
-  symlinks, and reports it if it lands in `apps/` or `packages/seed/`. Every other path out of `packages/keel`
+- **A relative or absolute path, or a `file:` URL.** `keel/no-path-to-app-code` resolves it against the importing
+  file, following symlinks, and reports it if it lands in `apps/` or `packages/seed/`. Every other path out of `packages/keel`
   stays open: keel's tests reach the repo's `tests/support/` helpers that way.
 - **A `..` segment in a package or alias specifier** (`bareTraversalPattern`). `@app-config/../seed` leaves the
   seam for the seed, and `@scope/../../apps/…` resolves out of node_modules into app code. Only `./`, `../`, `/`
   and `\` begin a path; `.x/…` is a package name.
-- **A specifier through `node_modules`** (`nodeModulesPathPattern`). pnpm links every workspace package into
-  `node_modules/.pnpm/node_modules`, the apps and the seed among them.
+- **A specifier through `node_modules`** (`nodeModulesPathPattern`). pnpm links the apps and the seed, among other
+  workspace packages, into `node_modules/.pnpm/node_modules`.
 - **An app's package by name** resolves to nothing from `packages/keel`: keel depends on no app package, and none
   is linked where keel's resolution looks.
 
 Both patterns travel with `appCodePattern` as `appCodePatterns`, so no fenced block lists one without the
 others, and the declarationless half reads them as `no-restricted-imports` does (a `regex` compiled with `iu`).
-The path rule leaves a path through `node_modules` to its pattern, so one import is one finding. Every rule in
-the fence also sees TypeScript's `import m = require('…')`.
+The path rule leaves a path through `node_modules` to its pattern, so one import is one finding. TypeScript's
+`import m = require('…')` is held too: `no-restricted-imports` sees it for the patterns, and the path rule checks
+it itself. Out of reach of every import rule, as before: a computed specifier, and a `data:` URL.

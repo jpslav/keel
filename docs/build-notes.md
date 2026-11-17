@@ -1656,8 +1656,8 @@ the panel is the element that carries it.
   rewrites only the surface it knows. Anything per-app belongs in the app's own directory, by a path relative to
   it (`apps/<app>/lint-exceptions.mjs`), where a rename carries it along.
 - **The allowed door needs the same attention as the banned ones, and a pattern's own fix can open a new hole.**
-  The first fix for paths into `apps/` skipped every `@` specifier to keep `@app-config/apps/…` open, and so let
-  `@scope/../../apps/…` through: Node, webpack and TypeScript all resolve a bare specifier's `..` out of
+  Round 1's fix for paths into `apps/` skipped every `@` specifier to keep `@app-config/apps/…` open, and so let
+  `@scope/../../apps/…` through: TypeScript's and Node's resolvers both resolve a bare specifier's `..` out of
   node_modules. Resolving a path against the importing file (`keel/no-path-to-app-code`) answers "where does
   this land"; matching its spelling only answers "does it look like it".
 - **When review rounds keep finding new spellings of one hole, list the ways in, not the spellings.** Three rounds
@@ -1666,6 +1666,12 @@ the panel is the element that carries it.
   a `..` in a package specifier, a path through node_modules, a package by name) and holds each one; the list
   sits above `bareTraversalPattern` in `eslint.config.mjs`. A path is also judged through symlinks, or a checkout
   opened through a symlinked directory would resolve `../../apps/…` to somewhere that is not the repo.
+- **A ban's exemptions need the same spelling sweep as the ban.** The traversal ban exempted `@/…` and
+  `@app/seed…`, which the alias pattern bans whole, but wrote the exemption with `[\\/]`, so it also exempted
+  `@\..\..\apps\…`. The alias pattern does not match a backslash, and TypeScript reads one as a slash, so that
+  specifier reached app code past both. The claim check after the sweep found it, by probing the claim "(1)
+  already bans it whole". Exempt only the spellings the other rule is proven to catch, and test that the
+  exempted specifier still gives exactly one finding.
 - **Cite a path in a gated doc in the spelling `pnpm init-app` rewrites.** `--eject-showcase` deletes
   `packages/seed` and rewrites the citation `` `packages/seed` `` to the surviving app's seed directory
   (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that

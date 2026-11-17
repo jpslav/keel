@@ -2155,12 +2155,12 @@ runbook and clicking fifteen things in the right order.
   core was the alternative. It was rejected because the extension is not what imports React: the JSX is.
 - **A path into app code is judged by where it lands, not how it is spelled.** `keel/no-path-to-app-code`
   resolves a relative or absolute specifier against the importing file, following symlinks, and reports it if it
-  lands in `apps/` or `packages/seed/`. The first version was a `regex` on the spelling (an `apps` segment in a
-  specifier that did not start with `@`); each review round found a spelling it missed, and keeping `@` specifiers
-  out of it, so that `@app-config/apps/…` stayed the seam, let `@scope/../../apps/…` through. Listing the two
+  lands in `apps/` or `packages/seed/`. The first version was a `regex` on the spelling (an `apps/` segment anywhere in a
+  specifier). It closed the seam for `@app-config/apps/…`; round 1's fix, which kept `@` specifiers out of it, let
+  `@scope/../../apps/…` through; and each review round found a spelling it missed. Listing the two
   apps' directories was rejected too: an adopter renames and adds apps.
 - **A `..` in any package or alias specifier is banned** (`bareTraversalPattern`), not only after
-  `@app-config/`: no package specifier has a reason to climb, and Node, webpack and TypeScript all resolve one
+  `@app-config/`: no package specifier has a reason to climb, and TypeScript's and Node's resolvers both resolve one
   that does out of node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where
   pnpm links the apps and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
 - **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing,
@@ -2174,7 +2174,7 @@ runbook and clicking fifteen things in the right order.
 ## App-owned lint exceptions (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
 
 - **An app's exceptions to a fence live in `apps/<app>/lint-exceptions.mjs`**, read by `eslint.config.mjs` for
-  every app at load. The alternative, an exact path in `eslint.config.mjs`, broke an adoption probe: the path named
+  every app at load. The alternative, an exact path in `eslint.config.mjs`, stops matching after `pnpm init-app`: the path named
   the app's directory, which `pnpm init-app` renames without rewriting keel's config. Every upstream change to the
   file would also conflict with the adopter's edit.
 - **Only `keel/no-raw-db-handle` takes one.** It is the one fence the docs tell an adopter to except a module
