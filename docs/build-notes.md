@@ -1837,6 +1837,30 @@ the panel is the element that carries it.
   while its comment said "that one file AND that one string". It was found while scoping a second entry.
   Both now set `condition = "AND"`. Any new entry that pairs a path with a string needs it too.
 
+## A `pg` pool needs an error listener (2026-11-17, `fix/pg-pool-idle-error`)
+
+- **A connection the server ends is an event, not an exception you can catch.** pg emits `'error'` on
+  the client when its connection dies, and an EventEmitter with no `'error'` listener throws: an uncaught
+  exception, which crashes a Lambda. Connections end for ordinary reasons: a failover, a reboot, an
+  idle-session timeout, a socket dropped while the Lambda sat frozen between invocations.
+- **pg-pool's own listener covers IDLE clients only.** It re-emits their errors on the pool, so the pool
+  needs a listener too. But a client checked out by Kysely has no listener at all, and Kysely checks one
+  out for every transaction: every `withTenant`, and the migrator's whole run. So `createRealDb`
+  (`packages/keel/src/adapters/real/db.ts`) gives every client a listener as it connects, which logs the
+  error's code and message with `console.warn`. The pool's listener is a deliberate no-op. A query that
+  was using the connection still fails with its own error, and the pool replaces the dead client.
+- **Found through the test emulator first.** The Data API owner pass's teardown runs
+  `DROP DATABASE … WITH (FORCE)`, which ended an emulator pool's idle connection, and CI failed on the
+  unhandled error. The production adapter had the same gap.
+    - Two contract tests now end a backend with `pg_terminate_backend`: one idle in the pool, one inside a
+      transaction.
+    - They expect the warning, a failed transaction in the second case, and a working next query.
+    - Removing either listener turns them red.
+    - The first version of the fix covered the idle case only. The review's probe of the in-transaction
+      case still crashed it.
+- The Data API transport has no such pool: it speaks HTTPS through the SDK, and an SDK failure rejects
+  the call that made it.
+
 ## The authorization scan matched text (2026-11-17, `fix/authz-scan-per-verb`)
 
 - **A text match cannot say whose path a call is on.** The scan asked whether a FILE contained `authorize(`, or an
