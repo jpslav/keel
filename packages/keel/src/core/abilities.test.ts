@@ -205,14 +205,17 @@ describe('defineAbilitiesFor', () => {
         expect(asLost.can('update', { type: 'Docket', orgId: ORG_A })).toBe(false)
         expect(asLost.can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
         // ...and so is a person with a role the ladder does not have, or a `restricted` that is not a boolean.
-        for (const malformed of [actor({ role: 'owner' as Role }), actor({ role: 'member', restricted: 'no' })]) {
+        // `0` and not a truthy string: a truthy `restricted` is refused by `!restricted` anyway, so only a
+        // FALSY non-boolean shows the shape check itself is what refuses it.
+        for (const malformed of [actor({ role: 'owner' as Role }), actor({ role: 'member', restricted: 0 })]) {
             expect(defineAbilitiesFor(malformed).can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
         }
         expect(defineAbilitiesFor(actor({ role: 'member' })).can('create', { type: 'Job', orgId: ORG_A })).toBe(true)
     })
 
     // A PERSON who came through a credential other than a session (an inbound email, a personal token):
-    // the same rules as a session, except that the staff superpower is a session's alone.
+    // the same rules as a session, except that the staff superpower is a session's alone, and
+    // administration takes a session unless the app widens it.
     describe('a person with a non-session credential', () => {
         const badge = { kind: 'fixture-badge', id: 'badge-1' } as const
 

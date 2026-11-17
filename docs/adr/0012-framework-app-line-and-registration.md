@@ -530,7 +530,9 @@ registers the same kind on both sides.
 **Two kinds of actor.** `keel/core/abilities` exports `Actor = AbilityActor | MachineActor`.
 
 - **A person.** `AbilityActor` gains an optional `kind: 'person'` and an optional `credential`, so every
-  existing literal still compiles and is still judged by the person rules. A missing credential means
+  existing literal that states a session, or sets `manageAll: false`, still compiles and is still judged by
+  the person rules. (A literal that could set `manageAll` without stating a session no longer compiles;
+  see the review below.) A missing credential means
   "not stated", never "a session": such an actor doesn't wield `manageAll`, and the audit trail records
   no credential for it. The three literals in this repo that stand for a session (the two static shells
   and a preset check) now say so.

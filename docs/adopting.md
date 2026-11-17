@@ -426,7 +426,7 @@ publishing to a registry worth the versioning cost.
 
 ### When an update changes what your seam must say
 
-A merge from keel can make your app stop compiling until you add a line. These come from the change that
+A merge from keel can make your app stop compiling, or fail the authorize scan, until you add a line. These come from the change that
 let non-session callers reach `authorize()` (ADR-0012, 2026-11-16 addendum):
 
 - `apps/<app>/src/app-config/abilities.ts` must export `AppPersonCredentialKind` and

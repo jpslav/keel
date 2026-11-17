@@ -73,8 +73,10 @@ async function buildPreUpdate(
     for (;;) {
         const { error, results = [] } = await migrator.migrateUp()
         if (error) {
-            const failed = results.find((result) => result.status === 'Error')?.migrationName ?? ''
-            if (prefix(failed) < 1000) throw error
+            // Only an APP migration's own failure ends the build. A framework migration failing, or an
+            // error no migration owns (Kysely's own), is a real defect.
+            const failed = results.find((result) => result.status === 'Error')?.migrationName
+            if (failed === undefined || prefix(failed) < 1000) throw error
             return ran
         }
         if (results.length === 0) return ran
