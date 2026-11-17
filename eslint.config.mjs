@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import js from '@eslint/js'
 import nextPlugin from '@next/eslint-plugin-next'
@@ -125,9 +126,18 @@ const appCodePattern = {
         'Framework code (packages/keel) must reach app content only through the seam — import from the ' +
         "@app-config/* alias (apps/*/src/app-config/*), never the app's @/* alias or @app/seed (ADR-0012).",
 }
+// keel/core is pure TypeScript (ADR-0006). Named once: the core block bans it in declarations and
+// `keel/no-dynamic-framework-import-in-core` everywhere else, from this one list.
+const coreFrameworkPattern = {
+    group: ['react', 'react-*', 'next', 'next/*', 'next-intl', 'next-intl/*', '@mantine/*'],
+    message: 'keel/core is pure TypeScript — no framework imports (ADR-0006).',
+}
 
-// Shared no-restricted-syntax selectors (merge trap applies to this rule too — a later block replaces
-// an earlier one per matching file, so blocks that need both re-list both).
+// The TENANCY BAN's selectors (ADR-0004), enforced by `keel/no-raw-db-handle` below, a rule with its own
+// id. They used to be no-restricted-syntax selectors, re-listed in every block that bans getDb, and the merge
+// trap dropped one of them for every route, page and component (a later block's list replaced the earlier
+// one for those files). A rule id of its own cannot be replaced that way, which is also what lets the ban be
+// deny-by-default (see its block).
 // These aim at the ACT — naming `getDb` — rather than one syntactic shape of it, because
 // shape-matching was bypassed twice. They do NOT catch every indirection and cannot: a variable key
 // (`const k = 'getDb' as const; db[k]()`) still walks past them, and no lint rule can chase an
@@ -139,11 +149,6 @@ const appCodePattern = {
 // form, and the ObjectPattern form deliberately carries no `VariableDeclarator >` ancestor, which is
 // what makes a destructured parameter count. A key spelled as a template literal with no expressions
 // (``db[`getDb`]``) or quoted (`const { 'getDb': g } = db`) names it just the same, so both match too.
-//
-// They travel TOGETHER, as getDbSelectors, and no block lists them one by one. A block that listed them
-// one by one dropped the computed form for every route, page and component (the a11y block below, which
-// is the last no-restricted-syntax block for those files, so its list was the one that counted), and
-// `db['getDb']()` passed lint in a route handler although the two blocks before it listed the selector.
 //
 // A KEY can name something three ways: an identifier (`.name`, `{ name }`), a string (`['name']`,
 // `{ 'name': x }`), or a template literal with no expressions. Every name these selectors aim at (getDb,
@@ -162,7 +167,7 @@ const anyKey = (path, name) =>
 const getDbSelector = {
     selector: 'MemberExpression[property.name="getDb"]',
     message:
-        'Route/UI code must not use the raw db handle — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
+        "App code and keel's screens must not use the raw db handle — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).",
 }
 const getDbComputedSelector = {
     selector: `MemberExpression[computed=true]${quotedKey('property', '"getDb"')}`,
@@ -174,7 +179,6 @@ const getDbDestructureSelector = {
     message:
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
-const getDbSelectors = [getDbSelector, getDbComputedSelector, getDbDestructureSelector]
 // Also the import form — `import { env }`, or a default or namespace import, from `process`/`node:process`
 // — which reads the same object under another name (a type-only import, or `import { cwd }`, does not).
 // Nothing in the tree uses it. It closes that one form: re-exporting `env` from `node:process`, or
@@ -220,7 +224,8 @@ const runModeEnvDestructureSelector = {
         `Property${anyKey('key', RUN_MODE_ENV)}`,
     message: runModeEnvMessage,
 }
-// Together, for the reason getDbSelectors are.
+// Together, so no block can list one without the other: re-listing selectors one by one is how the merge
+// trap once dropped a getDb form for every route (see the tenancy selectors above).
 const runModeEnvSelectors = [runModeEnvSelector, runModeEnvDestructureSelector]
 // Inside an app's adapters directory, only the registry loads real/. A fake, or a second module, doing
 // `await import('../real/kv')` would put the vendor SDK behind code that never asks the run mode. The
@@ -392,6 +397,9 @@ const keelNoDirectMkdtempRule = {
 //
 // The specifier must be a literal (or a template with no expressions). A computed one —
 // `import(name)` — is out of reach, as it is for every import rule.
+//
+// A TYPE-position `import('…').T` is an import too: `import type { T } from '…'` is banned by
+// no-restricted-imports, which never sees the inline form. Every rule built here checks it.
 const isVendorSpecifier = (specifier) =>
     vendorSdkPattern.group.some((pattern) =>
         pattern.endsWith('/*')
@@ -399,20 +407,13 @@ const isVendorSpecifier = (specifier) =>
             : specifier === pattern || specifier.startsWith(`${pattern}/`),
     )
 
-/** @type {import('eslint').Rule.RuleModule} */
-const keelNoDynamicVendorImportRule = {
-    meta: {
-        type: 'problem',
-        docs: { description: 'Vendor SDKs are not imported dynamically outside an adapters directory.' },
-        schema: [],
-        messages: {
-            dynamic:
-                '`{{specifier}}` is a vendor SDK, and loading it with import() or require() is still importing ' +
-                "it. Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or " +
-                'apps/<app>/src/adapters/real/ (a port the app owns) — code against the port instead ' +
-                '(docs/recipes/app-owned-adapter.md).',
-        },
-    },
+// Every import a declaration-only ban cannot see, checked against one predicate: `import()`, `require()`,
+// vitest/jest's `importActual`, `requireActual`, `importMock` and `requireMock`, and a type-position
+// `import('…')` (TSImportType: `source` in typescript-eslint 8, `argument.literal` before it). A rule
+// built here takes no options, so the merge trap has nothing to replace.
+/** @returns {import('eslint').Rule.RuleModule} */
+const declarationlessImportBan = ({ description, matches, message }) => ({
+    meta: { type: 'problem', docs: { description }, schema: [], messages: { banned: message } },
     create(context) {
         const check = (node) => {
             const specifier =
@@ -421,15 +422,81 @@ const keelNoDynamicVendorImportRule = {
                     : node?.type === 'TemplateLiteral' && node.expressions.length === 0
                       ? node.quasis[0].value.cooked
                       : undefined
-            if (typeof specifier !== 'string' || !isVendorSpecifier(specifier)) return
-            context.report({ node, messageId: 'dynamic', data: { specifier } })
+            if (typeof specifier !== 'string' || !matches(specifier.trim())) return
+            context.report({ node, messageId: 'banned', data: { specifier } })
         }
         return {
             ImportExpression: (node) => check(node.source),
+            TSImportType: (node) => check(node.source ?? node.argument?.literal),
             'CallExpression[callee.name="require"]': (node) => check(node.arguments[0]),
             // A test inside the fence loads the real module with these, exactly as with import().
             'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
                 (node) => check(node.arguments[0]),
+        }
+    },
+})
+
+const keelNoDynamicVendorImportRule = declarationlessImportBan({
+    description: 'Vendor SDKs are not imported dynamically outside an adapters directory.',
+    matches: isVendorSpecifier,
+    message:
+        '`{{specifier}}` is a vendor SDK, and loading it with import() or require(), or naming it in a type ' +
+        "import('…'), is still importing it. Vendor SDKs live only in packages/keel/src/adapters/ (keel's ports) or " +
+        'apps/<app>/src/adapters/real/ (a port the app owns) — code against the port instead ' +
+        '(docs/recipes/app-owned-adapter.md).',
+})
+
+// THE FRAMEWORK/APP FENCE AND keel/core's FENCE, outside declarations. Both are no-restricted-imports groups
+// (appCodePattern, coreFrameworkPattern), so until these rules existed `import('@app/seed')` in keel's
+// server-lib and `export type T = import('@/domain/tickets').Ticket` in keel's fixture linted clean. The
+// second is the exact type-only escape the fixture's fence exists to stop (see FIXTURE_FILES_GLOB).
+//
+// They match a specifier EXACTLY as no-restricted-imports matches its group: with the `ignore` package,
+// configured as that rule configures it (lib/rules/no-restricted-imports.js: `allowRelativePaths: true`,
+// `ignorecase` since no group here sets caseSensitive, and the specifier trimmed), and loaded from ESLint's own
+// dependencies so the static and declarationless bans cannot read one group two ways. That includes the
+// group syntax's quirks: a bare name matches at any depth, so core's `react` also bans `@x/react` and
+// `./react`, in both. If ESLint ever stops depending on `ignore`, this line throws when the config loads.
+const ignore = createRequire(createRequire(import.meta.url).resolve('eslint'))('ignore')
+const matchesGroup = (group) => {
+    const matcher = ignore({ allowRelativePaths: true, ignorecase: true }).add(group)
+    return (specifier) => matcher.ignores(specifier)
+}
+const keelNoDynamicAppImportRule = declarationlessImportBan({
+    description: 'Framework code does not reach app content by import(), require() or a type import().',
+    matches: matchesGroup(appCodePattern.group),
+    message:
+        "`{{specifier}}` is app content, and reaching it with import() or require(), or naming it in a type import('…'), " +
+        `is still importing it. ${appCodePattern.message}`,
+})
+const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
+    description: 'keel/core does not reach a framework by import(), require() or a type import().',
+    matches: matchesGroup(coreFrameworkPattern.group),
+    message:
+        "`{{specifier}}` is a framework, and reaching it with import() or require(), or naming it in a type import('…'), " +
+        `is still importing it. ${coreFrameworkPattern.message}`,
+})
+
+// THE TENANCY BAN (ADR-0004) as a rule of its own: the getDb selectors above, each with its message. See
+// its block for where it holds and the exceptions.
+/** @type {import('eslint').Rule.RuleModule} */
+const keelNoRawDbHandleRule = {
+    meta: {
+        type: 'problem',
+        docs: { description: 'App code and keel’s screens reach the database through db.withTenant().' },
+        schema: [],
+        messages: {
+            member: getDbSelector.message,
+            computed: getDbComputedSelector.message,
+            destructure: getDbDestructureSelector.message,
+        },
+    },
+    create(context) {
+        const report = (messageId) => (node) => context.report({ node, messageId })
+        return {
+            [getDbSelector.selector]: report('member'),
+            [getDbComputedSelector.selector]: report('computed'),
+            [getDbDestructureSelector.selector]: report('destructure'),
         }
     },
 }
@@ -442,6 +509,9 @@ const keelPlugin = {
         'public-surface': keelPublicSurfaceRule,
         'no-direct-mkdtemp': keelNoDirectMkdtempRule,
         'no-dynamic-vendor-import': keelNoDynamicVendorImportRule,
+        'no-dynamic-app-import': keelNoDynamicAppImportRule,
+        'no-dynamic-framework-import-in-core': keelNoDynamicFrameworkImportInCoreRule,
+        'no-raw-db-handle': keelNoRawDbHandleRule,
     },
 }
 
@@ -523,36 +593,69 @@ const eslintConfig = [
             ...nextPlugin.configs.recommended.rules,
         },
     },
-    // tenancy: request-path code must not grab the raw db handle — tenant-scoped access goes
-    // through withTenant so RLS context is always set (ADR-0004). App/component TEST files keep the
-    // getDb ban but are exempt from the process.env ban (they set APP_DATA_DIR for isolation).
+    // THE TENANCY BAN (ADR-0004), deny-by-default: no module in an app's src/, in keel's screens (components/
+    // and demo-static/) or in keel's fixture takes the raw db handle, so every tenant-scoped query goes
+    // through withTenant and RLS tenant context is always set. The ban used to NAME directories: routes and
+    // components, then domain/ and jobs/ once they were found outside it. Each list left a door, and a
+    // 'use server' action in src/actions or src/lib served requests with no ban at all. Now a directory
+    // nobody has thought of yet is inside, and what needs the raw client is a named exception, with a reason.
+    //
+    // keel's own src/ outside its screens is NOT in the zone. keel/db's helpers and keel's adapters are what
+    // open withTenant: they are the "keel/db helper" the rule's message sends request code to.
+    //
+    // The exceptions, all of them:
+    //  - TESTS, except those of routes, screens and keel's fixture (the next block). A test resolving seed
+    //    ids by slug to arrange a case is not a request path, and `fakeDb.getDb()` in an `ids()` helper is
+    //    the pattern the domain/ and jobs/ suites use (apps/showcase/src/domain/db/tickets.test.ts).
+    // No production module in either app uses the raw client. One that must is added to `ignores` by exact
+    // path, with its reason, never by directory.
+    //
+    // Its own rule id (keel/no-raw-db-handle), not no-restricted-syntax selectors, so no later block can
+    // replace it for a file: the merge trap dropped the computed form for every route that way once.
     {
-        files: UI_GLOBS,
-        rules: {
-            'no-restricted-syntax': ['error', ...getDbSelectors],
-        },
+        files: [
+            `apps/*/src/**/*.${SRC_EXT}`,
+            FRAMEWORK_COMPONENTS_GLOB,
+            `packages/keel/src/demo-static/**/*.${SRC_EXT}`,
+            FIXTURE_FILES_GLOB,
+        ],
+        ignores: [TEST_FILES],
+        plugins: { keel: keelPlugin },
+        rules: { 'keel/no-raw-db-handle': 'error' },
+    },
+    // ...and the tests that keep the ban, as they always have: a route's or a screen's test drives the code a
+    // request runs, and keel's fixture is app-shaped request code with no tests of its own to exempt.
+    {
+        files: [
+            'apps/*/src/app',
+            'apps/*/src/components',
+            'packages/keel/src/components',
+            'packages/keel/test-fixture',
+        ].map((dir) => `${dir}/${TEST_FILES}`),
+        plugins: { keel: keelPlugin },
+        rules: { 'keel/no-raw-db-handle': 'error' },
     },
     // params centralization (CLAUDE.md): process.env is read ONLY inside keel's adapters and an app's own real
     // adapters — every other module
     // imports the resolved value (the app's config/params.ts for deployment params; isSimulated/isDemoMode
     // from keel/adapters for run mode). Exempt: adapters, instrumentation (NEXT_PUBLIC needs literal inlining),
     // the two secret readers, and test files (which set APP_DATA_DIR for isolation). App/component
-    // non-test files also get the ban — re-listing getDbSelectors so their getDb ban survives the merge.
+    // non-test files get the ban here.
     {
         files: UI_GLOBS,
         ignores: [TEST_FILES],
         rules: {
-            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector],
+            'no-restricted-syntax': ['error', processEnvSelector],
         },
     },
-    // Targeted a11y-attribute literal ban (ADR-0008): non-test, non-story app/component code. Re-lists the
-    // getDb + process.env selectors (merge trap) so this block, being last for a regular component,
-    // still enforces them. Stories render fixtures, not shipped UI, so they are carved out.
+    // Targeted a11y-attribute literal ban (ADR-0008): non-test, non-story app/component code. Re-lists
+    // processEnvSelector (merge trap) so this block, being last for a regular component, still enforces it.
+    // Stories render fixtures, not shipped UI, so they are carved out.
     {
         files: UI_GLOBS,
         ignores: [TEST_FILES, STORY_FILES],
         rules: {
-            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector, a11yLiteralSelector],
+            'no-restricted-syntax': ['error', processEnvSelector, a11yLiteralSelector],
         },
     },
     {
@@ -632,29 +735,6 @@ const eslintConfig = [
         ignores: [TEST_FILES, STORY_FILES],
         rules: {
             'no-restricted-syntax': ['error', a11yLiteralSelector],
-        },
-    },
-    // Same tenancy ban as UI_GLOBS, wider net — and it MUST come after the process.env block above,
-    // which matches `apps/*/src/**` and so replaced an earlier getDb block for these files outright.
-    // That is the merge trap this file documents at the top, walked into once while adding this rule:
-    // the ban silently did nothing, and only `--print-config` showed why. It re-lists getDbSelectors
-    // AND processEnvSelector for the same reason every other block here does.
-    //
-    // WHY these directories: an app's domain/ and jobs/ are request-path code. The module a route calls
-    // to run the query is likelier to reach for the raw handle than the route itself, and CLAUDE.md
-    // sends adopters to `apps/showcase/src/domain/db/tickets.ts` as the worked example of a
-    // tenant-scoped query — yet they sat outside every glob while four documents, SECURITY.md included,
-    // said the ban was enforced. Not under UI_GLOBS because jsx-no-literals and the a11y-attribute rule
-    // do not belong on a query module.
-    //
-    // TESTS are exempt, unlike under UI_GLOBS: a test resolving seed ids by slug to arrange a case is
-    // not a request path, and `fakeDb.getDb()` inside an `ids()` helper is the pattern keel's own
-    // suites already use. The ban is about production code that serves a request.
-    {
-        files: [`apps/*/src/domain/**/*.${SRC_EXT}`, `apps/*/src/jobs/**/*.${SRC_EXT}`],
-        ignores: [TEST_FILES],
-        rules: {
-            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector],
         },
     },
     // i18n: UI code may not contain hard-coded strings — everything goes through next-intl (ADR-0008).
@@ -764,11 +844,20 @@ const eslintConfig = [
             'no-restricted-imports': ['error', { patterns: [vendorSdkPattern, appCodePattern, nextFontPattern] }],
         },
     },
+    // ...and the same fence outside declarations (keelNoDynamicAppImportRule): import(), require(), a test
+    // loader, a type-position import('…'). Same two globs, keel's adapters included, as the static fence;
+    // its own rule id, so no block below can replace it.
+    {
+        files: [FRAMEWORK_FILES_GLOB, FIXTURE_FILES_GLOB],
+        plugins: { keel: keelPlugin },
+        rules: { 'keel/no-dynamic-app-import': 'error' },
+    },
     // The fixture's syntax bans, decided one at a time rather than by inheriting the app's set.
     // APPLIED: getDb (its api/ + domain/ files are the app-shaped request path this template teaches —
-    // tenant access goes through withTenant, ADR-0004) and process.env (only keel's adapters and an app's
-    // own real adapters read it; the fixture is on the app side of that line). It has no test files of its
-    // own — keel's tests live in src/ — so neither needs a test carve-out.
+    // tenant access goes through withTenant, ADR-0004; enforced by keel/no-raw-db-handle, whose blocks name
+    // the fixture) and process.env (only keel's adapters and an app's own real adapters read it; the fixture
+    // is on the app side of that line). It has no test files of its own — keel's tests live in src/ — so
+    // neither needs a test carve-out.
     // NOT APPLIED, deliberately: react/jsx-no-literals and the a11y-attribute literal ban (ADR-0008).
     // Those govern user-visible COPY, and the fixture ships none: it has no components tree, and its
     // route files are scanned by authorized-mutations.test.ts, never served. Applying them would assert
@@ -776,7 +865,7 @@ const eslintConfig = [
     {
         files: [FIXTURE_FILES_GLOB],
         rules: {
-            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector],
+            'no-restricted-syntax': ['error', processEnvSelector],
         },
     },
     // Adapters are fenced against app content too, but MAY import vendor SDKs (that is their job) — so
@@ -791,25 +880,24 @@ const eslintConfig = [
     },
     // keel/core stays framework-free (ADR-0006) AND fenced from app content (ADR-0012) — vendor, app and
     // font patterns repeated on purpose (merge trap), see the notes above. The font ban was the one this
-    // block forgot; `next/*` below happened to cover it, with core's message rather than the font one.
+    // block forgot; coreFrameworkPattern's `next/*` happened to cover it, with core's message rather than
+    // the font one.
     {
         files: [`packages/keel/src/core/**/*.${SRC_EXT}`],
         rules: {
             'no-restricted-imports': [
                 'error',
-                {
-                    patterns: [
-                        vendorSdkPattern,
-                        appCodePattern,
-                        nextFontPattern,
-                        {
-                            group: ['react', 'react-*', 'next', 'next/*', 'next-intl', 'next-intl/*', '@mantine/*'],
-                            message: 'keel/core is pure TypeScript — no framework imports (ADR-0006).',
-                        },
-                    ],
-                },
+                { patterns: [vendorSdkPattern, appCodePattern, nextFontPattern, coreFrameworkPattern] },
             ],
         },
+    },
+    // ...and core's framework ban outside declarations (keelNoDynamicFrameworkImportInCoreRule). The vendor and
+    // app halves already hold there outside declarations: keel/no-dynamic-vendor-import and
+    // keel/no-dynamic-app-import both cover all of packages/keel/src.
+    {
+        files: [`packages/keel/src/core/**/*.${SRC_EXT}`],
+        plugins: { keel: keelPlugin },
+        rules: { 'keel/no-dynamic-framework-import-in-core': 'error' },
     },
     // keel's public surface (see keelPublicSurfaceRule above). Repo-wide on purpose: apps, repo
     // scripts, infra and the other workspace packages all resolve `keel/…` through an alias, so all
