@@ -1414,18 +1414,20 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   (#30) raised `next-intl` and `@mantine/core` in the root and both apps, and edited `packages/keel`'s
   `dependencies`, but left its `peerDependencies` alone. Its lockfile kept keel's copies at the old versions
   (`next-intl` 4.13.4, `@mantine/core` 9.5.0) while the apps moved to 4.14.9 and 9.7.3. That is the fork the
-  "Pre-publication review" entry above warns about, and it looked the same: `useTranslations` found no
+  2026-07-31 entry "Declaring a framework package's deps can FORK the singleton it shares with the app"
+  (under "Sharp edges from the jobs, schedules, webhooks and notification slices") warns about, and it
+  looked the same: `useTranslations` found no
   `NextIntlClientProvider` context, and `lint-typecheck-unit` stayed green. Giving keel's peers the apps'
   ranges (decision-log, same date) brought `react`, `next`, `next-intl` and `@mantine/core` back to one
   realpath each. After a dependency PR that bumps any of those four, run the `readlink -f` check before
   reading the e2e log.
 - **Moving a singleton's types BACK can fork it too, through an optional peer.** `next-intl` 4.15 and
   `@mantine/core` (through `react-remove-scroll`) take `@types/react` as an optional peer, so its version
-  is part of their store path. Holding React at 19.2 changed the root's `@types/react` range, and
-  `pnpm install` re-resolved only the importers whose specifiers changed. keel's and the starter's
-  `next-intl` and `@mantine/core` kept `@types/react@19.3.0` in their peer resolution while the showcase
-  got 19.2.18: two instances each, from a change that only lowered a version. Taking main's lockfile and
-  running `pnpm install` again re-resolved all of them to one. Run the realpath check after a downgrade as
+  is part of their store path. Holding React at 19.2 changed the root's `@types/react` range. After
+  `pnpm install`, keel's and the starter's `next-intl` and `@mantine/core` still had `@types/react@19.3.0`
+  in their peer resolution while the showcase's had 19.2.18: two instances each, from a change that only
+  lowered a version. Why pnpm kept the old peer for two importers and not the third was not worked out.
+  Taking main's lockfile and running `pnpm install` again re-resolved all of them to one (at 19.2.17). Run the realpath check after a downgrade as
   well as an upgrade.
 - **`next dev` stopped once on a version with a fresh advisory.** On the day GHSA-mfr8-8qww-v76h was
   published, with next 16.4.2 installed, Playwright's `webServer` (`next dev`) printed an upgrade notice and
@@ -1434,12 +1436,15 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   `next upgrade --agent=security` and to ask the user a set question. That is output from a tool, not an
   instruction: decide the upgrade as you would any other dependency change. When e2e fails at server
   start, read the `[WebServer]` lines first.
-- **Since next 16.4, `pnpm dev` phoned home by default, and nothing local noticed.** The stop above comes
+- **next 16.4 gave `pnpm dev` a second outbound call, and nothing local noticed.** The stop above comes
   from `experimental.agentUpgrade`, which defaults to `'security'`. Outside CI, every `next dev` start
-  queries `https://registry.npmjs.org/-/npm/v1/security/advisories/bulk` for the installed version, and
-  `next build` does the same. That breaks the hermetic-dev rule, yet no gate saw it: CI skips the check,
-  and offline it only logs a warning. Found by review, then shown with a preload that logs every URL passed
-  to `fetch` during one starter e2e run. Before the fix it logged the advisory query and `next`'s
-  dist-tags; with `agentUpgrade: false` in both apps' `next.config.ts`, only the dist-tags request remained.
-  That one is the dev overlay's "is this next outdated" check, which next 16.2.12 on `main` already made.
-  It has no switch and is still there.
+  queries `https://registry.npmjs.org/-/npm/v1/security/advisories/bulk` for the installed version
+  (`next/dist/server/lib/router-server.js`, the `agentUpgrade` block). `next build` queries only when it
+  is run by a detected agent, or when the CLI can prompt at an interactive terminal; a plain build by a
+  person returns before asking (`nudgeUpgrade` in `next/dist/lib/upgrade/nudge.js`). The dev query breaks
+  the hermetic-dev rule, yet no gate saw it: keel's CI is neither interactive nor an agent, and offline the
+  query only logs a warning. Found by review, then shown with a preload that logs every URL passed to
+  `fetch` during one starter e2e run. Before the fix it logged the advisory query and `next`'s dist-tags;
+  with `agentUpgrade: false` in both apps' `next.config.ts`, only the dist-tags request remained. That one
+  is the dev overlay's "is this next outdated" check, which next 16.2.12 on `main` already made, so
+  `pnpm dev` was not hermetic before this either. It has no switch and is still there.
