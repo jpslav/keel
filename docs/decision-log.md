@@ -2646,3 +2646,73 @@ verify` does not either), so the ejected suite is proven by hand here and by the
   exemption map as input (ADR-0014's conformance kit will need that). It is not in the `exports` map, so it is internal
   (`docs/adopting.md`'s count of internal modules grows by one). `typescript` stays a devDependency of keel;
   publishing the analyser for adopters would make it a dependency, and that is ADR-0014's decision.
+
+## ADR-0014's open decisions, decided by JP (2026-11-17, `docs/adr-package-model`)
+
+ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, and the same day added D8 to D11 and revised D3, in a chat with the
+keel manager session, which relayed them to the session writing the ADR. The ADR records each with its reasons.
+
+- **D1, registry: public npm.** GitHub Packages was the alternative. It needs a classic personal access token to
+  install even a public package, on every adopter's machine and in their CI.
+- **D2, name: keel is renamed.** `keel` on npm is another project's active backend framework, and a rename is
+  cheapest before anything is published and before Pages switches. The first choice, strake, was dropped the same
+  day (below), and the name is SSSB (below). The naming rule was left to the ADR: every package, the never-published seam included, is under the project's
+  npm organization, so owning the scope reserves every name. It first left the framework and its generator
+  unscoped, and npm refused the framework's name (below). Unscoped tooling (`eslint-plugin-<name>` and the like)
+  was rejected from the start, because each unscoped name is one more that someone else could publish first. ADRs 0001–0013, this log and `docs/build-notes.md` keep saying keel, because they were
+  true when written.
+- **D3, licence: unchanged**, MIT and "Copyright (c) 2026 JP Slavinsky".
+- **D4–D7, as the ADR recommended:** the showcase stays as the never-published reference app; Pages switches at
+  the first release candidate; SSSB's own packages are exempt from `minimumReleaseAge`; no backports during 0.x.
+- **D8, added by JP the same day: per-app infra.** The root `infra/` was the showcase's deployment and nothing
+  else, and `init-app` rewrote its paths on every rename or eject. Each app's deployment now lives in the app
+  (`apps/<app>/infra/`), the reusable code in `@sssb/cdk`, and nothing at the root names an app. The starter
+  gets one too. An adopter whose infrastructure spans several apps, as Pages' does, keeps its own root `infra/`.
+- **D2 reopened, the same day.** The independent design review found that an npm organization `strake` already
+  exists and is not JP's (the registry answers `/-/org/strake/package`, though every package name under it is a
+  404), and that Strake is an existing project. JP is choosing another name. It is reserved on npm first (step zero in ADR-0014's plan: organization ownership confirmed and placeholders published),
+  and only then written into the repository.
+- **D2 settled, the same day: SSSB**, written `sssb` in code. **The name is deliberately left undefined**: JP asked
+  that it not be overly defined, so the letters have no official expansion, in the docs or anywhere else. The
+  names: `sssb` (the framework), `create-sssb`, `@sssb/tools` (its CLI is `sssb`), `@sssb/eslint-plugin`,
+  `@sssb/cdk` (the `SssbApp` construct), the seam `@sssb/app-config` (a local link only, never published), and
+  the repository `safeinsights/sssb`. Checked on 2026-11-17: those names are unpublished, the registry had no `sssb` organization until
+  `safeinsights-bot` created it that day, and npm's search finds nothing similar. On GitHub a few small, unrelated repositories use
+  the letters, some of them watchers for SSSB, the Stockholm student-housing foundation: a different field, and
+  a low risk.
+- **D2's names corrected, the same day: unscoped `sssb` refused by npm as typosquat-similar; all packages
+  scoped.** Publishing `sssb` failed with a 403, "Package name too similar to existing packages ssri, ssh2, ses,
+  sass, scss, jss, csso, xss, css", and nothing was published. So the framework is `@sssb/core`, imported
+  directly as `@sssb/core/…` (JP chose that over an `npm:` alias), the generator is `@sssb/create`, which
+  `npm create @sssb` runs, and `create-sssb` is dropped; `@sssb/tools`, `@sssb/eslint-plugin`, `@sssb/cdk` and
+  the seam are unchanged. Owning the `@sssb` scope is step zero: nobody else can publish under it. The
+  organization's package list names `@sssb/core`, `@sssb/create`, `@sssb/tools`, `@sssb/eslint-plugin` and
+  `@sssb/cdk`, which gives P14 a package to configure a trusted publisher on; `@sssb/app-config` stays
+  unpublished.
+- **D2's framework name, the same day: `@sssb/kit`, not `@sssb/core`.** As `@sssb/core`, keel's own `core`
+  module would have read `@sssb/core/core/…`; as `@sssb/kit` it reads `@sssb/kit/core/…`. Apps import
+  `@sssb/kit/…` directly, and in the repository the framework moves to `packages/kit`, beside `packages/cdk`.
+  `@sssb/core` stays as a deprecated, unused placeholder saying the framework package is `@sssb/kit`. ADR-0014
+  now calls its conformance checks "the conformance suite", so "kit" only means the package. `safeinsights-bot` published
+  `@sssb/kit` and a `create-sssb` guard the same day, and deprecated `@sssb/core` ("Not used. The SSSB framework
+  package is @sssb/kit."). npm accepted `create-sssb`: its bin prints "SSSB's generator is @sssb/create. Run: npm create @sssb"
+  and exits 1, which covers the mistype `npm create sssb`. The docs run the CLI as `pnpm exec sssb`, never
+  `npx sssb`.
+- **D3 revised, the same day: copyright assigned to Rice University.** JP transfers keel's copyright to SafeInsights,
+  that is Rice University. The `LICENSE` line becomes "Copyright (c) 2026 Rice University", MIT unchanged. The line
+  records an assignment JP makes, and changes only once JP has executed it, before the first release candidate.
+- **D9, stewardship: maintained by SafeInsights, not SafeInsights-specific.** The universality test
+  (`docs/development-approach.md`, "What the template ships") is the guard. The rename PR says so in `README.md`,
+  `CONTRIBUTING.md` and `docs/README.md`.
+- **D10, a new home.** `jpslav/keel` is archived after a commit pointing its README at `safeinsights/sssb`, which
+  starts as a copy of the full git history, so every commit and author is kept. The rename is its first PR. PR
+  numbers restart there, so the doctrine docs qualify old references (`jpslav/keel#54`), and each dated record
+  gets an appended entry saying which repository its earlier numbers refer to. Rewriting the records' numbers
+  was the alternative, and it was rejected because the records are append-only. The npm organization `sssb` was created by the `safeinsights-bot` npm account, its sole owner for now, since JP
+  has no personal npm account (CanopyCMS is set up the same way). That single owner is recorded as a known risk,
+  and adding a second, human owner is an account action for when a maintainer has an npm account. In-flight `jpslav/keel` PRs land before the copy.
+- **D11, the same day: no more manual npm publishes.** Every passkey approval is friction JP wants gone. The
+  packages already exist, so the release workflow modeled on CanopyCMS's `publish.yml` and a trusted publisher on
+  every package, `create-sssb` included, move to right after the rename (ADR-0014's P1b), the last passkey round.
+  Pages' prereleases are GitHub-release tarballs, which involve no npm publish; iteration happens on an
+  integration branch, and npm sees only real releases.

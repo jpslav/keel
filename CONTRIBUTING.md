@@ -1,6 +1,7 @@
 # Contributing
 
-Read `docs/adr/` first — all thirteen decisions are Accepted and not relitigated in routine work. `CLAUDE.md` is
+Read `docs/adr/` first — thirteen decisions are Accepted and not relitigated in routine work, and one (0014) is
+Proposed. `CLAUDE.md` is
 the same rulebook in agent-sized form.
 
 ## Before you build a capability: it may be a recipe, not a feature
