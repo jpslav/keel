@@ -3,7 +3,7 @@
  *
  * THIS FILE keeps the `simulator/` PREFIX exemption alive: a simulated-world surface is 404 in real
  * builds and is never a product mutation path. The gate the exemption rests on is the
- * `if (!isSimulated)` early return, and the scan checks this file actually contains it — the whole
+ * `if (!isSimulated)` early return, and the scan checks that each mutating handler here opens with it — the whole
  * point of the `mustMatch` mechanism is that a simulator route which lost its gate would otherwise be
  * silently exempt from authorize(...) AND ship live.
  *

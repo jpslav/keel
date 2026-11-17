@@ -23,7 +23,14 @@ import ts from 'typescript'
  *   path, followed to any depth. A function that is only defined is not followed.
  *
  * What is NOT followed, and so does not count: a call into another module (an imported helper that calls
- * `authorize` inside it), a method on an object, a getter, a class body. Each of those fails the handler.
+ * `authorize` inside it), a method on an object, a getter, a class body, and a parameter or destructuring
+ * default (it runs only when the value is missing). Each of those fails the handler.
+ *
+ * WHAT COUNTS AS `authorize`: a call to the `authorize` imported from one of `ScanOptions.authorizeModules`
+ * (keel's `keel/authz/authorize` by default), under any local name or through a namespace import. A local
+ * function that happens to be named `authorize` is followed like any other, so it counts only if it calls
+ * the real one.
+ *
  * A handler the module cannot resolve at all (a destructured export, a `let`, an unresolvable re-export,
  * a file that does not parse) is REFUSED with the reason, and a refusal is a failure.
  */

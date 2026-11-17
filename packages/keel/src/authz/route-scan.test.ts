@@ -181,6 +181,15 @@ describe('the export forms a mutating handler can take', () => {
             expect: { PUT: 'open', PATCH: 'authorized' },
         },
         {
+            name: 'a named re-export of a name the module itself gets through export *',
+            files: {
+                'route.ts': "export { POST, DELETE } from './a'",
+                'a.ts': "export * from './b'",
+                'b.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\nexport async function DELETE() {}`,
+            },
+            expect: { POST: 'authorized', DELETE: 'open' },
+        },
+        {
             name: 'a re-export through a tsconfig `paths` alias',
             files: {
                 'route.ts': "export { POST } from '@/impl'",
@@ -266,6 +275,11 @@ describe('what the analyser refuses, and says why', () => {
             name: 'a re-export of a name the module does not export',
             files: { 'route.ts': "export { POST } from './impl'", 'impl.ts': 'export const GET = async () => {}' },
             expect: { POST: /has no export named `POST`/ },
+        },
+        {
+            name: 'a named re-export from a module whose export * does not resolve',
+            files: { 'route.ts': "export { POST } from './a'", 'a.ts': "export * from './missing'" },
+            expect: { POST: /does not resolve/ },
         },
         {
             name: 'a re-export into a declaration file',
@@ -521,6 +535,18 @@ describe("what counts as a handler's own path", () => {
             expect: 'open',
         },
         { name: 'in a class body', files: post(`class C { static { ${CALL} } }\nnew C()`), expect: 'open' },
+        {
+            name: 'in a class expression (not followed, though a static block would run)',
+            files: post(`const C = class { static { ${CALL} } }\nreturn C`),
+            expect: 'open',
+        },
+        {
+            name: 'a type-only import of authorize',
+            files: {
+                'route.ts': `import { type authorize } from 'keel/authz/authorize'\n${DECLS}export async function POST() { ${CALL} }`,
+            },
+            expect: 'open',
+        },
         {
             name: 'in a helper imported from another module',
             files: {

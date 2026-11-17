@@ -3,7 +3,7 @@
  *
  * THIS FILE backs the `auth/dev-signin/route.ts` EXACT exemption: session lifecycle again, but this
  * one is simulated-mode only, so its exemption carries a `mustMatch` for the `if (!isSimulated)` gate
- * and the scan checks the gate is really here.
+ * and the scan checks the handler really opens with it.
  */
 const isSimulated: boolean = true
 

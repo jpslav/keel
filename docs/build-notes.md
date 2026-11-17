@@ -1778,3 +1778,27 @@ the panel is the element that carries it.
   `packages/seed` and rewrites the citation `` `packages/seed` `` to the surviving app's seed directory
   (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that
   spelling: it passed the doc-path gate here, where the directory exists, and failed it in CI's adoption probe.
+
+## The authorization scan matched text (2026-11-17, `fix/authz-scan-per-verb`)
+
+- **A text match cannot say whose path a call is on.** The scan asked whether a FILE contained `authorize(`, or an
+  exemption's gate. A string, another verb, the `GET`, a dead branch and an uncalled closure all answer yes. The
+  finding that started this covered the `webhooks/` exemption. Asking the same question of the main rule found six
+  more false greens, and the `service/` and `simulator/` gates had two each. When a finding is about how a gate
+  matches, check every rule that matches the same way, not only the one the finding names.
+- **See the old gate pass before you trust the new one to fail.** Each shape was dropped into
+  `apps/starter/src/app/api` and run through main's scan, then the new one (a throwaway script: write the route,
+  run the suite, delete it). 12 of 14 passed on main. The two that did not were the real route and the comment-only
+  mention. All 14 are now cases against the real policy in `authorized-mutations.test.ts`.
+- **A suite that is green on its first run has not shown it can fail.** `route-scan.test.ts` passed first time, so
+  the analyser was mutated: 56 single changes, one at a time (drop the dead-code stop, count any `authorize`, share
+  one walk across verbs, skip `export *`, and so on), each run against both suites. Three survived the first pass:
+  a class expression's static block, a type-only import of `authorize`, and a name found through `export *` behind
+  a named re-export. Each was a missing case, not a defect, and each case now kills its mutant. Re-run a mutation
+  pass when the analyser changes.
+- **`getExportSpecifierLocalTargetSymbol` works without import resolution.** For `export { h as POST }` it returns
+  the local symbol, an alias whose first declaration is the `ImportSpecifier` when `h` was imported. That is enough
+  to follow it by hand. `noResolve` programs bind each file correctly, and the 80 route files here take about
+  150 ms.
+- **Prettier pads a markdown table to its widest cell.** Adding the resolved row to `.claude/future-tasks/index.md`
+  re-padded the whole Resolved table, so the diff touches every row of it.

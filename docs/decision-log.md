@@ -2436,3 +2436,41 @@ The design is in ADR-0004's addendum of the same date.
 - **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
   end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
   cannot swap the exceptions; that guards against accidents and is not a boundary.
+
+## The authorization scan reads each handler (2026-11-17, `fix/authz-scan-per-verb`)
+
+- **The TypeScript compiler's parser and binder, one file at a time, with no import resolution.** Each route file
+  becomes its own `ts.createProgram` with `noResolve` and `noLib`. That is enough for the checker to answer every
+  question asked of it, all of which are about bindings inside the file: which declaration a callee names, what an
+  `export { h as POST }` points at, whether an identifier is a `const`. Following an import is done explicitly, with
+  `ts.resolveModuleName` and the root's tsconfig. Rejected: one full program per app, which would load each app's
+  whole import graph (keel, Next, React types) to answer questions about 80 small files, which take about 150 ms
+  as it is. Also rejected: typescript-eslint's parser, which the lint rules use. It would serve within one file, but
+  following a re-export means reading another module and resolving its specifier through the root's tsconfig, which
+  the compiler API does in one call (`ts.resolveModuleName`). The check stays a test, as it was, because it judges a
+  file's exports and the modules they lead to, not one node.
+- **`authorize` is known by its import, not its name.** A call counts only if its callee is the `authorize` imported
+  from `keel/authz/authorize` (by any local name, or through a namespace import). The old regex took any
+  `authorize(`, so a local `function authorize() {}` satisfied it. The module list is a scan option, so an adopter
+  who wraps `authorize` can name its own module.
+- **Calls into other modules are not followed.** A handler whose only `authorize` is inside an imported helper
+  fails. Following them would mean resolving and reading arbitrary app modules, and a helper reached on an unknown
+  path is the case the scan cannot judge. Same-module functions are followed, to any depth, because the whole
+  module is in hand. No route in either app authorizes only through a helper in another module.
+- **A function literal passed as an argument is assumed to run.** Every route body is `withPortErrors(async () =>
+…)`, and the scan cannot read the imported wrapper to check that it calls its argument. This is the one trust the
+  analyser extends, and it is stated in the module and in ADR-0012's addendum.
+- **A `wrapped-by` gate needs the handler to BE the call.** A function handler that calls `withWebhookSecret(…)`
+  inside does not pass, even if its body is nothing but `return withWebhookSecret(…)`. With the apps' wrappers that
+  shape returns a function rather than a response, so it is a bug, not a variant. The fixture's two stand-ins had
+  that shape (their stand-in wrappers invoked the handler at once). They were changed to the apps' shape, not
+  accommodated.
+- **The simulated gate must be the first statement.** Every simulator handler, and the dev sign-in and upload
+  routes, open with it. A gate after other statements guards nothing those statements did.
+- **Refuse rather than guess.** A destructured export, a `let` handler, an unresolvable re-export or `export *`, a
+  file that does not parse, and CommonJS exports each fail with the reason. The old scan treated `export *` as
+  mutating sight unseen. The new one resolves it, and refuses it only when it cannot.
+- **The policy stays in the test; the analyser is a module of the package.** `route-scan.ts` takes the roots and the
+  exemption map as input (ADR-0014's conformance kit will need that). It is not in the `exports` map, so it is
+  internal (`docs/adopting.md`'s count of internal modules goes from 45 to 46). `typescript` stays a devDependency of
+  keel; publishing the analyser for adopters would make it a dependency, and that is ADR-0014's decision.

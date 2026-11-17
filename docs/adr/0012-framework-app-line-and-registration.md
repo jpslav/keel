@@ -762,3 +762,67 @@ findings, in both halves: the declarationless half reports every pattern a speci
 not match. TypeScript's `import m = require('…')` is held too: `no-restricted-imports` sees it for the patterns, and
 the path rule checks it itself. Out of reach of every import rule, as before: a computed specifier, a `data:` URL,
 and a require not called by that name (`createRequire(…)(…)`, `module.require(…)`).
+
+## Addendum (2026-11-17): the authorization scan judges each handler, not the file's text
+
+**Why.** The scan matched TEXT. A route file passed if its comment-stripped source contained `authorize(` anywhere, or,
+under an exemption, the gate's pattern anywhere. The review of `fix/audit-clock-and-cron-route` found that the
+`webhooks/` exemption passed a file whose only `withWebhookSecret(` was in a string, and a guarded `POST` beside an
+unguarded `DELETE`. The main rule had the same flaw. Each of these, dropped into the starter's api tree, passed main's
+scan: `'authorize('` in a string beside an open `POST`; an authorized `POST` beside an open `DELETE`; `authorize(...)`
+under `if (false)`, after a `return`, in a closure the handler never calls, and only in the `GET`. The same two shapes
+passed `service/`'s `withServiceCaller` gate and `simulator/`'s `if (!isSimulated)` gate. Only a mention in a comment
+failed. The table is in `.claude/future-tasks/resolved/authz-scan-exemption-matches-text-not-verbs.md`.
+
+**The scan reads code.** `packages/keel/src/authz/route-scan.ts` parses and binds each route file with the TypeScript
+compiler, finds its exported mutating handlers in every form Next accepts (a function, a `const`, `export { h as
+POST }`, a re-export, `export *`), and judges each one on its own path:
+
+- **What counts as `authorize`.** A call to the `authorize` imported from `keel/authz/authorize`, by any local name,
+  or through a namespace import of that module. A local function named `authorize` is followed like any other
+  same-file function, so it counts only if it reaches the real one.
+- **What counts as on the path.** The call must sit in the handler's body before any statement that always exits.
+  It must not sit under a condition the scan can decide is false: a literal, `!`, `void`, or a `const` bound to one.
+  A function literal passed as an argument counts, because it is assumed to be invoked (the `withPortErrors(async ()
+=> …)` idiom). So does a same-module function the path calls or passes, followed to any depth.
+- **What is not followed, and so does not count.** A call into another module, an object method, a class body, and
+  a parameter or destructuring default.
+- **What is refused, which fails the handler with the reason.** A destructured export, a `let` or `var` handler, a
+  handler that is a property of another value, and an unresolvable re-export. So is an unresolvable `export *`,
+  because which verbs it brings is unknown. Also a re-export into a declaration file, a file that does not parse,
+  and a file that assigns `module.exports`. Re-exports resolve through the root's tsconfig (its `paths`).
+
+**Gates are per verb, and each says what "guarded" means.** `mustMatch` is now a structured gate, checked on each
+exempted handler. It has three kinds:
+
+- `wrapped-by`: the handler IS the guard's call (`export const POST = withWebhookSecret(…)`). Used by `webhooks/`,
+  and by `service/`'s required-alongside `withServiceCaller`. A function handler that calls the guard inside does
+  not pass.
+- `calls`: the handler reaches the port call. Used by profile, assistant, analytics, auth org and sign-out, and
+  invite acceptance.
+- `opens-with-simulated-404`: the handler's first statement is `if (!isSimulated)`, and its branch exits. Used by
+  `simulator/`, dev sign-in and the upload endpoint.
+
+The finding warned that a per-verb rule might fail simulator routes that share one gate across verbs. None does:
+every mutating simulator handler opens with its own gate. The contract in the body above stands. Every exemption
+carries a `mustMatch`, which is matched by path in every root and proves the KIND of route, not the reason's whole
+claim.
+
+**What changed in the trees.** No app route was a false green: every route that passed still passes, with the same
+verbs judged. Two fixture routes changed shape. `webhooks/jobs/route.ts` and `service/jobs/route.ts` called their
+wrapper inside a function handler. They are now `export const POST = withX(…)`, the shape every app route has, because
+`wrapped-by` requires it. The fixture also gains `dockets/[id]/route.ts`, named as an invariant: two mutating verbs
+in one file, one of them authorizing through a same-file helper.
+
+**Roots and policy are input.** `scanRoutes(roots, options)` and `judge(route, handler, policy)` take the roots (each
+with its tsconfig) and the exemption map as arguments, so a conformance run in an adopter's repository can pass its
+own (ADR-0014, proposed). `options.authorizeModules` names the module whose `authorize` counts. The policy stays in
+`authorized-mutations.test.ts`.
+
+**Limits.**
+
+- The scan proves `authorize` is on the handler's path. It does not prove that `authorize` runs before the mutation,
+  or on every path to it. A handler that returns a 400 early still reaches `authorize` on its other path, and that is
+  the normal shape.
+- A function literal passed to a call is trusted to be invoked.
+- A gate still proves the kind of route, never the reason's whole claim.
