@@ -22,6 +22,7 @@ import { listTickets } from '@/domain/db/tickets'
  */
 export const appRlsProofs: RlsProofSuite = async ({
     db,
+    appDb,
     dbPort,
     expect,
     alphaTenantId,
@@ -53,11 +54,13 @@ export const appRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects
-    const alphaRows = await runWithTenant(db, alphaTenantId, (trx) => trx.selectFrom('tickets').selectAll().execute())
+    const alphaRows = await runWithTenant(appDb, alphaTenantId, (trx) =>
+        trx.selectFrom('tickets').selectAll().execute(),
+    )
     expect(alphaRows.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaRows.filter((r) => r.tenant_id === alphaTenantId).length).toBe(2)
 
-    const demoRows = await runWithTenant(db, demoTenantId, (trx) => trx.selectFrom('tickets').selectAll().execute())
+    const demoRows = await runWithTenant(appDb, demoTenantId, (trx) => trx.selectFrom('tickets').selectAll().execute())
     expect(demoRows.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
     expect(demoRows.filter((r) => r.tenant_id === demoTenantId).length).toBe(1)
 
@@ -67,7 +70,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     expect(allRows.length >= 3).toBe(true)
 
     // fail-closed: role set, no tenant context -> zero rows (and no cast error)
-    const noContext = await db.transaction().execute(async (trx) => {
+    const noContext = await appDb.transaction().execute(async (trx) => {
         await sql`SET LOCAL ROLE app_user`.execute(trx)
         return trx.selectFrom('tickets').selectAll().execute()
     })
@@ -76,7 +79,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // write isolation: INSERT carrying the other tenant's id is rejected by WITH CHECK
     let writeRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('tickets')
                 .values({
@@ -93,7 +96,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     expect(writeRejected).toBe(true)
 
     // scoped writes succeed and are visible
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .insertInto('tickets')
             .values({
@@ -104,19 +107,23 @@ export const appRlsProofs: RlsProofSuite = async ({
             })
             .execute(),
     )
-    const afterWrite = await runWithTenant(db, alphaTenantId, (trx) => trx.selectFrom('tickets').selectAll().execute())
+    const afterWrite = await runWithTenant(appDb, alphaTenantId, (trx) =>
+        trx.selectFrom('tickets').selectAll().execute(),
+    )
     expect(afterWrite.filter((r) => r.tenant_id === alphaTenantId).length).toBe(3)
 
     // DELETE is granted on this table (unlike escalations/attachments), so prove the grant works AND
     // that the policy still contains it: an UNFILTERED delete under alpha's context removes alpha's
     // rows and leaves demo's untouched. This is the one place a granted DELETE is exercised, and the
     // assertion that matters is the SURVIVOR count on the other tenant.
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.deleteFrom('tickets').where('ref', '=', `PX-${stamp}-4`).execute(),
     )
-    const afterDelete = await runWithTenant(db, alphaTenantId, (trx) => trx.selectFrom('tickets').selectAll().execute())
+    const afterDelete = await runWithTenant(appDb, alphaTenantId, (trx) =>
+        trx.selectFrom('tickets').selectAll().execute(),
+    )
     expect(afterDelete.filter((r) => r.ref === `PX-${stamp}-4`).length).toBe(0)
-    const demoSurvivors = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoSurvivors = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('tickets').select('ref').where('ref', '=', `PX-${stamp}-3`).execute(),
     )
     expect(demoSurvivors.length).toBe(1)
@@ -162,11 +169,11 @@ export const appRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // (a) tenant isolation: alpha sees its request under RLS; demo sees zero (via UNFILTERED select).
-    const alphaRequests = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaRequests = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('escalations').selectAll().execute(),
     )
     expect(alphaRequests.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoRequests = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoRequests = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('escalations').selectAll().execute(),
     )
     expect(demoRequests.length).toBe(0)
@@ -175,7 +182,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // though the org ids are valid alpha orgs — the tenant, not the org, is the RLS boundary.
     let requestWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('escalations')
                 .values({
@@ -196,7 +203,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // (b) TWO-SIDED visibility — the heart of the slice. The SAME row is returned by the two-sided
     // filter for BOTH the requester (A) and the responder (B), and for NEITHER the bystander (C).
     const seenBy = (activeOrgId: string) =>
-        runWithTenant(db, alphaTenantId, (trx) =>
+        runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .selectFrom('escalations')
                 .select('id')
@@ -218,7 +225,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // a request (and its audit trail) can never be erased.
     let requestDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM escalations`.execute(trx)
@@ -230,10 +237,10 @@ export const appRlsProofs: RlsProofSuite = async ({
 
     // ...but an UPDATE of the status DOES succeed — the transition (respond/withdraw) is the only
     // write path, and it's granted.
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.updateTable('escalations').set({ status: 'accepted' }).where('id', '=', reqAB!.id).execute(),
     )
-    const afterRespond = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterRespond = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('escalations').select('status').where('id', '=', reqAB!.id).executeTakeFirstOrThrow(),
     )
     expect(afterRespond.status).toBe('accepted')
@@ -263,12 +270,12 @@ export const appRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // (a) tenant isolation, both directions, via UNFILTERED selects under RLS.
-    const alphaAttachments = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaAttachments = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('attachments').selectAll().execute(),
     )
     expect(alphaAttachments.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaAttachments.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoAttachments = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoAttachments = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('attachments').selectAll().execute(),
     )
     expect(demoAttachments.length).toBe(0)
@@ -277,7 +284,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // valid demo org id — the tenant, not the org, is the RLS boundary.
     let attachmentWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('attachments')
                 .values({
@@ -297,14 +304,14 @@ export const appRlsProofs: RlsProofSuite = async ({
     expect(attachmentWriteRejected).toBe(true)
 
     // (b) UPDATE succeeds — the confirm path (pending → ready, record the true size) is a granted write.
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .updateTable('attachments')
             .set({ status: 'ready', size_bytes: 11 })
             .where('id', '=', artAlpha!.id)
             .execute(),
     )
-    const afterConfirm = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterConfirm = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('attachments')
             .select(['status', 'size_bytes'])
@@ -316,7 +323,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // (c) DELETE denied at the privilege layer — only SELECT, INSERT, UPDATE are granted this slice.
     let attachmentDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM attachments`.execute(trx)

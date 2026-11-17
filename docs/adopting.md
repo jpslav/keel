@@ -324,7 +324,7 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 `packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 38 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 40 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
@@ -420,6 +420,13 @@ domain" is a proof.
 
 The file opens with a worked row — closed, dated, owned, with a proof column that was thought through
 rather than restated. Read it once for the level of detail each row deserves before you fill in your own.
+
+**keel needs Postgres 16 or later.** Framework migration
+`packages/keel/src/db/migrations/0015_app_user_grant.ts` lets the migrating role switch to `app_user`
+with `GRANT … WITH SET TRUE`, checked by `pg_has_role(…, 'SET')`. Both arrived in Postgres 16, so on an
+older server that migration cannot run. Everything keel targets already meets it: the Aurora cluster in
+`infra/stack.ts` (16.10), CI's contract job (`postgres:16` in `.github/workflows/checks.yml`), pglite
+(18.6) and the embedded Postgres that a local `pnpm test:contract` starts (18.4).
 
 ## Staying current with keel
 

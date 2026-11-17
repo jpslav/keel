@@ -1658,3 +1658,23 @@ the panel is the element that carries it.
   Vitest hides the output of a passing test, so the counts were written to a file to measure this.
 - **`copyFile` does not carry the modification time over**: the copy's time is the time of the copy (checked on this
   machine), so the fake's `lastModified` after a copy is its own, as a new object's is.
+
+## A superuser hides every grant a role switch needs (2026-11-16, `fix/grant-app-user-to-owner`)
+
+- **Every contract suite connected as `postgres`, so none of them could see that the deployed role may
+  not `SET ROLE app_user`.** A superuser passes every privilege check, role membership included. pglite's
+  default user is one too. So the rule the whole tenancy model rests on, that the connecting role can
+  switch to `app_user`, had never been exercised by any test. The general lesson: a privilege model is
+  proven only by a connection that lacks the privilege. Run at least one gate as the least-privileged
+  role production really uses, here a `NOSUPERUSER CREATEROLE` owner like Aurora's master user.
+- **On Postgres 16+, creating a role gives its creator ADMIN on it, and by default nothing more.** SET and
+  INHERIT come only from `createrole_self_grant`, which is empty by default. So the creator may grant
+  itself the switch, which 0015 does, but holds none until it does. Owning every table does not help:
+  switching role is a question of membership, not ownership.
+- **Cluster-wide roles leak between test databases.** One contract pass creating `app_user` as the
+  superuser changes what the next pass's owner can do. So the owner pass measures a creator's membership
+  on the server it runs on, rather than trusting either the docs or the order the suites happen to run in.
+- **`name::regrole` folds case.** The `regrole` input function parses its argument as an identifier, so
+  `current_user::regrole` turns a role named `Keel_Second` into a lookup of `keel_second`. Compare
+  `pg_roles.rolname = current_user` instead, and quote any role name you print for someone to run
+  (`quote_ident`). A test role with a mixed-case name is what found it.

@@ -2220,3 +2220,59 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
     A retry after a copy that succeeded and a delete that failed finds the staged file again, gets the same etag,
     and converges over `finalKey`. A retry after both succeeded gets `null` from `head(stagedKey)`, which the
     first line of the snippet reads as "already finalized" by checking `head(finalKey)`.
+
+## The migrating role may switch to `app_user` (2026-11-16, `fix/grant-app-user-to-owner`)
+
+The design is in ADR-0004's addendum of the same date.
+
+- **A framework migration, not a deploy step.** The grant has to exist before the first tenant query on
+  any database keel migrates, and the migrator is the one role every deployment runs. A runbook line
+  would be forgotten exactly once, and that once is every request failing.
+- **Guarded by `pg_has_role(current_user, 'app_user', 'SET')`, not a bare GRANT.** The guard makes it a
+  no-op for a superuser and on a re-run (a fresh superuser in the contract suite pins it). Separately, the
+  block's `insufficient_privilege` handler means a role that cannot grant the switch to itself fails with
+  the statement to run, instead of a bare `permission denied to grant role`.
+- **INHERIT FALSE for the migrator, INHERIT TRUE for a separate app role.** The migrator owns every table,
+  so it needs only the switch. A separate app role owns nothing and reads `tenants`, `organizations` and
+  `service_keys` before any tenant is set, and those grants are `app_user`'s.
+- **The non-superuser pass runs the existing proofs, not a new suite.** `RlsProofContext` gained
+  `appDb`: every `runWithTenant` and every `SET LOCAL ROLE app_user` in the framework's and all three
+  seams' proofs moved to it. Seeding and the negative control stay on the superuser. So every isolation
+  claim is now proved for the connection a deployment actually uses, and an adopter's own proof half that
+  still switches on `db` keeps passing, just less strictly.
+- **The shared-server problem is measured, not assumed.** `app_user` is cluster-wide, and CI's suites
+  share one Postgres. The pass measures what this server gives a role's creator, then gives the owner
+  exactly that where `app_user` already exists. The pass runs twice in its file, so the genuine path (the
+  owner's own 0001 creates `app_user`) and that one both run every time. Before that, a scratch run on a
+  fresh cluster had checked the genuine path: the owner created `app_user`, failed without 0015, and passed
+  with it.
+- **`down` is a no-op.** Revoking the switch would take every tenant query down with it, and keel never
+  runs `down` migrations.
+- **A self-granted membership keeps its INHERIT.** If an operator set `createrole_self_grant`, the
+  creator already holds a membership it granted itself, and a plain GRANT would rewrite that row's
+  INHERIT. 0015 adds SET to that row instead (found in review; tested on real Postgres).
+- **A migrator with no ADMIN on `app_user` now fails at 0015, deliberately.** That happens on a shared
+  cluster where another role created `app_user`, or with a migrator that never runs the app. It used to
+  migrate cleanly. Now it stops with the one statement to run. The alternative, migrating anyway, would
+  leave a role that might be the app's unable to serve a single tenant query, discovered at the first
+  request instead of at deploy.
+- **A second owner on one cluster fails at 0015 rather than migrating, and the failure carries its
+  remedy.** Staging and production on one Aurora cluster, migrated by different owners, is a real setup.
+  A reviewer proved that the second owner's grant fails. Skipping 0015 there would have migrated a database
+  whose owner cannot serve a tenant query. So it stops, rolls back, and prints the GRANT. The contract
+  suite runs the case end to end, executing the printed statement as written.
+- **A role name with capitals broke 0015, and the second-owner test found it.** `current_user::regrole`
+  parses its input as an unquoted identifier and folds it to lower case, so a role named `Keel_Second_…`
+  was "not found". 0015 now finds the role by its exact name in `pg_roles`, and the remedy it prints quotes
+  the name (`quote_ident`), so copying it runs as-is. The test's second owner has a mixed-case name to pin
+  both. Its remedy is run by an ADMIN-only creator, not the superuser, so the docs' "a role holding ADMIN"
+  is what is tested.
+- **Postgres 16 or later is stated as keel's minimum, not branched on.** 0015's `pg_has_role(…, 'SET')`
+  and `GRANT … WITH SET` arrived in 16, and nothing in the repo stated a minimum version (found in the
+  independent re-check). Every server keel targets is 16 or later (Aurora 16.10, CI's postgres:16, pglite
+  18.6), so a `server_version_num` branch for 15 would be code no gate runs. The minimum is in
+  `docs/adopting.md`, the ADR addendum and 0015's header.
+- **A logical restore carries the ledger, not the grant.** `pg_dump` dumps one database, and roles and
+  their memberships are cluster-wide. Restored into another cluster, the ledger says 0001 and 0015 ran, so
+  neither runs again, and neither `app_user` nor anyone's switch to it came along. The
+  `db-role-not-superuser` cutover row says what to do before and after a restore.

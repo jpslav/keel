@@ -32,7 +32,19 @@ export interface ProofExpectation {
  * boundary and not to a fabricated foreign key.
  */
 export interface RlsProofContext {
+    /**
+     * The PRIVILEGED connection: it seeds the fixtures and runs the negative control (a read WITHOUT the
+     * role switch sees every tenant). A superuser, in every pass.
+     */
     db: Kysely<DB>
+    /**
+     * The connection that SWITCHES to `app_user`, and the one every `runWithTenant` and every
+     * `SET LOCAL ROLE app_user` in a proof must use. It is `db` itself in the default passes. In the
+     * contract suite's non-superuser pass it is the database OWNER, the way Aurora's master user connects,
+     * so a proof that switches on `db` instead would hide whether the owner may switch at all
+     * (`owner-pass.ts`, migration 0015).
+     */
+    appDb: Kysely<DB>
     /**
      * The same handle behind the `DbPort` interface, so a proof can drive PRODUCT code that takes the
      * port — `keysetPage`, which opens its own `withTenant` transaction — instead of re-implementing it
@@ -58,6 +70,7 @@ export type RlsProofSuite = (context: RlsProofContext) => Promise<void>
 
 export const frameworkRlsProofs: RlsProofSuite = async ({
     db,
+    appDb,
     dbPort,
     expect,
     alphaTenantId,
@@ -97,10 +110,10 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect((alphaJobRow!.payload as { scope: string }).scope).toBe('alpha')
 
     // read isolation, both directions, on BOTH tables, via UNFILTERED selects under RLS
-    const alphaJobs = await runWithTenant(db, alphaTenantId, (trx) => trx.selectFrom('jobs').selectAll().execute())
+    const alphaJobs = await runWithTenant(appDb, alphaTenantId, (trx) => trx.selectFrom('jobs').selectAll().execute())
     expect(alphaJobs.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaJobs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoJobs = await runWithTenant(db, demoTenantId, (trx) => trx.selectFrom('jobs').selectAll().execute())
+    const demoJobs = await runWithTenant(appDb, demoTenantId, (trx) => trx.selectFrom('jobs').selectAll().execute())
     expect(demoJobs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
     expect(demoJobs.filter((r) => r.tenant_id === demoTenantId).length).toBe(1)
 
@@ -110,18 +123,18 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(allJobs.length >= 2).toBe(true)
 
     // fail-closed: role set, no tenant context -> zero rows (and no cast error)
-    const noContextJobs = await db.transaction().execute(async (trx) => {
+    const noContextJobs = await appDb.transaction().execute(async (trx) => {
         await sql`SET LOCAL ROLE app_user`.execute(trx)
         return trx.selectFrom('jobs').selectAll().execute()
     })
     expect(noContextJobs.length).toBe(0)
 
-    const alphaChanges = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaChanges = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('job_status_changes').selectAll().execute(),
     )
     expect(alphaChanges.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaChanges.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoChanges = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoChanges = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('job_status_changes').selectAll().execute(),
     )
     expect(demoChanges.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -130,7 +143,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // write isolation on jobs: INSERT carrying the other tenant's id is rejected by WITH CHECK
     let jobWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx.insertInto('jobs').values({ tenant_id: demoTenantId, kind: 'digest-email', payload: {} }).execute(),
         )
     } catch (error) {
@@ -142,7 +155,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // FAILS at the privilege layer — the table's only grants are SELECT, INSERT
     let changeUpdateRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`UPDATE job_status_changes SET message = 'tampered'`.execute(trx)
@@ -155,7 +168,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // ...and a DELETE fails the same way — history rows can never be erased
     let changeDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM job_status_changes`.execute(trx)
@@ -175,7 +188,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
 
     // app_user CAN SELECT service_keys — verification reads these during request auth (no RLS, so
     // the row is visible even with tenant context set to alpha)
-    const keyRows = await runWithTenant(db, alphaTenantId, (trx) =>
+    const keyRows = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('service_keys').selectAll().execute(),
     )
     expect(keyRows.some((r) => r.org_id === alphaOrgId)).toBe(true)
@@ -183,7 +196,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // ...but INSERT fails at the privilege layer — only SELECT is granted (writes are owner-only)
     let keyInsertRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`INSERT INTO service_keys (tenant_id, org_id, public_key_pem)
@@ -197,7 +210,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // ...and UPDATE fails the same way — a key row can never be rewritten by the app role
     let keyUpdateRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`UPDATE service_keys SET public_key_pem = 'tampered'`.execute(trx)
@@ -210,7 +223,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // ...and DELETE fails the same way — revocation is an owner-only write
     let keyDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM service_keys`.execute(trx)
@@ -252,12 +265,12 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // (a) tenant isolation, both directions, via UNFILTERED selects under RLS.
-    const alphaAudit = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaAudit = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('audit_events').selectAll().execute(),
     )
     expect(alphaAudit.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaAudit.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoAudit = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoAudit = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('audit_events').selectAll().execute(),
     )
     expect(demoAudit.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -267,7 +280,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // valid demo org id — the tenant, not the org, is the RLS boundary.
     let auditWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('audit_events')
                 .values({
@@ -288,7 +301,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // (a) the credential columns (0014) ride the same grant: app_user, in its own tenant, INSERTs a row
     // naming the credential that acted and reads it back. Table-level grants cover columns added later,
     // so the trail gained columns without gaining a privilege.
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .insertInto('audit_events')
             .values({
@@ -303,7 +316,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
             })
             .execute(),
     )
-    const byToken = await runWithTenant(db, alphaTenantId, (trx) =>
+    const byToken = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('audit_events')
             .select(['credential_kind', 'credential_id'])
@@ -317,7 +330,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // the table's only grants are SELECT, INSERT.
     let auditUpdateRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`UPDATE audit_events SET action = 'tampered'`.execute(trx)
@@ -330,7 +343,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // ...and a DELETE fails the same way — audit rows can never be erased.
     let auditDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM audit_events`.execute(trx)
@@ -382,12 +395,12 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects under RLS
-    const alphaScheds = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaScheds = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('job_schedules').selectAll().execute(),
     )
     expect(alphaScheds.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaScheds.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoScheds = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoScheds = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('job_schedules').selectAll().execute(),
     )
     expect(demoScheds.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -396,7 +409,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // write isolation: INSERT carrying the other tenant's id is rejected by WITH CHECK
     let scheduleWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('job_schedules')
                 .values({
@@ -415,14 +428,14 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(scheduleWriteRejected).toBe(true)
 
     // the scheduler's advance path: a scoped UPDATE of next_run_at succeeds under RLS
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .updateTable('job_schedules')
             .set({ next_run_at: new Date('2026-08-10T13:00:00.000Z') })
             .where('id', '=', alphaSchedule!.id)
             .execute(),
     )
-    const afterAdvance = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterAdvance = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('job_schedules')
             .select('next_run_at')
@@ -473,14 +486,14 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects under RLS
-    const alphaEndpoints = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaEndpoints = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('webhook_endpoints').selectAll().execute(),
     )
     expect(alphaEndpoints.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaEndpoints.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
     // jsonb event_kinds round-trips as a parsed array (read under RLS)
     expect((alphaEndpoints[0]!.event_kinds as string[])[0]).toBe('job.status_changed')
-    const demoEndpoints = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoEndpoints = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('webhook_endpoints').selectAll().execute(),
     )
     expect(demoEndpoints.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -489,7 +502,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // write isolation: INSERT carrying the other tenant's id is rejected by WITH CHECK
     let endpointWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('webhook_endpoints')
                 .values({
@@ -508,7 +521,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(endpointWriteRejected).toBe(true)
 
     // endpoints have a DELETE grant (the org-admin card removes them) — a scoped delete succeeds.
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.deleteFrom('webhook_endpoints').where('id', '=', alphaEndpoint!.id).execute(),
     )
     // re-seed one for the delivery FK below
@@ -554,26 +567,26 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, on deliveries via UNFILTERED selects under RLS
-    const alphaDeliveries = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaDeliveries = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('webhook_deliveries').selectAll().execute(),
     )
     expect(alphaDeliveries.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaDeliveries.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoDeliveries = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoDeliveries = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('webhook_deliveries').selectAll().execute(),
     )
     expect(demoDeliveries.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
     expect(demoDeliveries.filter((r) => r.tenant_id === demoTenantId).length).toBe(1)
 
     // the drain's advance path: a scoped UPDATE of status/attempt_count/next_attempt_at succeeds under RLS
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .updateTable('webhook_deliveries')
             .set({ status: 'delivered', attempt_count: 1, delivered_at: new Date('2026-08-03T13:01:00.000Z') })
             .where('id', '=', alphaDelivery!.id)
             .execute(),
     )
-    const afterDeliver = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterDeliver = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('webhook_deliveries')
             .select(['status', 'attempt_count'])
@@ -585,10 +598,10 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // endpoint delete cascades: removing an endpoint (a granted, tenant-scoped DELETE) also removes its
     // deliveries via ON DELETE CASCADE — under app_user + FORCE RLS, which is exactly why the app role
     // holds the DELETE grant on webhook_deliveries. After deleting alphaEndpoint2, alphaDelivery is gone.
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.deleteFrom('webhook_endpoints').where('id', '=', alphaEndpoint2!.id).execute(),
     )
-    const afterCascade = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterCascade = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('webhook_deliveries').select('id').where('id', '=', alphaDelivery!.id).execute(),
     )
     expect(afterCascade.length).toBe(0)
@@ -622,12 +635,12 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects under RLS
-    const alphaNotifs = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaNotifs = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('notifications').selectAll().execute(),
     )
     expect(alphaNotifs.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaNotifs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoNotifs = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoNotifs = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('notifications').selectAll().execute(),
     )
     expect(demoNotifs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -635,7 +648,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // write isolation: INSERT carrying the other tenant's id is rejected by WITH CHECK
     let notifWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('notifications')
                 .values({
@@ -653,14 +666,14 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(notifWriteRejected).toBe(true)
 
     // mark-read: a scoped UPDATE of read_at succeeds under RLS (the granted UPDATE path)
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .updateTable('notifications')
             .set({ read_at: new Date('2026-08-03T13:05:00.000Z') })
             .where('recipient_user_id', '=', 'user-alpha')
             .execute(),
     )
-    const afterRead = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterRead = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('notifications')
             .select('read_at')
@@ -692,17 +705,17 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         ])
         .execute()
 
-    const alphaPrefs = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaPrefs = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('notification_prefs').selectAll().execute(),
     )
     expect(alphaPrefs.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaPrefs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
 
     // prefs hold a DELETE grant (the grid can clear a pref back to default) — a scoped delete succeeds
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.deleteFrom('notification_prefs').where('user_id', '=', 'user-alpha').execute(),
     )
-    const afterPrefDelete = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterPrefDelete = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('notification_prefs').select('id').where('user_id', '=', 'user-alpha').execute(),
     )
     expect(afterPrefDelete.length).toBe(0)
@@ -753,14 +766,14 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects under RLS
-    const alphaInbound = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaInbound = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('inbound_emails').selectAll().execute(),
     )
     expect(alphaInbound.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaInbound.filter((r) => r.tenant_id === alphaTenantId).length).toBe(2)
     // the null-org row is contained by the SAME tenant scope
     expect(alphaInbound.filter((r) => r.org_id === null).length).toBe(1)
-    const demoInbound = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoInbound = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('inbound_emails').selectAll().execute(),
     )
     expect(demoInbound.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -768,7 +781,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // write isolation: INSERT carrying the other tenant's id is rejected by WITH CHECK
     let inboundWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('inbound_emails')
                 .values({
@@ -787,14 +800,14 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(inboundWriteRejected).toBe(true)
 
     // status update: a scoped UPDATE succeeds under RLS (the granted UPDATE path intake uses)
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .updateTable('inbound_emails')
             .set({ status: 'handled', handler: 'proof' })
             .where('to_email', '=', 'nope+proof@mail.test')
             .execute(),
     )
-    const afterStatus = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterStatus = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('inbound_emails')
             .select('status')
@@ -836,12 +849,12 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // (a) tenant isolation, both directions, via UNFILTERED selects under RLS.
-    const alphaAgreements = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaAgreements = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('agreements').selectAll().execute(),
     )
     expect(alphaAgreements.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaAgreements.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoAgreements = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoAgreements = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('agreements').selectAll().execute(),
     )
     expect(demoAgreements.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
@@ -850,7 +863,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // (a) write isolation: INSERT carrying the OTHER tenant's id is rejected by WITH CHECK.
     let agreementWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('agreements')
                 .values({
@@ -869,10 +882,10 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     expect(agreementWriteRejected).toBe(true)
 
     // (b) the version bump: a scoped UPDATE of version succeeds under RLS (the granted UPDATE path).
-    await runWithTenant(db, alphaTenantId, (trx) =>
+    await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.updateTable('agreements').set({ version: 2 }).where('id', '=', alphaAgreement!.id).execute(),
     )
-    const afterBump = await runWithTenant(db, alphaTenantId, (trx) =>
+    const afterBump = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('agreements').select('version').where('id', '=', alphaAgreement!.id).executeTakeFirstOrThrow(),
     )
     expect(Number(afterBump.version)).toBe(2)
@@ -880,7 +893,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // (c) DELETE denied at the privilege layer — only SELECT, INSERT, UPDATE are granted (durable record).
     let agreementDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM agreements`.execute(trx)
@@ -902,12 +915,12 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // (a) tenant isolation, both directions, via UNFILTERED selects under RLS.
-    const alphaAcceptances = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaAcceptances = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('agreement_acceptances').selectAll().execute(),
     )
     expect(alphaAcceptances.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(alphaAcceptances.filter((r) => r.tenant_id === alphaTenantId).length).toBe(1)
-    const demoAcceptances = await runWithTenant(db, demoTenantId, (trx) =>
+    const demoAcceptances = await runWithTenant(appDb, demoTenantId, (trx) =>
         trx.selectFrom('agreement_acceptances').selectAll().execute(),
     )
     expect(demoAcceptances.length).toBe(0)
@@ -915,7 +928,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // (a) write isolation: INSERT carrying the OTHER tenant's id is rejected by WITH CHECK.
     let acceptanceWriteRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('agreement_acceptances')
                 .values({
@@ -935,7 +948,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // the table's only grants are SELECT, INSERT.
     let acceptanceUpdateRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`UPDATE agreement_acceptances SET agreement_version = 99`.execute(trx)
@@ -948,7 +961,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     // ...and a DELETE fails the same way — an acceptance can never be erased.
     let acceptanceDeleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM agreement_acceptances`.execute(trx)
@@ -1047,7 +1060,7 @@ export const frameworkRlsProofs: RlsProofSuite = async ({
     }
 
     // (a) the batch really does share one instant — otherwise the walk below proves nothing hard.
-    const alphaPageStamps = await runWithTenant(db, alphaTenantId, (trx) =>
+    const alphaPageStamps = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('jobs').select('created_at').where('org_id', '=', pageOrgAlpha!.id).execute(),
     )
     expect(new Set(alphaPageStamps.map((r) => String(r.created_at))).size).toBe(1)
