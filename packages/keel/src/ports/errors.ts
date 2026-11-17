@@ -25,7 +25,8 @@ export class NotFoundError extends Error {
 
 /** Thrown when a precondition the caller supplied no longer holds: a storage `copy` whose `ifMatch` names a
  *  version of the source that has since changed. The caller read something, decided, and the thing moved, so
- *  it should read again rather than retry. Route glue maps it to a 409 or a 412 as the route sees fit. */
+ *  it should read again rather than retry. No route glue maps it (`withPortErrors` rethrows it, so
+ *  it becomes a 500): a route that passes `ifMatch` catches it and answers a 409 or a 412. */
 export class PreconditionFailedError extends Error {
     constructor(message = 'precondition failed') {
         super(message)

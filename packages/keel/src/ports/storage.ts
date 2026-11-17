@@ -11,9 +11,10 @@ export interface StoredObjectInfo {
     contentType: string
     /**
      * An OPAQUE identifier of this version of the object. Compare two for equality; pass one back UNCHANGED
-     * as `copy`'s `ifMatch`; never parse it or assume a format or a length. Heads of one key that give the same
-     * `etag` mean it was not rewritten in between; whether rewriting it with identical bytes changes the `etag`
-     * is not promised either way. The real adapter returns S3's ETag exactly as S3 sent it (quotes included);
+     * as `copy`'s `ifMatch`; never parse it or assume a format or a length. Heads of one key that give different
+     * `etag`s mean its bytes changed in between. The same `etag` means the same BYTES, not that the object was
+     * not rewritten: a rewrite with identical bytes and another content type keeps it on the fake, and on S3
+     * that depends on how the object is stored, so rely on neither. The real adapter returns S3's ETag exactly as S3 sent it (quotes included);
      * the fake returns a quoted SHA-256 of the bytes.
      */
     etag: string
@@ -27,7 +28,9 @@ export interface CopyOptions {
      * Copy only if the source is STILL the version `head` reported: pass `info.etag` unchanged. When it no
      * longer matches, `copy` throws `PreconditionFailedError` and copies nothing. S3 evaluates this as part of
      * the copy (`CopySourceIfMatch`); the fake compares the very bytes it is about to publish. Without it,
-     * `copy` copies whatever is at `from` when it runs.
+     * `copy` copies whatever is at `from` when it runs. It pins the BYTES, and so the size; it does not pin the
+     * content type, which neither adapter's etag covers, so a content-type check made from `head` stays advisory
+     * (an upload target's `eq Content-Type` condition is what holds the type at upload).
      */
     ifMatch?: string
 }

@@ -2157,7 +2157,10 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
 - **Named `head`, after the port's verbs.** `put`, `get` and `delete` are HTTP verbs already; `head` is `get`
   without the body and is S3's own name for it. `stat` would have been the filesystem's.
 - **It returns `StoredObjectInfo { size, contentType, etag, lastModified }`.** Size and content type are what
-  finalize needs. The etag is there so the check can be tied to the copy (below). `lastModified` is the one
+  finalize needs. The etag is there so the check can be tied to the copy (below); it pins the bytes, so the size
+  check is exact, while the content-type check stays advisory, because neither adapter's etag covers the content
+  type (a rewrite with identical bytes and another type keeps it). A flow that must hold the type relies on the
+  upload target's `eq Content-Type` condition. `lastModified` is the one
   field nobody asked for; both adapters give it truthfully and a stat without a time looks wrong, but nothing
   else depends on it.
 - **The etag is opaque.** AWS's own reference calls it "an opaque identifier", so callers compare two for equality
@@ -2178,8 +2181,8 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
 - **A stat-then-copy check is advisory; `ifMatch` makes it exact.** The object can change between the two
   calls, so `copy(from, to, { ifMatch: info.etag })` copies only if the source is still that version, else throws
   the new `PreconditionFailedError` and copies nothing. Real: S3's `CopySourceIfMatch`, which S3 evaluates with
-  the copy. Fake: it compares the staged copy's hash, the very bytes about to be published, so what lands is
-  exactly what matched even if a writer replaces the source mid-copy (a test races exactly that). The order
+  the copy. Fake: it compares the staged copy's hash, the very bytes about to be published, so the bytes that land
+  are exactly the ones that matched even if a writer replaces the source mid-copy (a test races exactly that). The order
   of the checks is same key, missing source, precondition. No route glue maps the new error; the caller says
   409 or 412.
 - **412 is inferred, not read.** The CopyObject reference states 412 for its other conditional headers and gives no
@@ -2191,8 +2194,11 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
 - **The finalize sequence an app uses:**
 
     ```ts
-    const info = await storage.head(stagedKey) // null: the staged file is gone
-    if (!info || info.size > MAX_BYTES || info.contentType !== EXPECTED_TYPE) {
+    import { NotFoundError, PreconditionFailedError } from 'keel/ports/errors'
+
+    const info = await storage.head(stagedKey)
+    if (!info) return (await storage.head(finalKey)) ? alreadyFinalized : stagedFileVanished
+    if (info.size > MAX_BYTES || info.contentType !== EXPECTED_TYPE) {
         await storage.delete([stagedKey])
         return rejected
     }
@@ -2208,5 +2214,5 @@ generic primitive (S3 `HeadObject`; a stat in the fake).
     ```
 
     A retry after a copy that succeeded and a delete that failed finds the staged file again, gets the same etag,
-    and converges over `finalKey`. A retry after both succeeded gets `null` from `head(stagedKey)`; the caller
-    reads that as "already finalized" by checking `head(finalKey)`.
+    and converges over `finalKey`. A retry after both succeeded gets `null` from `head(stagedKey)`, which the
+    first line of the snippet reads as "already finalized" by checking `head(finalKey)`.
