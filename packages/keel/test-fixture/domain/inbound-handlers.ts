@@ -1,5 +1,6 @@
+import { abilityActorFromCredential } from 'keel/authz/authorize'
 import { defineAbilitiesFor } from 'keel/core/abilities'
-import { recordAuditEvent } from 'keel/db/audit'
+import { auditActorOf, recordAuditEvent } from 'keel/db/audit'
 import type { InboundContext, InboundHandlerResult } from 'keel/inbound-email/handlers'
 import { insertDocket } from './dockets'
 
@@ -9,10 +10,11 @@ import { insertDocket } from './dockets'
  * intake through it, which is why the slug is fixed rather than arbitrary.
  *
  * SENDER MATCHING + POSTURE (the same closed posture the template teaches): the sender's address is
- * matched against the org's ACTIVE members via the auth port, and the matched member must pass the
- * SAME ability check a product route would enforce (`can('create', Docket)`) — so a `restricted`
- * member whom the ability model denies in the UI is refused here too. An unmatched or unauthorized
- * sender does not open a docket; the message is filed 'unmatched'.
+ * matched against the org's ACTIVE members via the auth port, and the matched member becomes a PERSON
+ * actor whose credential is this email (`abilityActorFromCredential` re-reads their standing). They
+ * must pass the SAME ability check a product route would enforce (`can('create', Docket)`), so a
+ * `restricted` member whom the ability model denies in the UI is refused here too. An unmatched or
+ * unauthorized sender does not open a docket; the message is filed 'unmatched'.
  */
 export const supportHandler = async (ctx: InboundContext): Promise<InboundHandlerResult> => {
     const members = await ctx.auth.listMembers(ctx.orgSlug)
@@ -21,14 +23,15 @@ export const supportHandler = async (ctx: InboundContext): Promise<InboundHandle
         return { status: 'unmatched', reason: `sender ${ctx.fromEmail} is not a member of ${ctx.orgSlug}` }
     }
 
-    const ability = defineAbilitiesFor({
+    const actor = await abilityActorFromCredential(ctx.auth, {
         userId: sender.id,
-        role: sender.role,
-        restricted: sender.role === 'restricted',
-        activeOrgId: ctx.orgId,
-        manageAll: false,
+        org: ctx.org,
+        credential: { kind: 'inbound-email', id: ctx.emailId },
     })
-    if (!ability.can('create', { type: 'Docket', orgId: ctx.orgId })) {
+    if (!actor) {
+        return { status: 'unmatched', reason: `sender ${ctx.fromEmail} is not a member of ${ctx.orgSlug}` }
+    }
+    if (!defineAbilitiesFor(actor).can('create', { type: 'Docket', orgId: ctx.orgId })) {
         return { status: 'unmatched', reason: `sender ${ctx.fromEmail} may not open dockets in ${ctx.orgSlug}` }
     }
 
@@ -46,10 +49,10 @@ export const supportHandler = async (ctx: InboundContext): Promise<InboundHandle
     await recordAuditEvent(ctx.db, {
         tenantId: ctx.tenantId,
         orgId: ctx.orgId,
-        actorUserId: sender.id,
+        ...auditActorOf(actor),
         action: 'docket.created',
         subjectType: 'Docket',
         subjectId: docket.id,
     })
-    return { status: 'handled', actorUserId: sender.id, subjectId: docket.id }
+    return { status: 'handled', ...auditActorOf(actor), subjectId: docket.id }
 }

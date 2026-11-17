@@ -1,3 +1,5 @@
+import type { Credential } from '../core/abilities'
+import type { OrgIdentity } from '../db/org-lookup'
 import type { AuthPort } from '../ports/auth'
 import type { DbPort } from '../ports/db'
 import { appInboundHandlers } from '@app-config/inbound-email'
@@ -18,6 +20,10 @@ export interface InboundContext {
     tenantId: string
     orgId: string
     orgSlug: string
+    /** The same org as `orgId` + `orgSlug`, as one value from `orgIdentityForSlug`'s one row, read in the
+     *  tenant intake resolved: what `abilityActorFromCredential` takes, so a handler cannot pair one org's
+     *  id with another's slug. */
+    org: OrgIdentity
     /** Normalized sender addr-spec (lowercased, display name stripped). */
     fromEmail: string
     subject: string
@@ -39,7 +45,18 @@ export interface InboundContext {
  * name what the email produced (`as`, keel/core/presets.ts) for a later step to act on.
  */
 export type InboundHandlerResult =
-    { status: 'handled'; actorUserId: string; subjectId?: string } | { status: 'unmatched'; reason: string }
+    | {
+          status: 'handled'
+          actorUserId: string
+          /**
+           * The credential the actor acted with, for the intake's `inbound-email.received` row: the email
+           * itself when the handler matched a member (`auditActorOf(actor)` gives both fields). Omitted or
+           * null, the row records none, which is right for a synthetic or system actor.
+           */
+          credential?: Credential | null
+          subjectId?: string
+      }
+    | { status: 'unmatched'; reason: string }
 
 export type InboundHandler = (ctx: InboundContext) => Promise<InboundHandlerResult>
 

@@ -6,8 +6,16 @@ import { findOrg, people, type SeedPerson } from '@app-config/seed'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { LOCALES, type Locale } from '../../core/locale'
-import { isRole, type Role } from '../../core/roles'
-import type { AuthPort, AuthUser, InviteInput, Membership, OrgRef, ProfileUpdate } from '../../ports/auth'
+import { isRestricted, isRole, type Role } from '../../core/roles'
+import type {
+    AuthPort,
+    AuthUser,
+    InviteInput,
+    Membership,
+    MemberStanding,
+    OrgRef,
+    ProfileUpdate,
+} from '../../ports/auth'
 import { AuthRequiredError, ForbiddenError } from '../../ports/errors'
 import { writeFileAtomicSync, writeJsonAtomic } from './atomic-write'
 import { readSimulatorState, updatePersonState, writeViewpointCookie } from './simulator'
@@ -117,7 +125,7 @@ function toUser(person: SeedPerson, activeOrgSlug: string): AuthUser {
         // Ambient site: a person's tenant is fixed, never the active org's business.
         tenantSlug: person.tenantSlug,
         orgSlug: membership.orgSlug,
-        restricted: person.restricted,
+        restricted: isRestricted(person.restricted, membership.role),
     }
 }
 
@@ -264,6 +272,15 @@ export const fakeAuth: AuthPort = {
             .filter((i) => i.orgSlug === orgSlug)
             .map((i) => ({ id: i.id, name: null, email: i.email, role: i.role, status: 'invited' as const }))
         return [...members, ...invited]
+    },
+
+    async getMember(orgSlug: string, userId: string): Promise<MemberStanding | null> {
+        // Read afresh from the world on every call (seed + accepted invites): nothing is cached, so a
+        // person who leaves the org is a non-member on the very next call.
+        const person = findPerson(userId)
+        const membership = person?.memberships.find((m) => m.orgSlug === orgSlug)
+        if (!person || !membership) return null
+        return { role: membership.role, restricted: isRestricted(person.restricted, membership.role) }
     },
 
     async createInvite(invite: InviteInput): Promise<Membership> {

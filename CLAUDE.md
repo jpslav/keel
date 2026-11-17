@@ -119,7 +119,7 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   because `@app-config/*` is a bare specifier and a single alias can only name one app, PLUS a `keel`
   project that runs the packages' suites against the framework's own seam
   (**`packages/keel/test-fixture`** — see below). keel's seam-conformance tests (i18n partition/parity,
-  the pglite RLS suite, the demo-presets check) run under every app project as well, and that is what proves the seam against
+  the pglite RLS suite, the demo-presets check, the migration numbering and upgrade check) run under every app project as well, and that is what proves the seam against
   real apps rather than only against the fixture. E2E
   lives in `apps/*/tests/e2e/` (showcase on :3000, starter on :3100). In a LINKED WORKTREE both ports
   are derived per checkout by `scripts/ports.mjs`, so parallel agent sessions don't adopt each other's
@@ -175,7 +175,9 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `scripts/init-app.ts` so the gate and the adoption rewriter cannot disagree about scope. The dated
   records (`build-notes.md`, `decision-log.md`, ADR bodies and anything appended to them) are exempt — see
   `docs/README.md` for the split. If you move a directory, the gate is what tells you which docs you
-  just falsified.
+  just falsified. A citation of `apps/showcase` or `apps/starter` is checked strictly while that app
+  exists and passes where it does not (it then names keel's reference app, and a doc merged in from
+  upstream must not turn an adopter's gate red); write `apps/<app>/…` when you mean the reader's own app.
 - **The app's identity is a script, not a checklist**: `pnpm init-app <slug> [--repo <name>] [--eject-showcase]`
   (`scripts/init-app.ts`). Anything that names an app directory or the product's display name belongs
   in the surface that script covers — and **never hard-code the product name in a test**; specs read

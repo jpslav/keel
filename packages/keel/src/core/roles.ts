@@ -35,3 +35,13 @@ export function isAssignableRole(value: string): value is Role {
 export function canManageOrg(role: Role): boolean {
     return ORG_MANAGER_ROLES.includes(role)
 }
+
+/**
+ * Whether a member is RESTRICTED: by their own `restricted` flag, or by holding the `restricted` role in
+ * the org in question. This template has both readings. The seed sets both, while a real-mode invite
+ * writes only the role, so reading the flag alone left a `restricted` invitee unrestricted. Both auth
+ * adapters derive `AuthUser.restricted` and `getMember`'s standing through this one function.
+ */
+export function isRestricted(flag: boolean | undefined, role: Role): boolean {
+    return flag === true || role === 'restricted'
+}

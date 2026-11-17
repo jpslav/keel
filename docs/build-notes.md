@@ -1523,6 +1523,97 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   passed the `process.env` ban outright. A key wrapped in a TypeScript assertion (`['getDb' as const]`) is still out
   of reach.
 
+## An e2e wait that the page being left also passes (2026-11-16, `test/escalations-flake`)
+
+`escalations.spec.ts` failed or hit the 60 s test timeout in local `pnpm verify` on a loaded machine (load
+average 30 to 300) and was green in CI and alone. Two mechanisms, both invisible when the server answers
+fast:
+
+- **A "did it land?" check that the OLD document also satisfies lets the test race the switch.** An org
+  switch is a POST then `location.reload()`; a Simulator person switch is a POST then `location.assign()`.
+  Until the new document commits, the old page stays on screen and interactive. `switchOrg` asserted that
+  `escalations-card` was visible, which it is before and after. `switchPerson` waited on a URL regex the
+  page already matched and on `active-tenant`, which reads `Northwind Support` for Dana and for Sam alike.
+  Under load the gap is seconds wide, and the test went on as the previous person: the "member is read-only"
+  test saw Dana's `escalation-accept-*` button. Fix: `untilNewDocument` (`tests/e2e/support/new-document.ts`)
+  stamps the old `window` and waits for the stamp to vanish, the idiom `simulator-jobs` and
+  `simulator-snapshots` already hand-rolled; `pickOrg` now returns only once the switcher shows the picked
+  org's name; the person switch asserts `signed-in-as`.
+- **A bare `click()` inside `toPass` cannot be retried.** `createRequest` clicked the dropdown trigger, then
+  `getByRole('option').click()`. Clicks carry no timeout of their own, so on a page where the option never
+  arrives (the dropdown closed by the reload, or the option absent on the org being left) the click waited out
+  the 60 s test timeout and `toPass` never ran a second attempt; the trace showed one 56 s click. Each step
+  in the loop now has a 2 s timeout, and the trigger, which toggles the dropdown, is clicked only when the
+  option is not already visible.
+
+The hop to the dashboard after a person switch (`reachDashboard`, `support/people.ts`) clicks the nav button
+exactly once and only when the person landed elsewhere, after `data-hydrated` shows on the Simulator pill
+(closed) or panel (open; a person switch leaves it open). Gating on the pill alone hung on `/profile`, where
+the panel is the element that carries it.
+
+- **CPU load alone did not reproduce it; slow responses from the two switch routes did.** 16 `yes` loops on a
+  warm dev server at load ~200 passed the unfixed spec 12/12. Adding 1.5 s to `POST /api/simulator/viewpoint`
+  and `POST /api/auth/org` (a temporary edit, reverted) failed it 6/9, where the fixed spec passed 15/15. The
+  realistic trigger is a route's first, uncompiled hit on a loaded machine. To reproduce: delay those two
+  handlers, run `escalations.spec.ts` with `--repeat-each=3 --retries=0`, and expect red on the member and
+  bystander tests.
+- **A cold dev server at load ~250 can run a test out of its 60 s without any race.** The first test of a
+  cold run took 34 to 52 s end to end in six trials, and in two earlier trials that timed out, `signInAs`
+  alone took 42 and 52 s (`/en/dashboard` took 24 s to answer in one). That is the budget the config's
+  `timeout` comment describes, not a bug in a test. CI avoids it by running the production build
+  (`E2E_BUILD`).
+- `tests/e2e/destructive/notifications.spec.ts` carried the same two helper copies and got the same changes.
+  `tenancy.spec.ts`'s `switchPerson` has the same second hop, which waits on a URL it may already be on; its
+  first hop is sound because that switch changes the tenant name. It was left alone: with the old
+  `pickOrg` and the same 1.5 s latency, `tenancy.spec.ts` passed 10 of 10.
+
+## Actors that are not sessions, in `authorize()` (2026-11-16, `feat/authorize-non-session-actors`)
+
+- **An exemption justified "by construction" names a check that isn't there.** The scan's `service/`
+  entry was honest about its gate: `mustMatch` proved the route used `withServiceCaller`. The reason,
+  "org-scoped by construction", was the absence of a per-action check, and no rule said what a service
+  caller could do. So when a mechanism arrives that can make the check, retire the exemption. Leaving it
+  beside the new path keeps a second way through the gate.
+- **Don't hand a new kind of caller to rules written for an old kind.** The cheap version of this change
+  gave a machine a role and passed it to `appAbilityRules`. It would have compiled and passed every
+  existing test. It would also have handed every machine a member's authoring powers, because both
+  apps' person rules let any non-restricted member author the app's own subjects (the showcase's tickets and attachments, the starter's items). A separate
+  rule function with a `false` default is the version that fails closed.
+- **Make "decide this for every member" a type error.** `frameworkMachineRules` is a
+  `Record<BaseSubjectType, …>`, so adding a framework subject without a machine decision fails
+  `tsc` (seen: TS2741). The person rules' `switch` has no such check.
+- **A rule a caller must not break belongs in a signature or an evaluator, not in a docstring.** "Never
+  cache a role in a token" holds because `abilityActorFromCredential` has no role parameter: it reads
+  the standing itself, on every call. "Only a session wields `manageAll`" holds because
+  `defineAbilitiesFor` ignores the field for any other credential. Both started as advice to whoever
+  builds an actor, and an adopter had already built one with a placeholder role.
+- **Ask who the caller IS before giving it a shape.** The first cut of this work treated every
+  non-session caller as a machine. The adopter's token belongs to a person and acts as that person, so
+  it needed a person actor with a credential, not a principal of its own. The difference decides
+  which rules judge it.
+- **Two migration sequences interleaved by name need an unordered migrator, and CI cannot tell you.**
+  Framework migrations are 0001–0999 and app migrations 1001 and up, so a framework migration added in an
+  update sorts before app migrations a database already ran. Kysely's default refuses that. Every CI
+  database starts empty, so the gate was green; a reused local world (the starter's `.data`) was the only
+  place it showed. When a change adds a framework migration, run the e2e against an existing world, not
+  only a fresh one.
+
+## A gate that is green at adoption time can be red at the next merge (2026-11-16, `fix/adopter-merge-friction`)
+
+- **Every adoption gate is checked on the day `init-app` runs, and the failure that matters comes later.**
+  `doc-paths.test.ts` passed in an ejected tree right after `init-app` and went red after the next upstream
+  merge, because the merge brought a doc that named `apps/starter`, and `init-app` had already finished. The
+  adoption probe (`pnpm init-app …` then `pnpm verify`) cannot see this class. A test of an adoption-time
+  tool needs a second step that plays an upstream merge into the adopted tree, which is what the identity
+  suite now does with a new doc laid into its real adopted probe trees. And the first version of the rule keyed
+  "the app is absent" on its directory, which the next merge falsifies: git silently brings back every NEW file
+  upstream adds under a directory you deleted, so a directory with one stray file looked like the app. Key on
+  what makes it the app (its `package.json`), and test the resurrected-directory state, not only the clean one.
+- **A number kept in a shared script is an "edit the shared file" instruction in disguise.** The demo size
+  script's default was the showcase's budget, and its header said to record changes there. Nothing about it
+  looked like an instruction to edit a keel-owned file until an adopter tried to follow it. Ask of any value
+  an adopter is told to change: whose file is it, and will an upstream merge touch it?
+
 ## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
 
 - **An untyped string parameter is `varchar` on the real Data API.** So `uuid_column = :id` fails on

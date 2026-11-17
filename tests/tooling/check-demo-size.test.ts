@@ -12,7 +12,7 @@ import { makeTestTmpDir } from '../support/tmp-dir'
  */
 const SCRIPT = fileURLToPath(new URL('../../scripts/check-demo-size.mjs', import.meta.url))
 
-/** An app directory whose built demo is exactly `bytes` long, checked against `budget` (default: the script's own). */
+/** An app directory whose built demo is exactly `bytes` long, checked against `budget` (none: the script is run bare). */
 function run(bytes: number, budget?: string, env: Record<string, string> = {}) {
     const app = makeTestTmpDir('keel-demo-size-')
     mkdirSync(path.join(app, 'dist-demo'))
@@ -76,12 +76,19 @@ describe('check-demo-size', () => {
         }
     })
 
-    it("falls back to the showcase's number when no argument is passed", () => {
-        // read from the script, so changing the default on purpose does not also mean editing this test
-        const fallback = Number(
-            /DEFAULT_BUDGET_BYTES = ([\d_]+)/.exec(readFileSync(SCRIPT, 'utf8'))![1]!.replaceAll('_', ''),
-        )
-        expect(run(fallback + 1).status).toBe(1)
-        expect(run(fallback).status).toBe(0)
+    it('refuses to run without a budget, rather than judging an app by a number that is not its own', () => {
+        const { status, err } = run(10)
+        expect(status).toBe(1)
+        expect(err).toContain("pass this app's budget")
+        expect(err).toContain('`check:demo-size`')
+    })
+
+    it("holds no number and no budget history of its own, because an adopter must never need to edit keel's script", () => {
+        // An upstream merge changes this file, so a number or a dated entry written into it is a conflict on
+        // every later merge. The number is each app's package.json argument; the history lives with the app (the starter's DEMO-SIZE.md; the showcase's is in docs/decision-log.md).
+        const source = readFileSync(SCRIPT, 'utf8')
+        expect(source).not.toMatch(/DEFAULT_BUDGET|\bRE-BASED\b|\bRAISED\b|^\/\/ HISTORY/m)
+        expect(source).not.toMatch(/\b\d{3}_?\d{3}\b/)
+        expect(source).toContain('DEMO-SIZE.md')
     })
 })

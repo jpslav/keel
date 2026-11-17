@@ -515,3 +515,210 @@ constant, `SRC_EXT`, and hold for all eight. The carve-outs do not: each names w
 `*.test.{ts,tsx}`, Ladle's stories, Next's four `next.config` names, Next's instrumentation hooks), so a
 file nothing loads under that name keeps every ban. `tests/lint/extensions.test.ts` and
 `tests/lint/tenancy.test.ts` pin both.
+
+## Addendum (2026-11-16): `authorize()` judges actors that are not sessions
+
+**Why.** `authorize()` took only a session's `AuthUser`, so a caller that was not a browser session
+could not reach the choke point. An adopter (the sharing site's console) hit this with two callers. A
+CLI holds a **personal API token**: it acts as the person who approved it, with that person's current
+role, and removing the person stops their tokens at once. That is the console's design of record as its
+token-branch worker reported it through the keel manager; its `main` has the token verifier only as a
+seam. CI will hold a GitHub OIDC token: it is a
+principal of its own, not a person. The console worked around this by building a stand-in `AuthUser`
+for the token's owner, with placeholder role and locale. keel had one non-person path of its own,
+the per-org service keys. They sat under a `service/` prefix exemption whose reason was "org-scoped by
+construction", which gave a service route no per-action check and no rule anyone could read.
+
+**Actors carry a credential.** An actor now records HOW it proved who it is, not only who it is. A
+`Credential` is `{ kind, id }`. `id` names WHICH credential (a token's row id, a service key's id, the
+inbound email's id), so an audit row can say which one acted. It is never a secret, and it is `null`
+for a session. The kinds are composed unions, like every other framework vocabulary:
+
+- `PersonCredentialKind = 'session' | 'inbound-email' | AppPersonCredentialKind`
+- `MachineCredentialKind = 'service-key' | AppMachineCredentialKind`
+
+The two `App…CredentialKind` types are new type-only exports of the abilities seam (`never` when
+unused), so the console's `api-token` and `cli-login`, and later `github-oidc`, need no framework edit.
+The two unions must not overlap: a type-level check in `keel/core/abilities` fails the build if an app
+registers the same kind on both sides.
+
+**Two kinds of actor.** `keel/core/abilities` exports `Actor = AbilityActor | MachineActor`.
+
+- **A person.** `AbilityActor` gains an optional `kind: 'person'` and an optional `credential`, so every
+  existing literal that states a session, or sets `manageAll: false`, still compiles and is still judged by
+  the person rules. (A literal that could set `manageAll` without stating a session no longer compiles;
+  see the review below.) A missing credential means
+  "not stated", never "a session": such an actor doesn't wield `manageAll`, and the audit trail records
+  no credential for it. The three literals in this repo that stand for a session (the two static shells
+  and a preset check) now say so.
+- **A machine.** `MachineActor` is `{ kind: 'machine', credential, principalId, activeOrgId }`, where
+  `principalId` is `<credential kind>:<id>`. It has no `role`, no `restricted` flag and no `manageAll`.
+
+**A person who reached the app without a session.** `abilityActorFromCredential(auth, { userId, org,
+credential })` builds the person behind an inbound email or a personal token, and it owns the property
+the adopter asked for: role and `restricted` are read from the auth port on every call, through a new
+port method, `getMember(orgSlug, userId)` (see ADR-0003's addendum of this date).
+
+- It takes no role, so a role can be neither cached in the credential nor derived from it.
+- It returns `null` when the person is no longer an active member, so a removed person's credential
+  fails on the next call. Tests prove both by changing the world between two calls.
+- Such a person never wields `manageAll`. `defineAbilitiesFor` honours `manageAll` only for an actor
+  that states a `session` credential, whatever else the actor says, and hands the app's rules the same
+  effective value. The rule holds without trusting whoever built the actor.
+- It refuses, at run time, to build from a `session` credential, which the type alone cannot stop if an
+  app registers that name.
+
+keel exercises this kind itself through inbound email. The sender is matched by address, as before,
+and then becomes a person actor whose credential is the email. Their standing now comes from the same
+place their session's does. Before, inbound email derived `restricted` from the role alone, while a
+real-mode session read only the flag; both now use `isRestricted(flag, role)` (ADR-0003 addendum).
+
+**Narrowing is by credential kind, in the app's rules.** The console needs "publisher administration
+takes a browser session". The app's rules see `actor.credential.kind`, so that is one line in
+`appAbilityRules`; the fixture's Docket rule does exactly this for `delete`. A per-CREDENTIAL ceiling
+(one token allowed less than its owner) is not built, because nothing needs it yet. Its place is marked
+in `defineAbilitiesFor`, where it would intersect `can()` for every caller.
+
+**One choke point, two forms.** `authorize(actor, action, subject)` sits beside
+`authorize(user, activeOrgId, action, subject)`. The second form is shorthand for the first with
+`abilityActorFromUser` (which now records a `session` credential), so every existing call is unchanged.
+The scan's `authorize(` pattern matches both forms, and its failure message now names the three
+non-session constructors.
+
+**Machines are judged by a separate table, and it denies by default.**
+
+- **Base subjects** go to `frameworkMachineRules`, a record keyed by `BaseSubjectType`, so a new base
+  subject fails the typecheck until someone decides what machines may do with it. Its one grant: Job
+  `read`/`update` in the machine's own org, for keel's `service-key` credential only. That is what the
+  job service API exists for.
+- **App subjects** go to a new seam export, `appMachineAbilityRules`, which conforms to
+  `MachineAbilityRules`. The empty registration returns `false`. The export joins the enumerated
+  `abilities` value imports, since it is an ability rule.
+
+Machines were not passed to `appAbilityRules`. Both apps' person rules let any member who is not
+`restricted` author the app's own subjects (the showcase's tickets and attachments, the starter's items), so any role given
+to a machine would hand it that authoring by default.
+
+**Building a machine.**
+
+- `abilityActorFromService(identity)` builds `service-key:<org slug>`, acting in its key's org. Its
+  credential id is the `service_keys` row that verified the call (`ServiceIdentity` gains `keyId`).
+- `machineActor({ kind, id, credentialId?, activeOrgId })` is for the app's own verifier. `kind` is typed
+  to the app's machine kinds. At run time it also refuses keel's own kinds and `system` (which keel's
+  background writers record as), a kind that is not a lowercase slug, and an empty id or org.
+
+**Tenant.** The tenant binding is unchanged. An actor carries its org; the tenant comes from the
+verified credential and still scopes every query through `withTenant`, and `authorize()` stays pure. A
+credential that names its tenant, such as the console's `pages_<tenant slug>_…` tokens, already
+resolves through `tenantIdForSlug`. A credential that does not is
+`.claude/future-tasks/service-auth-flexibility.md`'s third item.
+
+**Audit.** Framework migration `0014_audit_credential` adds two nullable columns to `audit_events`:
+`credential_kind` and `credential_id`. NULL means "not recorded", which is true of every older row and
+of writers that don't pass a credential. A NOT NULL default would have claimed a kind nobody can vouch
+for. `app_user` keeps SELECT and INSERT only, because table-level grants cover added columns, and the
+RLS proofs insert and read the new columns as `app_user` on both engines.
+`auditActorOf(actor)` gives `{ actorUserId, credential }`. A person is recorded by user id, with
+their credential. A machine is recorded by its principal id. Keel's inbound intake, the showcase's email handlers and the fixture's handler write it. The session routes still write `actorUserId` alone, so their rows record NULL.
+
+**The migrator now runs unordered.** 0014 is the first framework migration added after both apps had
+run their own (≥1001). It surfaced a defect in how the two numbered sequences compose: Kysely's default
+strict ordering refused it on any database that had run an app migration ("corrupted migrations:
+expected … 1001_items … but 0014_audit_credential was found"). So no framework migration could reach an
+existing database, an adopter's deployed one included. CI never saw this, because every CI database
+starts empty. A reused local world did. `migrateToLatest` now sets `allowUnorderedMigrations`: pending
+migrations still run in name order, and a migration the database ran that has since disappeared still
+fails.
+
+The cost is a rule. A new framework migration runs after the app's migrations on an upgraded database
+and before them on a fresh one, so it must have the same effect in either position. It names the
+objects it touches, and never sweeps the catalog with `GRANT … ON ALL TABLES` or
+`ALTER DEFAULT PRIVILEGES`. Strict ordering was also the only thing that refused an app migration
+numbered into the framework range. Both are now a seam-conformance test,
+`packages/keel/src/db/migrate.test.ts`, run against the fixture and every app:
+
+- it holds every app migration to ≥1001, with no name shared with a framework one;
+- it migrates an "old" database forward and compares it with a fresh one: RLS enabled and forced per
+  table, policies (with roles), `app_user`'s table and column grants, columns, constraints, indexes,
+  triggers and functions.
+
+Under strict ordering the upgrade fails with the production error. A catalog-sweeping `GRANT` fails the
+comparison, and so does a sweep that un-forces RLS on whatever tables exist. A migration that un-forces RLS
+on a NAMED table is the same in either position, so the comparison passes it. `rls-pglite.test.ts` catches
+that one instead ("has RLS but not FORCE ROW LEVEL SECURITY", via the RLS coverage proof).
+
+The comparison's "old" database is built the way it really stood before the update. The registry, minus
+the newest framework migration, is applied one migration at a time, and the build stops at the first app
+migration that cannot run without it. An app migration that builds on a new framework migration arrives
+with it, and the two apply together. A synthetic registry in the same file pins that case: an app index
+on a column only the newest framework migration adds.
+
+Unordered mode had also stopped Kysely refusing an app migration that runs after a later app migration,
+as two branches' 1005 and 1006 can. So `migrateToLatest` runs a preflight first: a pending migration that
+sorts before an executed one of its OWN sequence is refused, and only framework-before-app may run out
+of order. The preflight leaves one Kysely behaviour alone: a database that ran a migration the registry
+no longer has still gets the "is missing" error, not a misleading out-of-order one.
+
+The preflight reads the migration table outside Kysely's lock. Two migrators running the SAME release
+are safe. Two different releases migrating one database at the same moment could each pass the check
+on a stale read. That is accepted: keel migrates once per deploy.
+
+**The `service/` exemption is retired.** The showcase's one mutating service route,
+`service/jobs/[id]/status/route.ts`, calls `authorize(actor, 'update', Job)` with the actor that
+`withServiceCaller` now passes. The fixture's `service/jobs/route.ts` is the scan's machine route, named
+as an invariant and no longer backed by an exemption. The body's "a service or webhook route must contain its signature wrapper" still holds for both: for
+webhooks as the exemption's gate, for service routes as a gate required alongside `authorize(` (below). The cost falls on adopters: a mutating
+route under `api/service/` must now call `authorize(...)`, and the scan's message says how.
+
+What the old exemption also guaranteed is kept: under `service/` the scan requires `withServiceCaller`
+**in addition to** `authorize(` (`REQUIRED_ALONGSIDE`). Otherwise a route could satisfy the scan by
+authorizing a machine literal built from the request. The gate proves the wrapper is present, not that
+the actor authorized is the one the wrapper built. That is the kind-not-claim limit stated above.
+
+The broader fix was considered and not built. A lint rule banning `kind: 'machine'` literals outside
+`keel/authz` would catch a fabricated actor anywhere. But keel has never guarded against a route
+fabricating an `AuthUser` either, and the fixture's own routes build actors by hand to be scanned.
+
+**What stays in the app.** keel owns the vocabulary, the constructors, the fresh standing, the
+`manageAll` rule and the audit columns. A personal token's storage, hashing, issuance and revocation
+stay in the app for now. They plausibly pass the universality test
+(`.claude/future-tasks/personal-api-tokens.md`).
+
+**Not done:**
+
+- The session routes don't record their `session` credential yet.
+- The naming section says a service caller claiming a job "IS the authorization actor on the resulting
+  audit row". The first half is now true. The second is not, and was not before: a status report writes
+  the job timeline, not `audit_events` (`.claude/future-tasks/machine-status-reports-unaudited.md`).
+
+**JP's decision (2026-11-16).** The fork this work raised was put to JP: should a machine's powers come
+from the app's abilities seam, or from per-credential grants stored with each key or token? He chose the
+abilities seam: a deny-by-default `appMachineAbilityRules`, with no per-token scopes built and the place
+for a later cap left marked. Retiring the `service/` exemption stands.
+
+**An independent review, and what it changed (2026-11-16).** A cold review by a different model, with the
+keel manager deciding each finding:
+
+- **A possibly-true `manageAll` must state a session, in the type.** `AbilityActor` is now two shapes: one
+  with `manageAll: false` and any credential (or none), and one with a session credential and any
+  `manageAll`. A literal that could set `manageAll` without stating a session is a compile error. The run
+  time keeps refusing it. It was already failing closed, but silently.
+- **Session-only framework subjects.** Inviting or managing members (Membership), changing the org (Org),
+  managing webhook endpoints (WebhookEndpoint) and accepting terms (AgreementAcceptance, a legal act) are
+  refused to any person whose credential is not a stated session. An app widens one subject at a time on
+  the seam, `nonSessionAdministration` (default `{}`); the export joins the enumerated `abilities` value
+  imports. It can never widen to `inbound-email`, by type (`WidenableCredentialKind`) and at run time.
+  Reads are not gated. Not listed: service keys (no route mints one, and they are no ability subject), the
+  other self-only subjects, the system-managed ones, and Job (a product action).
+- **A malformed actor is denied, not judged as a person.** Anything not a machine must be a well-formed
+  person (`kind` 'person' or absent, a real role, boolean `restricted` and `manageAll`, a credential with a
+  string kind), or it gets nothing. A machine that lost its `kind` had been judged as a person with no
+  role. The person is judged as a copy made by NAMING each field, so an actor whose fields are getters or
+  live on a prototype is judged by them, not by the empty result of `{ ...actor }`.
+- **One row gives an org's id and slug.** `abilityActorFromCredential` takes an `OrgIdentity`, which is
+  BRANDED: `orgIdentityForSlug` (`keel/db/org-lookup`) is its only producer, and the inbound intake gets
+  `ctx.org` through it as well. A hand-paired `{ id, slug }` does not compile.
+- **The handler reports the credential.** `InboundHandlerResult` carries `credential`, and the intake
+  records exactly that, or NULL. A synthetic actor a handler names is no longer recorded as an email
+  credential.
+- **A banned person has no standing** (ADR-0003's addendum).
