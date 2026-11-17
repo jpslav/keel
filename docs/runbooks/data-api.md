@@ -13,7 +13,9 @@ proven. The dialect is `packages/keel/src/adapters/real/rds-data-dialect.ts`. It
 
 ## Preconditions
 
-- The cluster has the Data API enabled and the migrations applied (the migrator Lambda, on either driver).
+- The cluster has the Data API enabled. Steps 1–4 need a database with the migrations applied, by the
+  migrator on either transport. Step 5 needs one no migrator has touched, so that every migration goes
+  through the Data API: see there.
 - Your shell can call `rds-data:*` on the cluster and `secretsmanager:GetSecretValue` on its secret.
 - At least one tenant with rows in a tenant-scoped table (`jobs` is in every app).
 
@@ -47,7 +49,29 @@ Pass when:
 - the third call returns `app_user` and `$TENANT`, so the role and the tenant reached a later call;
 - the fourth returns the tenant's own count and **0** in the second column;
 - the last call, after the commit, returns the secret's user (not `app_user`) and NULL or an empty
-  string, so nothing outlived the transaction.
+  string, so nothing outlived the transaction;
+- `commit-transaction` answered `"transactionStatus": "Transaction Committed"`, the only answer the dialect
+  takes for a commit (`commitOutcome` in `packages/keel/src/adapters/real/rds-data-codec.ts`). Record it
+  exactly.
+
+Then send a statement on a transaction id that has ended: the one just committed, and a second left idle
+past the three-minute limit.
+
+```bash
+rds execute-statement --database "$DB" --transaction-id "$TX" \
+  --sql "SELECT current_user, current_setting('app.current_tenant', true)"
+TX=$(rds begin-transaction --database "$DB" --query transactionId --output text)
+rds execute-statement --database "$DB" --transaction-id "$TX" \
+  --sql "SELECT set_config('role', 'app_user', true), set_config('app.current_tenant', '$TENANT', true)"
+sleep 200
+rds execute-statement --database "$DB" --transaction-id "$TX" \
+  --sql "SELECT current_user, current_setting('app.current_tenant', true)"
+```
+
+Pass when the first and the last call both FAIL, with no row returned. If AWS ran either outside a
+transaction instead, the tail of a `withTenant` that outlived the idle limit would run as the secret's
+user with no tenant, and that user is not bound by RLS: stop, and treat the transport as unsafe. Record
+each exception's name and message.
 
 ## 2. Postgres's parameter inference works through the Data API
 
@@ -83,6 +107,18 @@ rds execute-statement --database "$DB" --sql "SELECT ':not_a_parameter' AS liter
 
 Pass when the call succeeds and returns the literal unchanged.
 
+Two harder shapes of the same rule: an E-string, where `\'` is a quote inside the literal, and nested
+block comments, which Postgres allows. The dialect and the emulator read both the way Postgres does, by one
+scanner (`sqlSegments` in `packages/keel/src/adapters/real/rds-data-codec.ts`):
+
+```bash
+rds execute-statement --database "$DB" \
+  --sql "SELECT E'it\\'s :not_a_parameter' AS a /* outer /* inner :nor_this */ :nor_that */"
+```
+
+Pass when it returns `it's :not_a_parameter`. If AWS reads any of the three as a parameter, its scanner is
+weaker than Postgres's: make the emulator follow it, and keep such text out of keel's SQL.
+
 And check the other side of that rule, an accepted limit in ADR-0002's addendum: a colon directly before
 a name outside a literal IS read as a parameter, and a space after the colon stops it:
 
@@ -112,6 +148,16 @@ emulator together:
 - `ts` is a `stringValue` of UTC wall-clock time, `YYYY-MM-DD HH:MM:SS[.ffffff]`, with no zone.
 - `big` and `n` are `stringValue`s; `ds` is an `arrayValue` of `stringValues`; `by` is a `blobValue`.
 
+Then a response over the 1 MiB cap:
+
+```bash
+rds execute-statement --database "$DB" --sql "SELECT repeat('x', 2000000) AS big"
+```
+
+Pass when it fails. Record the exception's name and message; the emulator answers "Database returned more
+than the allowed response size limit". This is the limit a page of rows with unbounded text meets on this
+transport where `pg` returns it (ADR-0002's addendum, accepted limits).
+
 ## 4. Errors
 
 ```bash
@@ -126,23 +172,53 @@ Also roll back a transaction id that has already ended, and record that exceptio
 dialect treats `TransactionNotFoundException`, or a message saying the transaction is not found, as already
 rolled back (`isTransactionGone` in `packages/keel/src/adapters/real/rds-data-dialect.ts`).
 
-Last, record the exception names for two requests the Data API should refuse before running anything:
+Last, record the exception names for three requests the Data API should refuse before running anything:
 
 ```bash
 rds execute-statement --database "$DB" --sql "SELECT 1 -- $(head -c 70000 /dev/zero | tr '\0' x)"
 rds execute-statement --database "$DB" --sql "SELECT 1 WHERE 1 = ANY(:xs)" \
   --parameters '[{"name":"xs","value":{"arrayValue":{"longValues":[1]}}}]'
+rds execute-statement --database "$DB" --sql "SELECT 1; SELECT 2"
 ```
 
-The emulator names both `ValidationException`, and the dialect takes that name to mean the request never
-reached the database, so a transaction it happened in stays usable. If AWS sends another name, change both.
+The emulator names all three `ValidationException`, and the dialect takes that name to mean the request
+never reached the database, so a transaction it happened in stays usable. If AWS sends another name, change
+both. (The dialect refuses a multistatement itself before calling; the third request checks the emulator's
+model of AWS.)
 
 ## 5. The app on the transport
 
-- Deploy staging with `params.database.transport` set to `'data-api'` (so `DATABASE_TRANSPORT=data-api`), and
-  run the migrator Lambda with the same variables.
-  It must return `{ ok: true }`. Invoke it twice at once as well. Both must return `{ ok: true }`: the
-  second waits on the transaction-scoped migration lock and then finds nothing pending.
+- **On an EMPTY database.** On the `data-api` network shape the Data API is the migrator's only way in, so
+  every migration must be seen to go through it: deploy staging with `params.database.transport` set to
+  `'data-api'` (so `DATABASE_TRANSPORT=data-api`) onto a database no migrator has touched — a new
+  stack's cluster, or a new database named by `DATABASE_NAME`. Invoke the migrator Lambda. It must return
+  `{ ok: true }`, and then
+
+    ```bash
+    rds execute-statement --database "$DB" --sql "SELECT count(*) FROM kysely_migration"
+    ```
+
+    must equal the number of migrations the framework and the app register: the entries of
+    `packages/keel/src/db/migrations/index.ts` plus those of the app's own, such as
+    `apps/showcase/src/app-config/db/migrations/index.ts`. That one run proves on AWS what only the emulator has shown: DDL in
+    one Data API transaction, the describe step for the migrator's bookkeeping inserts inside it, and
+    0001's `DO` block.
+
+- **The `DO` block, asked on its own.** AWS refuses multistatements. Whether that check looks inside a
+  dollar-quoted body, where 0001's `;` sits, is not documented:
+
+    ```bash
+    rds execute-statement --database "$DB" --sql 'DO $$ BEGIN PERFORM 1; PERFORM 2; END $$'
+    ```
+
+    Pass when it succeeds. If AWS refuses it, keel changes 0001, not the migrator: the migration checks
+    `pg_roles` for `app_user` from its TypeScript and sends `CREATE ROLE app_user NOLOGIN` alone, one
+    statement per call. 0001's is the only dollar-quoted body in keel's migrations and both apps'. An
+    adopter's PL/pgSQL function would meet the same refusal, and its migration would run on `pg` from
+    inside the VPC.
+
+- Invoke the migrator twice at once. Both must return `{ ok: true }`: the second waits on the
+  transaction-scoped migration lock and then finds nothing pending.
 - Sign in and use a tenant-scoped screen. Then sign in as a member of the second tenant and confirm none
   of the first tenant's rows appear.
 - Let a Serverless v2 cluster with minimum capacity 0 pause. The next request must still succeed, after

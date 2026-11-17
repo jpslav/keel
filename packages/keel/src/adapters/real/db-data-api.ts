@@ -16,6 +16,8 @@ export interface DataApiDbConfig {
     region?: string
     /** Injected only by the contract suite, which runs the dialect against its emulator. */
     client?: RdsDataClientLike
+    /** How long inferred parameter types are trusted; the dialect's `TYPE_CACHE_TTL_MS` when omitted. */
+    typeCacheTtlMs?: number
 }
 
 /**
@@ -37,6 +39,7 @@ export function createRealDataApiDb(config: DataApiDbConfig): DbPort {
         resourceArn: config.resourceArn,
         secretArn: config.secretArn,
         database: config.database,
+        typeCacheTtlMs: config.typeCacheTtlMs,
     })
     const db = new Kysely<DB>({ dialect })
     return {

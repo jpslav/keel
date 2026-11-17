@@ -30,63 +30,98 @@ import type { ArrayValue, ColumnMetadata, Field, SqlParameter } from '@aws-sdk/c
 
 const IDENT_CHAR = /[A-Za-z0-9_$\u0080-￿]/
 
+/** A stretch of SQL: real code, or something Postgres reads as one token whose inside is not code. */
+export interface SqlSegment {
+    readonly text: string
+    /** False for a string literal, a quoted identifier, a comment or a dollar-quoted body. */
+    readonly code: boolean
+}
+
 /**
- * Rewrites every `$n` placeholder that is real SQL — not inside a string literal, a quoted identifier,
- * a comment or a dollar-quoted body — with `replace(n)`. Returns the SQL unchanged when it has none.
+ * Splits SQL into code and the stretches that can hide a `$1`, a `:name` or a `;`. Both the dialect and
+ * the test-only emulator read SQL through this one scanner, so they cannot disagree about where code is.
  *
- * Postgres's own lexical rules, the parts that can hide a `$1`: `'…'` (with `''`), `E'…'` (with
- * backslash escapes as well), `"…"` (with `""`), `--` to end of line, nested block comments, and
- * `$tag$…$tag$`. A `$` directly after an identifier character is part of that identifier, not a
- * placeholder or a dollar quote.
+ * Postgres's own lexical rules, the parts that matter here: `'…'` (with `''`), `E'…'` (with backslash
+ * escapes as well), `"…"` (with `""`), `--` to end of line, nested block comments, and `$tag$…$tag$`. A
+ * `$` directly after an identifier character is part of that identifier, not a placeholder or a dollar
+ * quote, and `$1` is code.
  */
-export function rewritePlaceholders(sql: string, replace: (index: number) => string): string {
-    let out = ''
+export function sqlSegments(sql: string): SqlSegment[] {
+    const segments: SqlSegment[] = []
+    let code = ''
     let i = 0
+    const literal = (stop: number) => {
+        if (code) segments.push({ text: code, code: true })
+        code = ''
+        segments.push({ text: sql.slice(i, stop), code: false })
+        i = stop
+    }
     while (i < sql.length) {
         const ch = sql[i]!
         const next = sql[i + 1]
         const prev = i > 0 ? sql[i - 1]! : ''
         if (ch === '-' && next === '-') {
             const end = sql.indexOf('\n', i)
-            const stop = end === -1 ? sql.length : end
-            out += sql.slice(i, stop)
-            i = stop
+            literal(end === -1 ? sql.length : end)
         } else if (ch === '/' && next === '*') {
-            const stop = blockCommentEnd(sql, i)
-            out += sql.slice(i, stop)
-            i = stop
+            literal(blockCommentEnd(sql, i))
         } else if (ch === "'") {
             const escapes = (prev === 'E' || prev === 'e') && !IDENT_CHAR.test(i > 1 ? sql[i - 2]! : '')
-            const stop = quotedEnd(sql, i, "'", escapes)
-            out += sql.slice(i, stop)
-            i = stop
+            literal(quotedEnd(sql, i, "'", escapes))
         } else if (ch === '"') {
-            const stop = quotedEnd(sql, i, '"', false)
-            out += sql.slice(i, stop)
-            i = stop
-        } else if (ch === '$' && !IDENT_CHAR.test(prev)) {
-            const digits = /^\$(\d+)/.exec(sql.slice(i))
-            if (digits) {
-                out += replace(Number(digits[1]))
-                i += digits[0].length
-                continue
-            }
+            literal(quotedEnd(sql, i, '"', false))
+        } else if (ch === '$' && !IDENT_CHAR.test(prev) && !/^\$\d/.test(sql.slice(i, i + 2))) {
             const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
             if (tag) {
                 const close = sql.indexOf(tag[0], i + tag[0].length)
-                const stop = close === -1 ? sql.length : close + tag[0].length
-                out += sql.slice(i, stop)
-                i = stop
-                continue
+                literal(close === -1 ? sql.length : close + tag[0].length)
+            } else {
+                code += ch
+                i += 1
             }
-            out += ch
-            i += 1
         } else {
-            out += ch
+            code += ch
             i += 1
         }
     }
-    return out
+    if (code) segments.push({ text: code, code: true })
+    return segments
+}
+
+const PLACEHOLDER = new RegExp(`(?<!${IDENT_CHAR.source})\\$(\\d+)`, 'g')
+
+/**
+ * Rewrites every `$n` placeholder that is real SQL — not inside a string literal, a quoted identifier,
+ * a comment or a dollar-quoted body (`sqlSegments`) — with `replace(n)`. Returns the SQL unchanged when
+ * it has none.
+ */
+export function rewritePlaceholders(sql: string, replace: (index: number) => string): string {
+    return sqlSegments(sql)
+        .map((segment) =>
+            segment.code ? segment.text.replace(PLACEHOLDER, (_, n: string) => replace(Number(n))) : segment.text,
+        )
+        .join('')
+}
+
+/**
+ * Whether `sql` is more than one statement: a `;` in code with anything after it but whitespace, comments
+ * and further `;`. The Data API refuses multistatements, and a second statement is also where a COMMIT
+ * could hide from the guard below.
+ */
+export function isMultistatement(sql: string): boolean {
+    let ended = false
+    for (const segment of sqlSegments(sql)) {
+        if (!segment.code) {
+            const comment = segment.text.startsWith('--') || segment.text.startsWith('/*')
+            if (ended && !comment) return true
+            continue
+        }
+        for (const ch of segment.text) {
+            if (ch === ';') ended = true
+            else if (ended && !/\s/.test(ch)) return true
+        }
+    }
+    return false
 }
 
 function quotedEnd(sql: string, start: number, quote: string, backslashEscapes: boolean): number {
@@ -123,11 +158,11 @@ function blockCommentEnd(sql: string, start: number): number {
     return sql.length
 }
 
-/** The index past any whitespace and comments (and opening parentheses, if asked) from `i` on. */
-function skipBlank(sql: string, i: number, parentheses: boolean): number {
+/** The index past any whitespace and comments (and opening parentheses and `;`, if asked) from `i` on. */
+function skipBlank(sql: string, i: number, punctuation: boolean): number {
     while (i < sql.length) {
         const ch = sql[i]!
-        if (/\s/.test(ch) || (parentheses && ch === '(')) {
+        if (/\s/.test(ch) || (punctuation && (ch === '(' || ch === ';'))) {
             i += 1
         } else if (ch === '-' && sql[i + 1] === '-') {
             const end = sql.indexOf('\n', i)
@@ -141,7 +176,10 @@ function skipBlank(sql: string, i: number, parentheses: boolean): number {
     return i
 }
 
-/** The statement's first keyword, lower-cased, past leading whitespace, comments and parentheses. */
+/**
+ * The statement's first keyword, lower-cased, past leading whitespace, comments, parentheses and `;` (an
+ * empty statement first: `;commit` is a COMMIT).
+ */
 export function leadingKeyword(sql: string): string {
     const i = skipBlank(sql, 0, true)
     return (/^[A-Za-z_]+/.exec(sql.slice(i))?.[0] ?? '').toLowerCase()
@@ -217,6 +255,9 @@ const SESSION_STATE = new Set(['set', 'reset', 'prepare', 'deallocate', 'discard
  * would actually make, and it does not claim to catch an alias.
  */
 export function unsupportedStatement(sql: string, inTransaction: boolean): string | null {
+    if (isMultistatement(sql)) {
+        return 'more than one statement in one call — the Data API refuses multistatements; send each statement on its own'
+    }
     const keyword = leadingKeyword(sql)
     if (TRANSACTION_CONTROL.has(keyword)) {
         const savepoint = keyword === 'rollback' && /^\s*rollback\s+to\b/i.test(sql.replace(/^[\s(]+/, ''))
@@ -413,6 +454,18 @@ export class RdsDataDatabaseError extends Error {
         this.code = code
         this.constraint = constraint
     }
+}
+
+/**
+ * What CommitTransaction's `transactionStatus` says happened. The API reference lists no values; AWS's
+ * own CLI example answers a commit with "Transaction Committed", and step 1 of docs/runbooks/data-api.md
+ * records what a live cluster sends. Anything else is not taken for a commit.
+ */
+export function commitOutcome(status: string | undefined): 'committed' | 'rolled back' | 'unknown' {
+    const said = status?.trim().toLowerCase()
+    if (said === 'transaction committed') return 'committed'
+    if (said !== undefined && /\brollback\b|\brolled back\b/.test(said)) return 'rolled back'
+    return 'unknown'
 }
 
 /** Raised before a call is made, for something the Data API cannot do (see unsupportedStatement). */

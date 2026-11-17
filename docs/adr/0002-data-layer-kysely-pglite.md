@@ -143,10 +143,17 @@ and five outside one, which also needs its own short transaction.
 
 **What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
 
-- transaction control written in SQL;
+- transaction control written in SQL, even after a leading `;` (`;commit`);
+- more than one statement in one call, which the Data API refuses as well (a `;` in code, by the same
+  scanner that finds placeholders, with more SQL after it);
 - session state outside a transaction (`SET`, `SET ROLE`, `PREPARE`, temporary tables,
   `set_config(…, false)`, session-level advisory locks);
 - streaming.
+
+**A commit is what CommitTransaction says it was.** Its `transactionStatus` must read "Transaction
+Committed", the value AWS's own CLI example shows (the API reference lists none); a rollback answer throws
+Kysely's `AbortedTransactionError`, and anything else throws. Step 1 of `docs/runbooks/data-api.md` records
+what a live cluster sends.
 
 **The migration lock is transaction-scoped.** Kysely's own migration lock is a session-level
 `pg_advisory_lock` on a separate connection, and it creates its bookkeeping tables before locking at all.
@@ -192,11 +199,16 @@ lock. Nothing in
 contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
 emulators".
 
-**Some limits are accepted rather than closed.** None of them arises in keel's own SQL.
+**Some limits are accepted rather than closed.** Only the last can arise in the SQL keel and its two
+apps send.
 
-- **The inferred types are cached for the life of the process.** A migration that changes a parameter's
-  type while an old process keeps serving would be answered with the old type. Deploys replace processes,
-  so after an out-of-band schema change, restart the app.
+- **The inferred types are cached for five minutes, and within them a schema change is SILENT.** A
+  migration that changes a parameter's type while a process keeps serving is answered with the old type
+  until the entry expires (`TYPE_CACHE_TTL_MS` in `packages/keel/src/adapters/real/rds-data-dialect.ts`).
+  Nothing fails: a `date` column changed to `timestamptz` goes on receiving midnight through the Data API,
+  where `pg` stores the instant. The contract suite shows both the silent case and the expiry. Expiry
+  bounds the window; it does not close it. After a migration that changes a column's type, restart the
+  app or wait five minutes before relying on the new type.
 - **An explicit cast to a length-bearing domain, written in the SQL, truncates.** In
   `${value}::code3`, where `code3` is a domain over `char(3)`, the value reaches that cast already
   converted to the base type. The cast is explicit, so it truncates, where node-postgres refuses the value.
@@ -207,6 +219,11 @@ emulators".
   `a[lo:hi]`, fails loudly. Write `a[lo : hi]`.
 - **A statement PREPARE cannot take, such as `CALL proc($1)`,** cannot be described, so with parameters
   it fails loudly. An EXPLAIN is described by the statement it explains.
+- **A response over 1 MiB fails, where `pg` would return it.** Rows are bounded in count, not in bytes:
+  a keyset page of rows with unbounded text (a page of tickets with large bodies) can pass on `pg` and
+  fail on this transport. The fix belongs to the query: a smaller page, or narrower columns for the list
+  with the large field fetched one row at a time. Step 3 of `docs/runbooks/data-api.md` records the error
+  AWS sends.
 
 **Not proven, and owed by the `data-api` cutover row:**
 
