@@ -1,5 +1,5 @@
 import { type Kysely, sql } from 'kysely'
-import { Migrator } from 'kysely/migration'
+import { type Migration, Migrator } from 'kysely/migration'
 import { migrations } from './migrations/index'
 import type { DB } from './schema'
 
@@ -17,9 +17,17 @@ export function outOfSequence(executed: readonly string[], pending: readonly str
 }
 
 export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
+    await migrateRegistryToLatest(db, migrations)
+}
+
+/**
+ * {@link migrateToLatest} over an explicit registry, so a test can stand up a registry of its own (an app
+ * migration that builds on the newest framework one). Production code calls `migrateToLatest`.
+ */
+export async function migrateRegistryToLatest(db: Kysely<DB>, registry: Record<string, Migration>): Promise<void> {
     const migrator = new Migrator({
         db,
-        provider: { getMigrations: async () => migrations },
+        provider: { getMigrations: async () => registry },
         // Framework migrations (0001–0999) and the app's (≥1001) are TWO sequences interleaved by name
         // (ADR-0012). So a framework migration that arrives in a keel update sorts BEFORE app migrations
         // the database already ran. Kysely's default strict ordering refuses that as "corrupted
@@ -39,7 +47,7 @@ export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
     // raise it: getMigrations() lists only the registry, so the renamed one would otherwise look merely
     // out of order here and the message would point at the wrong remedy.
     if (stray.length > 0) {
-        const missing = await executedButUnknown(db)
+        const missing = await executedButUnknown(db, registry)
         if (missing.length > 0) {
             throw new Error(`corrupted migrations: previously executed migration ${missing.join(', ')} is missing`)
         }
@@ -59,7 +67,7 @@ export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
  * own table, since `Migrator.getMigrations()` reports only the registry's names. Only consulted when
  * something already looks out of order, so a fresh database never reaches it.
  */
-async function executedButUnknown(db: Kysely<DB>): Promise<string[]> {
+async function executedButUnknown(db: Kysely<DB>, registry: Record<string, Migration>): Promise<string[]> {
     const { rows } = await sql<{ name: string }>`SELECT name FROM kysely_migration`.execute(db)
-    return rows.map((row) => row.name).filter((name) => !Object.hasOwn(migrations, name))
+    return rows.map((row) => row.name).filter((name) => !Object.hasOwn(registry, name))
 }

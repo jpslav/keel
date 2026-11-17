@@ -1,9 +1,9 @@
 import { appMigrations } from '@app-config/db/migrations'
 import { Kysely, sql } from 'kysely'
-import { Migrator } from 'kysely/migration'
+import { type Migration, Migrator } from 'kysely/migration'
 import { describe, expect, test } from 'vitest'
 import { openPglite, PGliteDialect } from '../adapters/fake/pglite-dialect'
-import { migrateToLatest, outOfSequence } from './migrate'
+import { migrateRegistryToLatest, migrateToLatest, outOfSequence } from './migrate'
 import { frameworkMigrations, migrations } from './migrations/index'
 import type { DB } from './schema'
 
@@ -55,10 +55,40 @@ async function schemaOf(db: Kysely<DB>) {
     }
 }
 
+/**
+ * The database as it stood BEFORE the keel update that brings `withheld` (the newest framework migration):
+ * the registry minus `withheld`, applied one migration at a time, stopping at the first APP migration
+ * that cannot run without it. That migration, and everything after it, arrive with the update and are
+ * pending alongside `withheld`, which is how an app migration that builds on a new framework migration
+ * reaches a real database. A FRAMEWORK migration failing here is a real defect, and the test fails.
+ */
+async function buildPreUpdate(
+    db: Kysely<DB>,
+    registry: Record<string, Migration>,
+    withheld: string,
+): Promise<string[]> {
+    const before = Object.fromEntries(Object.entries(registry).filter(([name]) => name !== withheld))
+    const migrator = new Migrator({ db, provider: { getMigrations: async () => before } })
+    const ran: string[] = []
+    for (;;) {
+        const { error, results = [] } = await migrator.migrateUp()
+        if (error) {
+            const failed = results.find((result) => result.status === 'Error')?.migrationName ?? ''
+            if (prefix(failed) < 1000) throw error
+            return ran
+        }
+        if (results.length === 0) return ran
+        ran.push(...results.map((result) => result.migrationName))
+    }
+}
+
+/** A migration from raw SQL, for the synthetic registry below. */
+const step = (statement: string): Migration => ({ up: async (db) => void (await sql.raw(statement).execute(db)) })
+
 describe('migration numbering', () => {
     test('every app migration is numbered ≥1001 and none shares a name with a framework one', () => {
+        // An app may register no migrations at all (ADR-0004's addendum allows an app with no tables).
         const app = Object.keys(appMigrations)
-        expect(app.length, 'the seam registers at least one app migration').toBeGreaterThan(0)
         for (const name of app) expect(prefix(name), name).toBeGreaterThanOrEqual(1001)
         for (const name of Object.keys(frameworkMigrations)) expect(prefix(name), name).toBeLessThan(1000)
         // A collision would let the app's key silently replace the framework's in the merged map.
@@ -85,14 +115,9 @@ describe('migrateToLatest', () => {
         async () => {
             const latestFramework = Object.keys(frameworkMigrations).sort().at(-1)!
 
-            // The database as it stood before the update: every migration except the newest framework one.
+            // The database as it stood before the update that brings the newest framework migration.
             const upgraded = new Kysely<DB>({ dialect: new PGliteDialect(openPglite()) })
-            const before = Object.fromEntries(Object.entries(migrations).filter(([name]) => name !== latestFramework))
-            const old = await new Migrator({
-                db: upgraded,
-                provider: { getMigrations: async () => before },
-            }).migrateToLatest()
-            expect(old.error).toBeUndefined()
+            await buildPreUpdate(upgraded, migrations, latestFramework)
 
             await migrateToLatest(upgraded)
             const ran = await sql<{ name: string }>`SELECT name FROM kysely_migration`.execute(upgraded)
@@ -140,6 +165,33 @@ describe('migrateToLatest', () => {
                 new RegExp(`previously executed migration ${renamed}_old_name is missing`),
             )
             await db.destroy()
+        },
+    )
+
+    test(
+        'an app migration that builds on the newest framework migration arrives with it, and both apply',
+        { timeout: 30_000 },
+        async () => {
+            // A synthetic registry, so the case does not depend on what keel's newest migration happens to
+            // be: the app's 1002 indexes a column that only the framework's 0002 adds.
+            const registry: Record<string, Migration> = {
+                '0001_base': step('CREATE TABLE base (id int)'),
+                '0002_newest': step('ALTER TABLE base ADD COLUMN detail text'),
+                '1001_app': step('CREATE TABLE app_thing (id int)'),
+                '1002_app_on_newest': step('CREATE INDEX base_detail_idx ON base (detail)'),
+            }
+            const upgraded = new Kysely<DB>({ dialect: new PGliteDialect(openPglite()) })
+            expect(await buildPreUpdate(upgraded, registry, '0002_newest')).toEqual(['0001_base', '1001_app'])
+
+            await migrateRegistryToLatest(upgraded, registry)
+            const ran = await sql<{ name: string }>`SELECT name FROM kysely_migration`.execute(upgraded)
+            expect(ran.rows.map((row) => row.name).sort()).toEqual(Object.keys(registry).sort())
+
+            const fresh = new Kysely<DB>({ dialect: new PGliteDialect(openPglite()) })
+            await migrateRegistryToLatest(fresh, registry)
+            expect(await schemaOf(upgraded)).toEqual(await schemaOf(fresh))
+            await upgraded.destroy()
+            await fresh.destroy()
         },
     )
 })
