@@ -1805,3 +1805,21 @@ worth keeping.
   decides this, so it is not a new choice. It does not make `pnpm dev` offline: the dev overlay's version
   check, which next 16.2 already had, still fetches `next`'s dist-tags. Advisories now have to reach keel
   another way, through Dependabot security updates (currently off in the repository settings) or review.
+
+## Lint fences cover every extension; carve-outs name what their runner loads (2026-11-16, `fix/lint-fence-gaps`)
+
+- **Fence globs take their extensions from one constant, `SRC_EXT`.** They named `{ts,tsx}`, so a `.mjs`
+  file in `apps/*/src`, `packages/keel/src` or keel's test fixture got past the vendor, `process.env` and
+  `getDb` bans. `SRC_EXT` lists all eight extensions ESLint lints here, `.mts` and `.cts` included.
+- **Carve-outs do NOT use `SRC_EXT`.** A test carve-out names what vitest runs (`*.test.{ts,tsx}`), the story
+  carve-out what Ladle loads, the `next.config` carve-out the four names Next reads, the instrumentation one
+  Next's default `pageExtensions`. Widening each to every extension was the alternative. It was rejected
+  because a `.test.mjs` that vitest never runs is an ordinary module a route can import.
+- **The app's registry stays `adapters/index.ts` by name.** An `index.mjs` beside it is one more module
+  that may not load `real/`. Widening the registry exemption across extensions was the alternative. It was
+  rejected because the recipe names one file, and a second registry-shaped file is the thing to catch.
+- **Selectors that implement one rule travel as one array** (`getDbSelectors`, `runModeEnvSelectors`),
+  replacing re-listing them one by one. Re-listing is what let the a11y block drop the computed `getDb` form.
+- **Tests under an app's adapters directory stay exempt from the dynamic `real/` ban**, as they are from
+  the other syntax bans there. A story beside a fake was given it back, since the static form was already
+  banned in stories.

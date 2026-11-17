@@ -1,67 +1,30 @@
-import path from 'node:path'
-import { ESLint } from 'eslint'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import {
+    A11Y_LITERAL,
+    APP,
+    fired,
+    IMPORTS_VENDOR,
+    JSX_LITERAL,
+    KEEL_REAL_ADAPTER,
+    lint,
+    LOADS_VENDOR,
+    NEXT_FONT,
+    PROCESS_ENV,
+    REAL_ADAPTER,
+    REAL_ADAPTER_DYNAMIC,
+    REAL_ADAPTER_INSIDE,
+    RUN_MODE,
+    VENDOR_DYNAMIC,
+    VENDOR_STATIC,
+} from './lint-text'
 
 /**
  * The app-owned adapter seam (ADR-0012, addendum 2026-11-16) is a set of lint fences, and this file
- * pins them against the repo's REAL config: `new ESLint()` with no override, linting virtual files at
- * the paths the fences are about. Nothing is written to disk, so there is no dead fixture for knip,
- * tsc or jscpd to trip over, and no vendor package has to be installed. `no-restricted-imports`
- * judges the specifier and never resolves it.
- *
- * The paths sit under `apps/any-app/`, which is neither of this repo's apps, on purpose. Every fence
- * is written `apps/*`, so the app's name is not what is being tested, and a name nobody owns
- * survives `pnpm init-app` renaming or ejecting the real ones.
+ * pins them against the repo's REAL config (./lint-text says how, and why the app is `apps/any-app`).
+ * Every case here is a `.ts` or `.tsx` file; ./extensions.test.ts holds the same fences for the other
+ * six extensions ESLint lints.
  */
-const repoRoot = process.cwd()
-const APP = 'apps/any-app'
-
-let eslint: ESLint
-beforeAll(() => {
-    eslint = new ESLint({ cwd: repoRoot })
-})
-
-interface Finding {
-    rule: string
-    message: string
-}
-
-async function lint(relativePath: string, code: string): Promise<Finding[]> {
-    const [result] = await eslint.lintText(code, { filePath: path.join(repoRoot, relativePath) })
-    // A parse failure, or the warning for a file the config ignores, carries no rule id. Either one
-    // would make every "nothing fired" expectation below pass vacuously, so it fails the case instead.
-    expect(
-        result.messages.filter((m) => !m.ruleId),
-        `${relativePath} was not actually linted`,
-    ).toEqual([])
-    return result.messages.map((m) => ({ rule: m.ruleId as string, message: m.message }))
-}
-
-// Each fence is told apart by its rule id AND its message, because five different patterns all report
-// as `no-restricted-imports` (vendor, two real-adapter forms, keel's real adapters, next/font/google) and
-// four different selectors as `no-restricted-syntax` (process.env, run mode, dynamic real/, a11y).
-const VENDOR_STATIC = { rule: 'no-restricted-imports', fragment: 'Vendor SDKs may only be imported' }
-const VENDOR_DYNAMIC = { rule: 'keel/no-dynamic-vendor-import', fragment: 'is a vendor SDK' }
-const PROCESS_ENV = { rule: 'no-restricted-syntax', fragment: 'process.env is read ONLY' }
-const RUN_MODE = { rule: 'no-restricted-syntax', fragment: "Run mode is keel's" }
-const REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "Reach the app's real adapters through its registry" }
-const REAL_ADAPTER_INSIDE = { rule: 'no-restricted-imports', fragment: 'real/ is loaded only with import()' }
-const REAL_ADAPTER_DYNAMIC = { rule: 'no-restricted-syntax', fragment: "Only the app's registry" }
-const KEEL_REAL_ADAPTER = { rule: 'no-restricted-imports', fragment: "never import keel's real adapters" }
-const NEXT_FONT = { rule: 'no-restricted-imports', fragment: 'next/font/google phones home' }
-const JSX_LITERAL = { rule: 'react/jsx-no-literals', fragment: '' }
-const A11Y_LITERAL = {
-    rule: 'no-restricted-syntax',
-    fragment: 'aria-label/placeholder/title/alt carry user-visible copy',
-}
-
-type Fence = typeof VENDOR_STATIC
-const fired = (findings: Finding[], fence: Fence) =>
-    findings.filter((f) => f.rule === fence.rule && f.message.includes(fence.fragment)).length
-
-const IMPORTS_VENDOR = "import { S3Client } from '@aws-sdk/client-s3'\nexport const client = S3Client\n"
 const IMPORTS_VENDOR_SUBPATH = "import { auth } from '@clerk/nextjs/server'\nexport const current = auth\n"
-const LOADS_VENDOR = "export const load = () => import('@aws-sdk/client-s3')\n"
 const LOADS_VENDOR_TEMPLATE = 'export const load = () => import(`pg`)\n'
 
 /** The only two places a vendor SDK may be imported. */
@@ -154,6 +117,19 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         ['a quoted destructuring key', "const { 'APP_MODE': mode } = process.env\nexport { mode }\n"],
         ['destructuring assignment', 'let mode\n;({ APP_MODE: mode } = process.env)\nexport { mode }\n'],
         ['a parameter default', 'export function mode({ DEMO_MODE } = process.env) {\n    return DEMO_MODE\n}\n'],
+        ['a template-literal destructuring key', 'const { [`APP_MODE`]: mode } = process.env\nexport { mode }\n'],
+        // `env` itself spelled as a key: the same object, so the same ban
+        ['env as a quoted key', "export const mode = process['env'].APP_MODE\n"],
+        ['env as a template-literal key', 'export const mode = process[`env`][`DEMO_MODE`]\n'],
+        ['destructuring env as a quoted key', "const { E2E_BUILD } = process['env']\nexport const e2e = E2E_BUILD\n"],
+        [
+            'destructuring assignment from env as a quoted key',
+            "let mode\n;({ APP_MODE: mode } = process['env'])\nexport { mode }\n",
+        ],
+        [
+            'a parameter default of env as a template-literal key',
+            'export function mode({ DEMO_MODE } = process[`env`]) {\n    return DEMO_MODE\n}\n',
+        ],
     ])('a real adapter may not read the run mode itself (%s)', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, code), RUN_MODE)).toBe(1)
     })
@@ -184,9 +160,22 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         `${APP}/config/params.ts`,
     ])('%s may not read process.env at all', async (file) => {
         expect(fired(await lint(file, 'export const storeArn = process.env.KVS_ARN\n'), PROCESS_ENV)).toBe(1)
+        // the same name spelled as a key
+        expect(fired(await lint(file, "export const storeArn = process['env'].KVS_ARN\n"), PROCESS_ENV)).toBe(1)
+        expect(fired(await lint(file, 'export const storeArn = process[`env`].KVS_ARN\n'), PROCESS_ENV)).toBe(1)
         // the same object under another name
         const imported = "import { env } from 'node:process'\nexport const storeArn = env.KVS_ARN\n"
         expect(fired(await lint(file, imported), PROCESS_ENV)).toBe(1)
+        const quoted = "import { 'env' as e } from 'node:process'\nexport const storeArn = e.KVS_ARN\n"
+        expect(fired(await lint(file, quoted), PROCESS_ENV)).toBe(1)
+    })
+
+    // A template key is the name only when it has no expressions; `env${x}` could be anything.
+    it('a template key with an expression in it is not the name', async () => {
+        const notEnv = 'const x = 1\nexport const v = process[`env${x}`]\n'
+        expect(fired(await lint(`${APP}/src/domain/kv.ts`, notEnv), PROCESS_ENV)).toBe(0)
+        const notRunMode = 'const x = 1\nexport const m = process.env[`APP_MODE${x}`]\n'
+        expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, notRunMode), RUN_MODE)).toBe(0)
     })
 })
 
