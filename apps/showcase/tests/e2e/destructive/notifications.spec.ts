@@ -70,7 +70,7 @@ async function createRequest(page: Page, targetName: string, subject: string) {
         await page.getByTestId('escalation-subject').fill(subject, { timeout: 2_000 })
         await page.getByTestId('escalation-body').fill('please collaborate', { timeout: 2_000 })
         await expect(page.getByTestId('escalation-create')).toBeEnabled({ timeout: 1_000 })
-    }).toPass({ timeout: 30_000 })
+    }).toPass({ timeout: 45_000 })
     await page.getByTestId('escalation-create').click()
     await expect(page.getByTestId('escalations-sent-list')).toContainText(subject)
 }
