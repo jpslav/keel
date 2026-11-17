@@ -420,6 +420,30 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
     })
 
     /**
+     * An ejected app used to have no cron route, so nothing ticked keel's scheduler in a deployment. The route is
+     * the starter's now, and adoption must carry it along with its guard: a copy without `withWebhookSecret(` would
+     * be an open route that the authorization scan rejects, and one that is missing is the original bug.
+     */
+    describe("the starter's scheduled-tick route survives adoption", () => {
+        it.each([
+            ['renamed and ejected', () => ejected, SLUG],
+            ['renamed only', () => named, SLUG],
+            ['ejected with no slug', () => ejectOnly, 'starter'],
+        ])("is in the app of a tree %s, guarded by the shared secret and calling keel's tick", (_label, probe, app) => {
+            const text = readFileSync(path.join(probe().dir, `apps/${app}/src/app/api/webhooks/cron/route.ts`), 'utf8')
+            expect(text).toContain('withWebhookSecret(')
+            expect(text).toContain("from 'keel/server-lib/scheduled-tick'")
+            expect(text).toContain("from 'keel/service-auth/webhook'")
+        })
+
+        it('has its own test alongside it', () => {
+            expect(existsSync(path.join(ejected.dir, `apps/${SLUG}/src/app/api/webhooks/cron/route.test.ts`))).toBe(
+                true,
+            )
+        })
+    })
+
+    /**
      * Adoption is not the last time keel's docs reach the adopter: `git merge upstream/main` (ADR-0013) brings
      * NEW text, and `init-app` only repointed what it found on the day it ran. The first recipe to cite
      * `apps/starter/…` turned the path gate red in an ejected adopter's tree, on a citation nobody there wrote.
