@@ -2156,8 +2156,9 @@ The design is in ADR-0004's addendum of the same date.
   any database keel migrates, and the migrator is the one role every deployment runs. A runbook line
   would be forgotten exactly once, and that once is every request failing.
 - **Guarded by `pg_has_role(current_user, 'app_user', 'SET')`, not a bare GRANT.** The guard makes it a
-  no-op for a superuser and on a re-run. It also means a role that cannot grant the switch to itself fails
-  with the statement to run, instead of a bare `permission denied to grant role`.
+  no-op for a superuser and on a re-run (a fresh superuser in the contract suite pins it). Separately, the
+  block's `insufficient_privilege` handler means a role that cannot grant the switch to itself fails with
+  the statement to run, instead of a bare `permission denied to grant role`.
 - **INHERIT FALSE for the migrator, INHERIT TRUE for a separate app role.** The migrator owns every table,
   so it needs only the switch. A separate app role owns nothing and reads `tenants`, `organizations` and
   `service_keys` before any tenant is set, and those grants are `app_user`'s.

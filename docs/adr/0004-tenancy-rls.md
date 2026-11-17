@@ -163,14 +163,15 @@ The Decision says every tenant-scoped transaction runs `SET LOCAL ROLE app_user`
 role is allowed to, and on every engine this repo tested, the answer was "the superuser, which may switch
 to anything". That is not the role a deployment connects as.
 
-**The failure.** Migration 0001 creates `app_user` and grants it to nobody. Aurora's master user is
-`NOSUPERUSER CREATEROLE`. Since Postgres 16, a non-superuser that creates a role is granted ADMIN on it,
+**The failure.** Migration 0001 creates `app_user` and grants it to nobody. Aurora's master user is not a
+superuser: AWS documents it as a member of `rds_superuser`, with `CREATEROLE` and `CREATEDB`. Since Postgres 16, a non-superuser that creates a role is granted ADMIN on it,
 but not SET (`createrole_self_grant` is empty by default). So the owner that ran every migration could
 not switch to the role it had created. Every `withTenant` failed closed with
 `permission denied to set role "app_user"`. Nothing leaked, but a real deployment could not serve a single
-tenant-scoped query. An independent reviewer proved this on Postgres 18.4, and the contract suite
-reproduced it on 18.4 with a fresh cluster where the owner created `app_user` itself. It is the same rule
-on Aurora's 16.10 (`infra/stack.ts`).
+tenant-scoped query. An independent reviewer reported it, relayed by the keel manager. The contract suite
+reproduced it on Postgres 18.4, with a fresh cluster where the owner created `app_user` itself. The rule
+is the same on Aurora's 16.10 (`infra/stack.ts`), and CI's postgres:16 contract job measures it on every
+run (below).
 
 **The fix: framework migration `0015_app_user_grant`.** It grants the MIGRATING role
 `app_user WITH SET TRUE, INHERIT FALSE`, and only if `pg_has_role(current_user, 'app_user', 'SET')` is
@@ -201,12 +202,13 @@ from `packages/keel/src/adapters/real/db.contract.test.ts`).
 - Inside `withTenant` it must be `app_user`, in the tenant it asked for.
 - Then the whole composed proof suite runs with every role switch made by that owner. The proof context
   gained `appDb` for this; seeding and the superuser negative control stay on `db`, unchanged.
-- The pass runs FIRST in its file. On the fresh cluster a local run starts, the owner's own 0001 is what
-  creates `app_user`. That is the genuine path.
-- `app_user` is cluster-wide, and CI's contract suites share one server. So the pass first MEASURES what
-  this server gives a creator (the owner creates a throwaway role and reads its own membership back:
-  ADMIN, no INHERIT, no SET). Where another pass already created `app_user`, it grants the owner exactly
-  that membership.
+- The pass first MEASURES what this server gives a creator. The owner creates a throwaway role and reads
+  its own membership back: ADMIN, no INHERIT, no SET. CI's postgres:16 job asserts that on every run.
+- The pass runs TWICE in its file, so both of its branches run every time. The first run is on a fresh
+  server: a local run's embedded server is always one, and so is CI's service whenever this file runs
+  before the app's. There, the owner's own 0001 creates `app_user`, which is the genuine path. The second
+  run finds `app_user` already there (cluster-wide, as on any reused server), and grants the owner exactly
+  the measured creator membership.
 - Without 0015 the pass fails with the production error.
-- The pass reaches the server only through an injected `connect`, so another transport (the Data API,
-  #46) can run it.
+- The pass reaches the server only through injected `admin` and `connect` handles, so another transport
+  (the Data API, #46) could run it. It does not yet.
