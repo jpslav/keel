@@ -1,4 +1,4 @@
-import type { LlmPort } from 'keel/ports/llm'
+import { llm } from '../stand-ins'
 
 /**
  * FIXTURE ROUTE — SCANNED, NEVER SERVED. See ../dockets/route.ts for what this tree is.
@@ -12,10 +12,8 @@ import type { LlmPort } from 'keel/ports/llm'
  * between "exempt because someone named a file `assistant/route.ts`" and "exempt because the file
  * demonstrably talks to the model port".
  *
- * Local stand-in typed against the port, for the reason given in ../profile/route.ts.
+ * `llm` is imported from ../stand-ins.ts, for the reason given there.
  */
-const llm: Pick<LlmPort, 'complete'> = { complete: async () => ({ text: '' }) }
-
 export async function POST(): Promise<Response> {
     const { text } = await llm.complete({ purpose: 'fixture-echo', messages: [{ role: 'user', content: 'ping' }] })
     return Response.json({ text })

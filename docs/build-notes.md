@@ -1891,6 +1891,48 @@ the panel is the element that carries it.
   `defineContractSuite(`", and a hand run of `init-app` then `pnpm test:contract` on a scratch copy. If the
   probe should run it, that is a CI change of its own (it needs the service container).
 
+## The authorization scan matched text (2026-11-17, `fix/authz-scan-per-verb`)
+
+- **A text match cannot say whose path a call is on.** The scan asked whether a FILE contained `authorize(`, or an
+  exemption's gate. A string, another verb, the `GET`, a dead branch and an uncalled closure all answer yes. The
+  finding that started this covered the `webhooks/` exemption. Asking the same question of the main rule found six
+  more false greens, and the `service/` and `simulator/` gates had two each. When a finding is about how a gate
+  matches, check every rule that matches the same way, not only the one the finding names.
+- **See the old gate pass before you trust the new one to fail.** Each shape was dropped into
+  `apps/starter/src/app/api` and run through main's scan, then the new one (a throwaway script: write the route,
+  run the suite, delete it). 16 of the 17 shapes passed main's scan: the real route rightly, and
+  15 as false greens. Only the comment-only mention failed there. All 17 are cases against the real policy in `authorized-mutations.test.ts`.
+- **A suite that is green on its first run has not shown it can fail.** `route-scan.test.ts` passed first time, so
+  the analyser was mutated, one change at a time, each run against both suites. Every pass left survivors, and none
+  was a defect the reviews had missed. Most were missing cases, now added; the two that were not are noted below.
+    - the first pass, 55 mutants, left 3;
+    - the second, after review round 1's fixes, 87 mutants, left 2;
+    - the third and fourth, after round 2's fixes, re-ran the earlier set (retargeted where the code had moved) with 41
+      new ones, and left 3, one of them equivalent: it removed a branch the walk already covered, so the branch went;
+    - the fifth, after round 3's fixes, 17 mutants, left 1, which was a more accurate scope rather than a defect, and
+      the code took it.
+
+    Re-run a mutation pass whenever the analyser changes.
+
+- **Three review rounds found the gate itself spoofable three ways.** Round 1 found a local look-alike passing as the
+  gate (`const isSimulated = true`) and a 404 branch that mutated before it returned. Round 2 found an alias passing
+  as the gate and a branch whose response argument ran code through `toJSON`. Round 3 found a global constructor that
+  does I/O in the thrown error. The fix that converged was one rule for every gate name (`gateName`: a value import,
+  under its exported name) and one for every value the 404 builds (`isLiteralValue`: literals only). Instance-by-
+  instance patches would not have converged.
+- **TypeScript's binder does not see every redeclaration in a JS file.** `function check` and `var check` in one scope
+  of a `.js` file get separate symbols, and an exported function gets an export symbol of its own. So
+  `symbol.declarations` shows one declaration each time. `isRedeclared` reads the syntax instead.
+- **A shorthand destructuring target's symbol is the property, not the variable.** For `({ POST } = …)`,
+  `getSymbolAtLocation(name)` returns the object literal's property. The variable written is
+  `getShorthandAssignmentValueSymbol`. A test written for the obvious case found this. The code had used the wrong call.
+- **`getExportSpecifierLocalTargetSymbol` works without import resolution.** For `export { h as POST }` it returns
+  the local symbol, an alias whose first declaration is the `ImportSpecifier` when `h` was imported. That is enough
+  to follow it by hand. `noResolve` programs bind each file correctly, and the 81 route files here (both apps and the fixture, 2026-11-17) take 100 to
+  165 ms over three runs.
+- **Prettier pads a markdown table to its widest cell.** Adding the resolved row to `.claude/future-tasks/index.md`
+  re-padded the whole Resolved table, so the diff touches every row of it.
+
 ## The package-model spike (2026-11-17, `docs/adr-package-model`)
 
 - **A workspace symlink hides every package-resolution question.** `node_modules/keel` is a link whose real path

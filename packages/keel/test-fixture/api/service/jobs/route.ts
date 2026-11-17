@@ -1,5 +1,5 @@
 import { abilityActorFromService, authorize } from 'keel/authz/authorize'
-import type { ServiceIdentity } from 'keel/service-auth/verify'
+import { withServiceCaller } from '../../stand-ins'
 
 /**
  * FIXTURE ROUTE — SCANNED, NEVER SERVED. See ../../dockets/route.ts for what this tree is.
@@ -8,27 +8,13 @@ import type { ServiceIdentity } from 'keel/service-auth/verify'
  * a mutation, authorized like any other route by passing its machine actor to `authorize(...)`. Service
  * routes used to sit under a `service/` prefix exemption ("org-scoped by construction"); a machine
  * actor gave them a per-action check instead, so the exemption is gone and this route has to call
- * `authorize(...)` for real. It must ALSO contain `withServiceCaller`, the wrapper that verifies the
- * caller and builds that actor: the scan requires both under `service/`.
+ * `authorize(...)` for real. It must ALSO be wrapped by `withServiceCaller`, the wrapper that verifies the
+ * caller and builds that actor: the scan requires both under `service/`, per verb, so the handler is itself
+ * the call (`export const POST = withServiceCaller(…)`), the shape the showcase's service route has.
  *
- * The wrapper is a local stand-in rather than an import: `withServiceCaller` is app-side machinery
- * (each app composes it over its own respond helpers), so there is no framework symbol to reach for.
+ * `withServiceCaller` is imported from ../../stand-ins.ts, for the reason given there.
  */
-const IDENTITY: ServiceIdentity = {
-    kind: 'org-service',
-    keyId: 'wharf-key',
-    tenantId: 'harbor',
-    tenantSlug: 'harbor',
-    orgId: 'wharf',
-    orgSlug: 'wharf',
-}
-
-const withServiceCaller = (handler: (identity: ServiceIdentity) => Promise<Response>): Promise<Response> =>
-    handler(IDENTITY)
-
-export async function POST(): Promise<Response> {
-    return withServiceCaller(async (identity) => {
-        authorize(abilityActorFromService(identity), 'update', { type: 'Job', orgId: identity.orgId })
-        return Response.json({ ok: true })
-    })
-}
+export const POST = withServiceCaller(async ({ identity }) => {
+    authorize(abilityActorFromService(identity), 'update', { type: 'Job', orgId: identity.orgId })
+    return Response.json({ ok: true })
+})

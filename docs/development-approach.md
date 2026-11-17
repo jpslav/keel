@@ -424,8 +424,8 @@ one function that either allows the action or throws `ForbiddenError` → 403. T
 and the static demo twin) is deny-by-default and org-scoped: role alone (`canManageOrg`) still gates coarse,
 whole-route decisions via `requireRole`, but resource-level decisions — can THIS user create THIS ticket in THIS
 org — go through the ability layer instead of a rank check. A build-time scan (`authorized-mutations.test.ts`)
-makes skipping the choke point loud: every mutating route must call `authorize(...)` or carry a justified
-exemption, the same discipline `withTenant`'s lint ban on raw `getDb()` gives the tenant boundary. The caller
+makes skipping the choke point loud: every mutating handler must reach `authorize(...)` on its own path, or sit
+under a justified exemption and pass that exemption's gate, the same discipline `withTenant`'s lint ban on raw `getDb()` gives the tenant boundary. The caller
 need not be a person: `authorize(actor, action, subject)` also judges a **machine** (a service key, or a token
 verifier the app owns) by a separate, deny-by-default table, so a machine never inherits a member's powers and a
 machine route authorizes like any other instead of being exempted (ADR [0012](adr/0012-framework-app-line-and-registration.md),

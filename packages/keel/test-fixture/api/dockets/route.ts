@@ -10,7 +10,7 @@ import type { AuthUser } from 'keel/ports/auth'
  * thinnest thing that still carries the property the scan asserts about its class of route.
  *
  * THIS FILE is the scan's non-vacuity anchor: a mutating route that is NOT exempt and therefore has to
- * call `authorize(...)` for real. Without one, every per-file assertion could be satisfied by the
+ * call `authorize(...)` for real. Without one, every per-handler assertion could be satisfied by the
  * exemption branch and the whole suite would prove nothing.
  */
 const CALLER: AuthUser = {
