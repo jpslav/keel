@@ -130,16 +130,18 @@ rule respectively.
 untyped, so Postgres infers `$1` from context. The Data API cannot do that: an untyped string arrives as
 `varchar`, and `uuid = varchar` is an error on Aurora. A per-value guess at a type hint would break
 `set_config`'s text argument the moment a tenant id looked like a uuid. So the dialect PREPAREs each SQL
-shape once per process and reads Postgres's own inference from `pg_prepared_statements.parameter_types`.
-It then sends every value as a string inside an explicit `CAST(:name AS <type>)`. That reproduces
-node-postgres's semantics rather than approximating them. It is also how arrays get through at all: the
-Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. The type in the cast
-never carries a length, and a domain is replaced by the type it is built on. An explicit cast to `char(3)`,
-`bit(4)` or a domain over `varchar(3)` truncates or pads a value that does not fit, where node-postgres's
-untyped parameter is checked on assignment and refused. Casting to the bare base type leaves that check to
-the same assignment. So a too-long value stored in a column or passed to a function fails the same way on
-both transports, and a domain's CHECK still runs. A warm process pays nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
-and five outside one, which also needs its own short transaction.
+shape once per process, again once its entry is five minutes old (the accepted limits below), and reads
+Postgres's own inference from `pg_prepared_statements.parameter_types`. It then sends every value as a
+string inside an explicit `CAST(:name AS <type>)`. That reproduces node-postgres's semantics rather than
+approximating them. It is also how arrays get through at all: the Data API rejects array parameters, but
+an array literal cast to `uuid[]` is a string. The type in the cast never carries a length, and a domain
+is replaced by the type it is built on. An explicit cast to `char(3)`, `bit(4)` or a domain over
+`varchar(3)` truncates or pads a value that does not fit, where node-postgres's untyped parameter is
+checked on assignment and refused. Casting to the bare base type leaves that check to the same assignment.
+So a too-long value stored in a column or passed to a function fails the same way on both transports, and
+a domain's CHECK still runs. A warm process pays nothing extra until a shape's entry expires. A new or
+expired SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE) and five
+outside one, which also needs its own short transaction.
 
 **What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
 
@@ -223,7 +225,8 @@ apps send.
   a keyset page of rows with unbounded text (a page of tickets with large bodies) can pass on `pg` and
   fail on this transport. The fix belongs to the query: a smaller page, or narrower columns for the list
   with the large field fetched one row at a time. Step 3 of `docs/runbooks/data-api.md` records the error
-  AWS sends.
+  AWS sends. It also asks whether a single row over 64 KB, a limit AWS's troubleshooting page lists, fails
+  on Aurora PostgreSQL; if it does, such a field cannot be read through this transport at all.
 
 **Not proven, and owed by the `data-api` cutover row:**
 
