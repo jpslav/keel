@@ -840,3 +840,92 @@ To record a why, pass `detail` to `recordAuditEvent`.
 ## Addendum (2026-11-17): every app has its own contract database
 
 The Consequences' "contract runner stays single-app", and the 2026-10-03 addendum's "one app plus the framework's own seam", no longer hold. `vitest.contract.config.ts` makes one project for every `apps/*` that has a `tests/contract` (`tests/support/contract-apps.ts`), plus keel's fixture. Each app's suite is `defineContractSuite` (`tests/support/contract-suite.ts`) over a database of its own, `<slug>_contract`, beside the fixture's two (`keel_contract`, `keel_data_api_contract`) on the one server. The starter carries its own suite and `config/params.ts`, so `pnpm init-app --eject-showcase` rescues nothing from the showcase. `.claude/future-tasks/resolved/contract-suite-single-app.md` is resolved (ADR-0014, step P11).
+
+## Addendum (2026-11-17): the authorization scan judges each handler, not the file's text
+
+**Why.** The scan matched TEXT. A route file passed if its comment-stripped source contained `authorize(` anywhere, or,
+under an exemption, the gate's pattern anywhere. The review of `fix/audit-clock-and-cron-route` found that the
+`webhooks/` exemption passed a file whose only `withWebhookSecret(` was in a string, and a guarded `POST` beside an
+unguarded `DELETE`. The main rule had the same flaw. Each of these, dropped into the starter's api tree, passed main's
+scan: `'authorize('` in a string beside an open `POST`; an authorized `POST` beside an open `DELETE`; `authorize(...)`
+under `if (false)`, after a `return`, in a closure the handler never calls, and only in the `GET`. The same two shapes
+passed `service/`'s `withServiceCaller` gate and `simulator/`'s `if (!isSimulated)` gate, and so did a local
+look-alike of a gate and a 404 branch that mutates before it returns. Only a mention in a comment failed. The table is
+in `.claude/future-tasks/resolved/authz-scan-exemption-matches-text-not-verbs.md`.
+
+**The scan reads code.** `packages/keel/src/authz/route-scan.ts` parses and binds each route file with the TypeScript
+compiler, finds its exported mutating handlers in every form Next accepts (a function, a `const`, `export { h as
+POST }`, a re-export, `export *`), and judges each one on its own path. The rules are stated at the top of that file;
+in short:
+
+- **What counts as `authorize`.** A call to the `authorize` imported from `keel/authz/authorize` (a value import, by
+  any local name, or through a namespace import of that module). A local function named `authorize` is followed like
+  any other same-file function, so it counts only if it reaches the real one.
+- **What counts as on the path.** The call sits in the handler's body before any statement control cannot get past:
+  a `return`, `throw`, `break` or `continue`, or an `if`, `try`, `switch`, labeled block or loop that every way through
+  leaves. It does not sit under a condition the scan can decide is false: a literal, `!`, `void`, or a `const` bound
+  to one. A function literal passed as an argument counts, because it is assumed to be invoked (the
+  `withPortErrors(async () => …)` idiom). So does a same-module function the path calls or passes, followed to any
+  depth, unless the file reassigns or redeclares it. For a wrapper handler (`export const POST = withX(fn)`) only the
+  functions handed to the wrapper are the per-request path; the wrapper call and its other arguments ran when the
+  module loaded.
+- **What is not followed, and so does not count.** A call into another module, an object method, a class body, a
+  generator (calling one runs none of its body), and a parameter or destructuring default.
+- **What is refused, which fails the handler with the reason.** A destructured export, a `let` or `var` handler, a
+  handler the file reassigns or declares twice, and a handler that is a property of another value. An unresolvable
+  re-export or `export *` is refused too (which verbs it brings is unknown). So is a re-export whose module has more
+  than one candidate file (`impl.ts` beside `impl.js`, `impl.mjs` beside `impl/index.ts`, or a `package.json` the
+  bundler may follow), since TypeScript and Next's bundler can pick different ones. Also refused: a re-export cycle, a
+  re-export into a declaration file, a file that does not parse, and a file that is not an ES module or uses
+  `export =`, `module.exports` or `exports`. Re-exports resolve through the root's tsconfig (its `paths`).
+
+**Gates are per verb, bound to imports, and each says what "guarded" means.** `mustMatch` is now a structured gate,
+checked on each exempted handler. Every name in it must be a value import kept under the name it is exported by: a
+local look-alike (`const isSimulated = true`) or an alias (`import { identity as withWebhookSecret }`) is not the gate.
+A namespace member reads under its own name (`respond.withWebhookSecret`). It has three kinds:
+
+- `wrapped-by`: the handler IS the guard's call (`export const POST = withWebhookSecret(…)`). Used by `webhooks/`,
+  and by `service/`'s required-alongside `withServiceCaller`. A function handler that calls the guard inside does
+  not pass.
+- `calls`: the handler reaches the port call. Used by profile, assistant, analytics, auth org and sign-out, and
+  invite acceptance.
+- `opens-with-simulated-404`: the handler's first statement is `if (!isSimulated)`, and its branch does nothing but
+  return or throw a response built from literals (`new Response(null, { status: 404 })`, `Response.json({…})`, a
+  thrown `Error` or imported error class). No parameter may run code before it (a default). Used by `simulator/`, dev
+  sign-in and the upload endpoint. Next's `(request, { params })` signature is fine.
+
+An exemption is an alternative to `authorize(...)`, never a ban on it: a handler under an exempted path that does not
+pass the gate is judged like any other, so one that authorizes passes.
+
+The finding warned that a per-verb rule might fail simulator routes that share one gate across verbs. None does:
+every mutating simulator handler opens with its own gate. The contract in the body above stands. Every exemption
+carries a `mustMatch`, which is matched by path in every root and proves the KIND of route, not the reason's whole
+claim.
+
+**What changed in the trees.** No app route was a false green: every route that passed still passes, with the same
+verbs judged. The fixture changed in three ways. Its routes imported nothing for their gates: each defined a local
+stand-in, which is a look-alike that no longer passes as the gate, so the stand-ins moved to
+`packages/keel/test-fixture/api/stand-ins.ts` and the routes import them. `webhooks/jobs/route.ts` and
+`service/jobs/route.ts` called their wrapper inside a function handler; they are now `export const POST = withX(…)`,
+the shape every app route has, because `wrapped-by` requires it. And `dockets/[id]/route.ts` is new, named as an
+invariant: two mutating verbs in one file, one of them authorizing through a same-file helper.
+
+**Roots and policy are input.** `scanRoutes(roots, options)` and `judge(route, handler, policy)` take the roots (each
+with its tsconfig) and the exemption map as arguments, so a conformance run in an adopter's repository can pass its
+own (ADR-0014, proposed). `options.authorizeModules` names the module whose `authorize` counts. The policy stays in
+`authorized-mutations.test.ts`.
+
+**Limits.**
+
+- The scan proves `authorize` is on the handler's path. It does not prove that `authorize` runs before the mutation,
+  or on every path to it. A handler that returns a 400 early still reaches `authorize` on its other path, and that is
+  the normal shape.
+- A function literal passed to a call is trusted to be invoked.
+- A gate is matched by the name it is imported and exported under, not by the module that exports it. An app may
+  re-export keel's `isSimulated` from its own module, and the wrappers are the app's, so a module that exports a fake
+  under the real name passes. As with a fabricated actor (the 2026-11-16 addendum above), the scan catches a route
+  that lost its gate, not one written to fool it.
+- An `async` same-file helper that calls `authorize` counts when the handler calls it, whether or not the handler
+  awaits it. Not awaited, the helper's `ForbiddenError` becomes an unhandled rejection and the handler goes on. The
+  lint config does not include `@typescript-eslint/no-floating-promises`, which would catch it.
+- A gate still proves the kind of route, never the reason's whole claim.

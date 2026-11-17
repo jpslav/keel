@@ -110,15 +110,20 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   (`keel/authz/authorize.ts`) — a build-time scan
   (`packages/keel/src/authz/authorized-mutations.test.ts`) walks every `route.{ts,tsx,js,jsx,mjs}` under
   EVERY app's whole `apps/*/src/app` tree, not only `api/` (Next serves a `route.ts` from anywhere
-  there), **plus the framework's own reference tree, `packages/keel/test-fixture/api`**. It fails any
-  file that exports a mutating verb and neither calls `authorize(...)` nor has a justified entry in that
-  file's exemption map. Exemption keys are paths relative to each app's `apps/<app>/src/app/api`, so a
-  mutating route OUTSIDE `api/` can match no exemption and must call `authorize(...)` itself. The
-  exemption map's staleness is measured against the FIXTURE tree, so a new exemption needs a file there
-  to demonstrate it; the fixture's routes are scanned, never served. **Every exemption MUST carry a `mustMatch`** —
-  entries are matched by relative path in every root, so a gateless one would exempt an adopter's
-  same-named route from authorization entirely. It proves the route is the KIND the reason describes,
-  never the reason's whole claim; ADR-0012 states the limit.
+  there), **plus the framework's own reference tree, `packages/keel/test-fixture/api`**. It judges EACH
+  exported mutating handler, read with the TypeScript parser (`packages/keel/src/authz/route-scan.ts`), never
+  the file's text: the handler must reach the `authorize` imported from `keel/authz/authorize` on its own path,
+  or its route must have a justified entry in that test's exemption map and the handler must pass that entry's
+  gate. A string, a comment, another verb, a dead branch, an uncalled function or a helper in another module
+  does not count, and a handler the scan cannot follow fails. Exemption keys are paths relative to each app's
+  `apps/<app>/src/app/api`, so a mutating route OUTSIDE `api/` can match no exemption and must call
+  `authorize(...)` itself. The exemption map's staleness is measured against the FIXTURE tree, so a new
+  exemption needs a file there to demonstrate it; the fixture's routes are scanned, never served. **Every
+  exemption MUST carry a `mustMatch`**, a gate checked on each verb (the handler IS the guard's call, reaches a
+  port call, or opens with the simulated-mode 404), every name in it a value import kept under its exported name,
+  so a local look-alike or an alias is not the gate — entries are matched by relative path in every root, so a
+  gateless one would exempt an adopter's same-named route from authorization entirely. It proves the route is
+  the KIND the reason describes, never the reason's whole claim; ADR-0012 states the limit.
 - Dead code fails the gate (`knip`); never silence a finding with a broad ignore — add the narrowest
   possible `knip.json` entry, justified in `docs/build-notes.md`.
 - The MERGED en/es catalogs must stay key- and placeholder-identical (unit-test enforced, both halves).

@@ -8,7 +8,8 @@ import { withWebhookSecret } from 'keel/service-auth/webhook'
  * deliveries. The starter has no Simulator routes, so without this route nothing ticks keel's scheduler there,
  * in a deployment or in `pnpm dev`.
  *
- * Authorization is the shared-secret guard, and the route file has to name it: the authorize() scan exempts a
- * `webhooks/` route (a machine caller, not a user session) only if the file calls `withWebhookSecret(`.
+ * Authorization is the shared-secret guard, and the handler has to BE it: the authorize() scan exempts a
+ * `webhooks/` handler (a machine caller, not a user session) only if that verb's export is a call to an imported
+ * `withWebhookSecret` (or `withMailgunSignature`), as POST is here.
  */
 export const POST = withWebhookSecret(async () => Response.json({ ok: true, ...(await runScheduledTick()) }))

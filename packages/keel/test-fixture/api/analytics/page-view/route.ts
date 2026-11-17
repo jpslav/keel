@@ -1,4 +1,4 @@
-import type { AnalyticsPort } from 'keel/ports/analytics'
+import { analytics } from '../../stand-ins'
 
 /**
  * FIXTURE ROUTE — SCANNED, NEVER SERVED. See ../../dockets/route.ts for what this tree is.
@@ -8,10 +8,8 @@ import type { AnalyticsPort } from 'keel/ports/analytics'
  * the analytics port, which is the checkable half of "mutates no product resource"; a same-named route
  * that wrote product rows instead would not contain it.
  *
- * Local stand-in typed against the port, for the reason given in ../../profile/route.ts.
+ * `analytics` is imported from ../../stand-ins.ts, for the reason given there.
  */
-const analytics: Pick<AnalyticsPort, 'capture'> = { capture: async () => {} }
-
 export async function POST(): Promise<Response> {
     await analytics.capture('page_view', { path: '/fixture' })
     return new Response(null, { status: 204 })
