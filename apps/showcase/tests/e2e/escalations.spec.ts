@@ -14,8 +14,8 @@ import { reachDashboard, signInAs } from './support/people'
 
 /**
  * Switch org (team) within the same tenant via the header OrgSwitcher; the switch reloads the page.
- * `pickOrg` returns once the NEW document is showing that org, so the card check below is about the
- * switched page and not the one being torn down.
+ * `pickOrg` returns once the switcher shows that org, which only the new document can do when the org
+ * changed, so the card check below is about the switched page and not the one being torn down.
  */
 async function switchOrg(page: Page, slug: string) {
     await pickOrg(page, slug)
@@ -28,15 +28,15 @@ async function switchOrg(page: Page, slug: string) {
  * this is how the tenancy suite crosses people too. Lands on the dashboard deterministically.
  *
  * The switch is a full document load, and nothing the page shows can be awaited in its place: Dana and
- * Sam are in the SAME tenant, so `active-tenant` reads the same before and after, and the URL is already
- * `/dashboard`. Waiting on those let this helper return while Dana's page was still up — the next
+ * Sam are in the SAME tenant, so `active-tenant` reads the same before and after, and in these tests the
+ * URL is already `/dashboard`. Waiting on those let this helper return while Dana's page was still up — the next
  * steps then ran as Dana and the "member is read-only" assertions saw her manager buttons. So it waits
  * for a new document, and the identity is asserted on it: `signed-in-as` names who the session is.
  */
 async function switchPerson(page: Page, personId: string, personName: string, expectedTenant: string) {
     await openSimulatorPanel(page)
     await untilNewDocument(page, () => page.getByTestId(`people-${personId}`).click())
-    // The switch lands on the person's remembered route (/dashboard or /org); get to the dashboard.
+    // The switch lands on the person's remembered route (/dashboard, /org or /profile); get to the dashboard.
     await reachDashboard(page)
     await expect(page.getByTestId('signed-in-as')).toContainText(personName)
     await expect(page.getByTestId('active-tenant')).toHaveText(expectedTenant)
@@ -48,7 +48,7 @@ async function switchPerson(page: Page, personId: string, personName: string, ex
  *
  * Every step inside the retry loop carries its own short timeout. A bare `click()` has none, so a step
  * that can never succeed on the page it is stuck on — the option is not in a dropdown that never opened,
- * the page was reloaded under it — blocks until the 60s TEST timeout, and `toPass` never gets to run its
+ * the page was reloaded under it — blocks until the TEST timeout (60s here), and `toPass` never gets to run its
  * next attempt: the retry loop exists to retry, which a step that does not throw cannot let it do. The
  * trigger TOGGLES the dropdown, so it is only clicked when the option is not already on screen.
  */

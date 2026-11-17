@@ -15,11 +15,12 @@ type Stamped = { __previousDocument?: boolean }
  * the new document can satisfy. Stamping the old `window` is that check: the stamp is gone exactly when a
  * fresh document exists, however fast or slow the load was, and whatever URL it landed on.
  *
- * Two lessons already recorded in docs/build-notes.md, here in one place. The budget is the 45s the
- * hand-rolled copies of this wait use (destructive/simulator-jobs and simulator-snapshots): it is one full
- * load of a dev-mode route, which compiles on demand and slows to a crawl under CPU load. It is a bound,
- * not a guess — without it a lost trigger stalls to the 60s test timeout and the report blames whatever
- * step happened to be running.
+ * That a URL wait cannot do this, and the stamp idiom, are recorded in docs/build-notes.md ("Specs that
+ * wipe `.data` mid-suite need their own Playwright project…"), and destructive/simulator-jobs.spec.ts and
+ * simulator-snapshots.spec.ts each hand-roll the same wait. The budget is theirs, 45s: one full load of a
+ * dev-mode route, which compiles on demand (docs/build-notes.md, "An e2e wait that the page being left
+ * also passes", has the 24s `/en/dashboard` measurement). It is a bound, not a guess — without it a lost
+ * trigger stalls to the test timeout and the report blames whatever step happened to be running.
  *
  * Only for a trigger that WILL load a document. One that may be a no-op (picking the org that is already
  * active) would wait out the full budget — assert on the state you expect instead.

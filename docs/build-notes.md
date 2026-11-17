@@ -1523,4 +1523,5 @@ the panel is the element that carries it.
   (`E2E_BUILD`).
 - `tests/e2e/destructive/notifications.spec.ts` carried the same two helper copies and got the same changes.
   `tenancy.spec.ts`'s `switchPerson` has the same second hop, which waits on a URL it may already be on; its
-  first hop is sound because that switch changes the tenant name.
+  first hop is sound because that switch changes the tenant name. It was left alone: with the old
+  `pickOrg` and the same 1.5 s latency, `tenancy.spec.ts` passed 10 of 10.
