@@ -221,6 +221,10 @@ apps send.
   `a[lo:hi]`, fails loudly. Write `a[lo : hi]`.
 - **A statement PREPARE cannot take, such as `CALL proc($1)`,** cannot be described, so with parameters
   it fails loudly. An EXPLAIN is described by the statement it explains.
+- **A SQL-standard function body is refused as more than one statement.** A `CREATE FUNCTION` whose
+  body is `BEGIN ATOMIC select 1; select 2; END` is one statement, but the scanner does not parse
+  `BEGIN ATOMIC`, and a `;` inside it has more SQL after it. It fails loudly. A dollar-quoted body
+  (`AS $$ … $$`) is unaffected. No migration of keel or its two apps has a `BEGIN ATOMIC` body.
 - **A response over 1 MiB fails, where `pg` would return it.** Rows are bounded in count, not in bytes:
   a keyset page of rows with unbounded text (a page of tickets with large bodies) can pass on `pg` and
   fail on this transport. The fix belongs to the query: a smaller page, or narrower columns for the list
