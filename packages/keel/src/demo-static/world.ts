@@ -813,7 +813,8 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         // The same closed vocabulary the server intake records (keel/core/inbound-email).
         let detail: InboundReceivedDetail = { outcome: 'unmatched', cause: 'no-handler' }
 
-        const handler = inboundHandlers[parsed.handler]
+        // An own entry only, as in the server intake: `+constructor` names no handler.
+        const handler = Object.hasOwn(inboundHandlers, parsed.handler) ? inboundHandlers[parsed.handler] : undefined
         if (!handler) {
             error = `no handler: ${parsed.handler}`
         } else {

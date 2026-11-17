@@ -154,12 +154,17 @@ const BEARER_SHAPE = /\bbearer\s+[\w.~+/=-]{16,}/i
 const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
 function keyWords(key: string): string[] {
-    return key
-        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter(Boolean)
+    return (
+        key
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter(Boolean)
+            // A version or a number on the end names the same thing: `password2`, `apiKey_v2`.
+            .filter((word) => !/^v?\d+$/.test(word))
+            .map((word) => word.replace(/(?<=[a-z])\d+$/, ''))
+    )
 }
 
 /**
@@ -178,7 +183,8 @@ function secretNamed(key: string): { plural: boolean; qualified: boolean } | nul
     const singular = own(last)
     if (singular) return { plural: false, qualified: words.length > singular }
     if (last.length < 2 || !last.endsWith('s')) return null
-    const plural = own(last.slice(0, -1))
+    // `tokens` and `passwordHashes`: try the word without its `s`, then without `es`.
+    const plural = own(last.slice(0, -1)) || (last.endsWith('es') ? own(last.slice(0, -2)) : 0)
     return plural ? { plural: true, qualified: words.length > plural } : null
 }
 
@@ -190,6 +196,14 @@ function stringProblem(value: string): string | null {
     if (value.includes('eyJ') && JWT_SHAPE.test(value)) return 'looks like a JWT'
     if (BEARER_SHAPE.test(value)) return 'looks like a Bearer credential'
     return null
+}
+
+/**
+ * A key as it may appear in an error's path: itself when it is short and passes every shape check,
+ * otherwise withheld. Bounded before any pattern reads it, so it costs the same however long the key is.
+ */
+function shownKey(key: string): string {
+    return key.length <= 64 && stringProblem(key) === null ? key : '<key withheld>'
 }
 
 function isPlainObject(value: object): boolean {
@@ -241,7 +255,7 @@ function checkObject(value: object, path: string, depth: number, content: boolea
         // An optional property left undefined is absent, as JSON writes it (and as the type allows).
         if (child === undefined) continue
         if (content) checkKey(key, child, path)
-        checkValue(child, `${path}.${key}`, depth + 1, content)
+        checkValue(child, `${path}.${shownKey(key)}`, depth + 1, content)
     }
 }
 
@@ -255,7 +269,7 @@ function checkKey(key: string, child: unknown, path: string): void {
     if (!named || child === null || typeof child === 'boolean') return
     if (named.plural && named.qualified && typeof child === 'number') return
     refuse(
-        `${path}.${key}`,
+        `${path}.${shownKey(key)}`,
         named.plural
             ? 'names secrets, and is not a count of them (a number under a key like revokedTokens)'
             : 'names a secret',

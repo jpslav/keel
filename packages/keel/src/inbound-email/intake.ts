@@ -124,7 +124,8 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         bodyHtml: input.bodyHtml ?? null,
     })
 
-    const handler = inboundHandlers[parsed.handler] ?? null
+    // An own entry only: `<org>+constructor@…` must not find Object.prototype's `constructor`.
+    const handler = Object.hasOwn(inboundHandlers, parsed.handler) ? (inboundHandlers[parsed.handler] ?? null) : null
     if (!handler) {
         await setInboundStatus(db, org.tenantId, id, {
             status: 'unmatched',

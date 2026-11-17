@@ -246,6 +246,9 @@ describe('recordAuditEvent detail', () => {
         ['a card number', { cardNumber: '4111111111111111' }, 'detail.cardNumber names a secret'],
         ['a card security code', { cvv: 123 }, 'detail.cvv names a secret'],
         ['a social security number', { ssn: 'x' }, 'detail.ssn names a secret'],
+        ['a numbered password', { password2: 'x' }, 'detail.password2 names a secret'],
+        ['a versioned api key', { apiKey_v2: 'x' }, 'detail.apiKey_v2 names a secret'],
+        ['an -es plural', { passwordHashes: ['x'] }, 'detail.passwordHashes names secrets'],
         ['a header name', { Authorization: 'x' }, 'detail.Authorization names a secret'],
         ['a kebab-case cookie', { 'set-cookie': 'x' }, 'detail.set-cookie names a secret'],
         ['a nested secret', { items: [{ ok: 1 }, { privateKey: 'x' }] }, 'detail.items[1].privateKey names a secret'],
@@ -269,6 +272,20 @@ describe('recordAuditEvent detail', () => {
         const refused = await attempt(detail)
         expect(refused).toContain(message)
         expect(refused).not.toContain(String(Object.values(detail)[0]))
+    })
+
+    test.each([
+        ['a non-finite number', { 'jane.doe@example.com': Number.NaN }, 'is not a finite number'],
+        ['a Date', { 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln': new Date(0) }, 'is not a plain object'],
+        ['an undefined in an array', { by: { 'jane.doe@example.com': [undefined] } }, 'is undefined'],
+        ['a very long key', { ['k'.repeat(5000)]: Number.NaN }, 'is not a finite number'],
+    ])('a refusal under %s never repeats an unsafe key in its path', async (_name, detail, message) => {
+        const refused = await attempt(detail)
+        expect(refused).toContain(message)
+        expect(refused).toContain('<key withheld>')
+        expect(refused).not.toContain('jane.doe')
+        expect(refused).not.toContain('eyJ')
+        expect(refused).not.toContain('kkkk')
     })
 
     test('a key shaped like an email address is refused without repeating it', async () => {

@@ -326,6 +326,30 @@ describe('intakeInboundEmail', () => {
         }
     })
 
+    test('a slug Object.prototype carries (constructor, the one a slug can spell) names no handler', async () => {
+        const slug = 'constructor'
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { fakeAuth } = await import('../adapters/fake/auth')
+        const { intakeInboundEmail } = await import('./intake')
+        const { tenantId } = await depotIds()
+
+        const outcome = await intakeInboundEmail(fakeDb, fakeAuth, {
+            to: formatInboundRecipient('depot', slug, DEMO_INBOUND_DOMAIN),
+            from: ADA,
+            subject: 'hi',
+            bodyText: 'body',
+        })
+        expect(outcome).toMatchObject({ stored: true, status: 'unmatched', handler: null })
+        const received = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select('detail')
+                .where('subject_id', '=', outcome.id!)
+                .executeTakeFirstOrThrow(),
+        )
+        expect(received.detail).toEqual({ outcome: 'unmatched', cause: 'no-handler' })
+    })
+
     test('an unresolvable org is unmatched and unstored (no tenant to anchor)', async () => {
         const { fakeDb } = await import('../adapters/fake/db')
         const { fakeAuth } = await import('../adapters/fake/auth')
