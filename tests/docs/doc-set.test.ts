@@ -172,6 +172,13 @@ describe('resolves', () => {
         expect(resolves('scripts', template()), 'a directory of the real repo that is not in the temp tree').toBe(false)
     })
 
+    it('accepts a file citation on its parent directory existing in the tree it is given, not the working directory', () => {
+        expect(resolves('apps/showcase/src/only-in-temp/new.ts', template())).toBe(true)
+        // `packages/keel/src` is in the temp tree; `scripts/` is only in the real repo
+        expect(resolves('packages/keel/src/new.ts', template())).toBe(true)
+        expect(resolves('scripts/new.ts', template())).toBe(false)
+    })
+
     it('is strict in the template: a broken citation of either reference app fails', () => {
         const root = template()
         expect(resolves('apps/showcase/src/no-such-dir', root)).toBe(false)
@@ -210,7 +217,12 @@ describe('resolves', () => {
         // An upstream merge adds every NEW file under apps/showcase/ back, even after you deleted the app; a
         // local rename leaves apps/starter/node_modules. Neither makes the directory an app again.
         const root = tree(
-            ['apps/console/package.json', 'apps/showcase/DEMO-SIZE.md', 'apps/showcase/tests/e2e/new.spec.ts'],
+            [
+                'apps/console/package.json',
+                'apps/showcase/DEMO-SIZE.md',
+                'apps/showcase/tests/e2e/new.spec.ts',
+                'apps/showcase/src/new-component.ts', // where a new upstream file most often lands
+            ],
             ['apps/starter/node_modules/left-behind', 'packages/keel/src'],
         )
         expect(resolves('apps/showcase/src/domain/db/tickets.ts', root)).toBe(true)

@@ -519,7 +519,7 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
                 scripts: Record<string, string>
             }
             const budget = /check-demo-size\.mjs\s+(\d+)\s*$/.exec(showcase.scripts['check:demo-size'] ?? '')?.[1]
-            expect(budget, "the showcase's script passes no number").toBeDefined()
+            expect(budget, "the showcase's check:demo-size no longer passes a number").toBeDefined()
             expect(flat(result.stdout)).toContain(
                 `apps/demo/package.json's check:demo-size passes the static demo's byte budget, ${budget}.`,
             )

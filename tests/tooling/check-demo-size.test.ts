@@ -85,7 +85,7 @@ describe('check-demo-size', () => {
 
     it("holds no number and no budget history of its own, because an adopter must never need to edit keel's script", () => {
         // An upstream merge changes this file, so a number or a dated entry written into it is a conflict on
-        // every later merge. The number is each app's package.json argument; the history is its DEMO-SIZE.md.
+        // every later merge. The number is each app's package.json argument; the history lives with the app (the starter's DEMO-SIZE.md; the showcase's is in docs/decision-log.md).
         const source = readFileSync(SCRIPT, 'utf8')
         expect(source).not.toMatch(/DEFAULT_BUDGET|\bRE-BASED\b|\bRAISED\b|^\/\/ HISTORY/m)
         expect(source).not.toMatch(/\b\d{3}_?\d{3}\b/)

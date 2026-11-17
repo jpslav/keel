@@ -47,7 +47,7 @@ if (size > budget) {
     console.error(
         "That number is this app's own: the argument of `check:demo-size` in its package.json. " +
             'First find what grew (see WHEN IT GOES RED in scripts/check-demo-size.mjs). If the growth is intentional, ' +
-            "raise the budget in its own commit and say what grew in the app's DEMO-SIZE.md.",
+            'raise the budget in its own commit and say what grew where the app records its budget (apps/<app>/DEMO-SIZE.md).',
     )
     process.exit(1)
 }

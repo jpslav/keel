@@ -787,7 +787,7 @@ function readDemoBudget(onDisk: string): DemoBudget {
  * Why this is in "WHAT THIS DID NOT TOUCH" and not something init-app does: the budget is a number the
  * adopter has to own. And why it says where to record a change: the obvious place is the header of
  * scripts/check-demo-size.mjs, which is keel's, so a note written there is a conflict on every later upstream
- * merge (ADR-0013). The history lives beside the number, in the app's own DEMO-SIZE.md.
+ * merge (ADR-0013). The history lives beside the number, in the app's own DEMO-SIZE.md where it has one.
  */
 function demoBudgetBullet(survivor: string, budget: DemoBudget): string {
     if (budget === null) return ''

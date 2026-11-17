@@ -1822,8 +1822,8 @@ update.
   deleted the app, and a directory holding one stray file had switched the rule off. The template stays strict (a broken one fails, watched
   failing), a rename-only tree is strict about the showcase it kept, and the adopter's own app and
   `packages/keel` are strict everywhere. Rejected: asking every doc to cite `apps/<app>/…` (it depends on
-  each future author, and the live docs hold about 150 citations of the showcase in 43 files and 40 of the
-  starter in 15, most of them pointing at keel's worked examples and not at the reader's own app), and a rule in the
+  each future author, and the live docs hold 159 citations of the showcase in 46 files and 46 of the
+  starter in 17 (counted 2026-11-17), most of them pointing at keel's worked examples and not at the reader's own app), and a rule in the
   test alone (`init-app` asks `resolves` which citations are gone before it generalizes them, so the rule
   lives where both read it). The list is closed at two names: `init-app` reserves `showcase`, and an adopter
   who keeps the name `starter` has the directory, so their own citations of it are still checked.
