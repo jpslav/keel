@@ -9,7 +9,7 @@ import type { StoragePort } from '../../ports/storage'
 import { fakeAnalytics } from '../fake/analytics'
 import { createRealAnalytics } from './analytics'
 import { realAuth } from './auth'
-import { createRealDb } from './db'
+import { createRealDataApiDb, createRealDb } from './db'
 import { createRealEmail } from './email'
 import { createRealJobs } from './jobs'
 import { createRealLlm } from './llm'
@@ -29,7 +29,6 @@ interface RealPorts {
 const REQUIRED_ENV: Record<string, string> = {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'auth-dev',
     CLERK_SECRET_KEY: 'auth-dev',
-    DATABASE_URL: 'cloud-accounts',
     STORAGE_BUCKET: 'cloud-accounts',
     AWS_REGION: 'cloud-accounts',
     JOBS_CODEBUILD_PROJECT: 'job-runner',
@@ -43,10 +42,35 @@ const REQUIRED_ENV: Record<string, string> = {
     MAILGUN_WEBHOOK_SIGNING_KEY: 'email-inbound',
 }
 
+/**
+ * How the app reaches Postgres — an explicit switch, never inferred from which variables happen to be
+ * set (a deployment that half-configures the Data API must fail, not quietly fall back to `pg`).
+ *
+ * - `pg` (the default): node-postgres over a socket, from a Lambda inside the database's VPC.
+ * - `data-api`: the RDS Data API over HTTPS, from a Lambda outside any VPC (ADR-0002, addendum
+ *   2026-11-16). Its variables replace DATABASE_URL.
+ */
+const DATABASE_DRIVERS = ['pg', 'data-api'] as const
+type DatabaseDriver = (typeof DATABASE_DRIVERS)[number]
+
+const DATABASE_ENV: Record<DatabaseDriver, Record<string, string>> = {
+    pg: { DATABASE_URL: 'cloud-accounts' },
+    'data-api': { DATABASE_CLUSTER_ARN: 'data-api', DATABASE_SECRET_ARN: 'data-api', DATABASE_NAME: 'data-api' },
+}
+
+function databaseDriver(): DatabaseDriver {
+    const value = process.env.DATABASE_DRIVER ?? 'pg'
+    if (!(DATABASE_DRIVERS as readonly string[]).includes(value)) {
+        throw new Error(`DATABASE_DRIVER must be one of ${DATABASE_DRIVERS.join(', ')} (got "${value}")`)
+    }
+    return value as DatabaseDriver
+}
+
 export function assertRealEnv(): void {
-    const missing = Object.keys(REQUIRED_ENV).filter((name) => !process.env[name])
+    const required = { ...REQUIRED_ENV, ...DATABASE_ENV[databaseDriver()] }
+    const missing = Object.keys(required).filter((name) => !process.env[name])
     if (missing.length > 0) {
-        const rows = [...new Set(missing.map((name) => REQUIRED_ENV[name]))]
+        const rows = [...new Set(missing.map((name) => required[name]))]
         throw new CutoverPendingError(
             rows as string[],
             `Missing env: ${missing.join(', ')}. See docs/cutover-checklist.md.`,
@@ -59,7 +83,15 @@ export function createRealPorts(): RealPorts {
     const env = process.env as Record<string, string>
     return {
         auth: realAuth,
-        db: createRealDb(env.DATABASE_URL),
+        db:
+            databaseDriver() === 'data-api'
+                ? createRealDataApiDb({
+                      resourceArn: env.DATABASE_CLUSTER_ARN,
+                      secretArn: env.DATABASE_SECRET_ARN,
+                      database: env.DATABASE_NAME,
+                      region: env.AWS_REGION,
+                  })
+                : createRealDb(env.DATABASE_URL),
         storage: createRealStorage(env.STORAGE_BUCKET, env.AWS_REGION),
         llm: createRealLlm(env.ANTHROPIC_API_KEY),
         email: createRealEmail(env.MAILGUN_DOMAIN, env.MAILGUN_API_KEY, env.EMAIL_FROM),
