@@ -2147,3 +2147,66 @@ runbook and clicking fifteen things in the right order.
   its own change.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
+
+## Storage port: `head(key)` and `copy`'s `ifMatch` (2026-11-17, `storage-head`)
+
+Requested because `copy` alone cannot serve a finalize step that re-checks each staged file's size and content
+type before making it live: the port could only read them by fetching the whole object. A metadata read is a
+generic primitive (S3 `HeadObject`; a stat in the fake).
+
+- **Named `head`, after the port's verbs.** `put`, `get` and `delete` are HTTP verbs already; `head` is `get`
+  without the body and is S3's own name for it. `stat` would have been the filesystem's.
+- **It returns `StoredObjectInfo { size, contentType, etag, lastModified }`.** Size and content type are what
+  finalize needs. The etag is there so the check can be tied to the copy (below). `lastModified` is the one
+  field nobody asked for; both adapters give it truthfully and a stat without a time looks wrong, but nothing
+  else depends on it.
+- **The etag is opaque.** AWS's own reference calls it "an opaque identifier", so callers compare two for equality
+  and pass one back UNCHANGED as `ifMatch`; the port promises no format and not whether rewriting identical
+  bytes changes it. Real: exactly what S3 sent, quotes included. Fake: a quoted SHA-256 of the bytes, shaped like
+  S3's so a caller that mishandles the quotes fails here too. The fake computes size, modification time and hash
+  from ONE open handle, so a writer that renames a new file over the old one cannot make them describe two
+  versions; the cost is that a fake `head` reads the whole file.
+- **A missing object is `null`, as for `get`; `copy` throws.** A read has a natural "nothing" to return, so a
+  caller asks `if (!info)`; `copy` has nothing to return and a silent no-op would hide a lost file. Both
+  adapters agree: the real one maps S3's `NotFound` (the SDK's error for a HEAD 404) and `NoSuchKey`; the fake
+  answers `null` for anything that is not a regular file (a directory, a bookkeeping name).
+- **What S3's HEAD cannot say.** A HEAD response has no body, so AWS gives only a generic status ("It's not
+  possible to retrieve the exact exception"): a missing BUCKET is also a 404 and reads as `null`, where `put` or
+  `get` would surface it. A 403 (the role lacks `s3:ListBucket`, so a missing key is not a 404) is not
+  mapped and throws, as in `copy`. A response without a size, ETag or date throws: defaulting a size to 0
+  would let a maximum-size check pass on something S3 never said.
+- **A stat-then-copy check is advisory; `ifMatch` makes it exact.** The object can change between the two
+  calls, so `copy(from, to, { ifMatch: info.etag })` copies only if the source is still that version, else throws
+  the new `PreconditionFailedError` and copies nothing. Real: S3's `CopySourceIfMatch`, which S3 evaluates with
+  the copy. Fake: it compares the staged copy's hash, the very bytes about to be published, so what lands is
+  exactly what matched even if a writer replaces the source mid-copy (a test races exactly that). The order
+  of the checks is same key, missing source, precondition. No route glue maps the new error; the caller says
+  409 or 412.
+- **412 is inferred, not read.** The CopyObject reference states 412 for its other conditional headers and gives no
+  code for `x-amz-copy-source-if-match`, which is HTTP's rule for a failed If-Match. The adapter maps the name
+  `PreconditionFailed` or a bare 412, and the cutover row `storage-head` asks to confirm it.
+- **No IAM change** (`HeadObject` needs `s3:GetObject` per AWS; `grantReadWrite` has `s3:GetObject*` and
+  `s3:List*`), **no static-demo twin** (no storage port there). **Not done:** `copy` returning the new object's
+  info, a create-only copy (`ifNoneMatch`), and reading a specific version.
+- **The finalize sequence an app uses:**
+
+    ```ts
+    const info = await storage.head(stagedKey) // null: the staged file is gone
+    if (!info || info.size > MAX_BYTES || info.contentType !== EXPECTED_TYPE) {
+        await storage.delete([stagedKey])
+        return rejected
+    }
+    try {
+        // exactly the version that was checked, copied server-side
+        await storage.copy(stagedKey, finalKey, { ifMatch: info.etag })
+    } catch (error) {
+        if (error instanceof PreconditionFailedError) return changedAfterTheCheck // re-head, or reject
+        if (error instanceof NotFoundError) return stagedFileVanished
+        throw error
+    }
+    await storage.delete([stagedKey]) // idempotent
+    ```
+
+    A retry after a copy that succeeded and a delete that failed finds the staged file again, gets the same etag,
+    and converges over `finalKey`. A retry after both succeeded gets `null` from `head(stagedKey)`; the caller
+    reads that as "already finalized" by checking `head(finalKey)`.
