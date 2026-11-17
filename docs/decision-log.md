@@ -1941,6 +1941,13 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
 - **Declined: invalidating the type cache.** A statement that fails inside a transaction has already
   aborted it, so a retry with fresh types could only help outside one. It is an accepted limit (ADR-0002
   addendum): deploys replace processes.
+- **Round 2's fixes were reviewed as a diff, not by a third general round** (Opus): its findings were one
+  more instance of round 1's shape, now swept, and one defect in round 1's fix. The diff review found
+  nothing at MEDIUM. Fixed from its LOWs: EXPLAIN is recognised after a comment, as `ANALYSE`, and before
+  a parenthesised statement; a contract test now runs a parameterised EXPLAIN through the dialect, which
+  nothing did; and the too-long-value test asserts each refusal's reason, not merely that something
+  failed. Accepted as limits (ADR-0002 addendum): an explicit `::domain` cast in the SQL, and a colon
+  before a column name, as in `a[lo:hi]`.
 
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 

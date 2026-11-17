@@ -7,13 +7,13 @@ import { createRealDb } from './db'
  * contract tests use. Invoked by the CD pipeline before each release shifts traffic.
  * AUTHORED — CUTOVER (`cloud-accounts`; `data-api` for the Data API path).
  *
- * The transport follows the app's switch (`DATABASE_TRANSPORT`, ./index.ts), and the Data API one is
- * a dynamic import here too. On the Data API, Kysely's
- * Migrator runs every pending migration in ONE Data API transaction, as it does on `pg` (Postgres DDL
- * is transactional). Two limits follow, and both fail loudly rather than half-apply: the transaction
- * dies after an hour (AWS's BeginTransaction API reference) or three idle minutes, and any single statement still running at 45 seconds is
- * cancelled. A migration that cannot fit — a long backfill, an index on a large table — runs from inside
- * the VPC on the `pg` transport instead.
+ * The transport follows the app's switch (`DATABASE_TRANSPORT`, ./index.ts), and the Data API one is a
+ * dynamic import here too. On the Data API, Kysely's Migrator runs every pending migration in ONE Data
+ * API transaction, as it does on `pg` (Postgres DDL is transactional). Two limits follow, and both fail
+ * loudly rather than half-apply: the transaction dies after an hour (AWS's BeginTransaction API
+ * reference) or three idle minutes, and any single statement still running at 45 seconds is cancelled. A
+ * migration that cannot fit — a long backfill, an index on a large table — runs from inside the VPC on
+ * the `pg` transport instead.
  *
  * @public
  */

@@ -136,9 +136,8 @@ Data API rejects array parameters, but an array literal cast to `uuid[]` is a st
 never carries a length, and a domain is replaced by the type it is built on. An explicit cast to `char(3)`,
 `bit(4)` or a domain over `varchar(3)` truncates or pads a value that does not fit, where node-postgres's
 untyped parameter is checked on assignment and refused. Casting to the bare base type leaves that check to
-the same assignment, so a too-long value fails the same way on both transports, and a domain's CHECK
-still runs. A warm process pays
-nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
+the same assignment. So a too-long value stored in a column or passed to a function fails the same way on
+both transports, and a domain's CHECK still runs. A warm process pays nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
 and five outside one, which also needs its own short transaction.
 
 **What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
@@ -192,9 +191,20 @@ lock. Nothing in
 contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
 emulators".
 
-**One limit is accepted rather than closed.** The inferred types are cached for the life of the process.
-A migration that changes a parameter's type while an old process keeps serving would be answered with the
-old type. Deploys replace processes, so after an out-of-band schema change, restart the app.
+**Some limits are accepted rather than closed.** None of them arises in keel's own SQL.
+
+- **The inferred types are cached for the life of the process.** A migration that changes a parameter's
+  type while an old process keeps serving would be answered with the old type. Deploys replace processes,
+  so after an out-of-band schema change, restart the app.
+- **An explicit cast to a length-bearing domain, written in the SQL, truncates.** In
+  `${value}::code3`, where `code3` is a domain over `char(3)`, the value reaches that cast already
+  converted to the base type. The cast is explicit, so it truncates, where node-postgres refuses the value.
+  Storing the value in a domain column, or passing it to a function, refuses it on both transports.
+- **A colon directly before a name, outside a literal, is read by the Data API as a parameter.** The
+  dialect parenthesizes its own placeholders, so `a[1:$1]` works, but an array slice bounded by a column,
+  `a[lo:hi]`, fails loudly. Write `a[lo : hi]`.
+- **A statement PREPARE cannot take, such as `CALL proc($1)`,** cannot be described, so with parameters
+  it fails loudly. An EXPLAIN is described by the statement it explains.
 
 **Not proven, and owed by the `data-api` cutover row:**
 

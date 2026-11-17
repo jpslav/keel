@@ -290,8 +290,9 @@ class RdsDataDriver implements Driver {
             // format_type(t, -1), not t::text: regtype prints `character` and `bit`, which a CAST reads as
             // char(1) and bit(1). And a domain is walked down to its base type first: an explicit cast to a
             // domain over char(3) or varchar(3) truncates, where node-postgres's input path errors on the
-            // same value. Cast to the length-free base, and the assignment to the column (or domain)
-            // checks length and constraints exactly as it does for node-postgres.
+            // same value. Cast to the length-free base, and storing the value in a column (or passing it to
+            // a function) checks length and constraints as it does for node-postgres. An explicit
+            // `::domain` cast written in the SQL still truncates: an accepted limit (ADR-0002's addendum).
             const out = await this.statement(
                 `WITH RECURSIVE params AS (
                     SELECT u.i, u.t::oid AS oid FROM pg_prepared_statements p,

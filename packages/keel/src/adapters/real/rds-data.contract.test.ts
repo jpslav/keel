@@ -210,6 +210,31 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         expect(rows).toEqual([])
     })
 
+    test('an EXPLAIN of a parameterised statement is typed by the statement it explains', async () => {
+        // PREPARE refuses EXPLAIN, so the describe step asks about the statement alone. Outside a transaction
+        // a failed describe throws; inside one it would abort the transaction.
+        const plan =
+            await sql`explain select * from tenants where id = ${'00000000-0000-0000-0000-000000000000'}`.execute(db())
+        expect(plan.rows.length).toBeGreaterThan(0)
+
+        // EXPLAIN ANALYZE runs its statement, so it goes inside a transaction that is then rolled back.
+        const slug = `explained-${Date.now()}`
+        await expect(
+            db()
+                .transaction()
+                .execute(async (trx) => {
+                    await sql`/* tag */ explain analyse insert into tenants (slug, name) values (${slug}, ${'explained'})`.execute(
+                        trx,
+                    )
+                    const seen = await trx.selectFrom('tenants').select('name').where('slug', '=', slug).execute()
+                    expect(seen).toEqual([{ name: 'explained' }])
+                    throw new Error('undo')
+                }),
+        ).rejects.toThrow('undo')
+        const rows = await db().selectFrom('tenants').select('id').where('slug', '=', slug).execute()
+        expect(rows).toEqual([])
+    })
+
     test('a parameterised statement outside a transaction asks Postgres for its types once, then reuses them', async () => {
         // A query shape no other test compiles, so its first run is a guaranteed cache miss.
         const shape = (n: number) =>
@@ -430,19 +455,21 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             ['pg', viaPg],
             ['data-api', dataApi],
         ] as const) {
-            for (const [column, value] of [
-                ['dc', 'abcd'],
-                ['ds', 'wxyz'],
-                ['ds', 'bad'],
+            // Refused for the same reason on both: the length, or the domain's CHECK. Any refusal would not do,
+            // since a Data API call can fail for reasons of its own.
+            for (const [column, value, reason] of [
+                ['dc', 'abcd', /value too long for type character\(3\)/],
+                ['ds', 'wxyz', /value too long for type character varying\(3\)/],
+                ['ds', 'bad', /violates check constraint "data_api_short_check"/],
             ] as const) {
                 const outcome =
                     await sql`insert into data_api_parity (k, ${sql.ref(column)}) values (${`${label}-${column}-${value}`}, ${value})`
                         .execute(port.getDb())
                         .then(
                             () => 'stored',
-                            () => 'refused',
+                            (e: unknown) => (e instanceof Error ? e.message : String(e)),
                         )
-                expect(outcome, `${label}: ${column} = '${value}'`).toBe('refused')
+                expect(outcome, `${label}: ${column} = '${value}'`).toMatch(reason)
             }
         }
     })

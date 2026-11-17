@@ -51,6 +51,13 @@ describe('rewritePlaceholders: only real `$n` placeholders are rewritten', () =>
         expect(describableSql('EXPLAIN (FORMAT JSON, ANALYZE) select $1')).toBe('select $1')
         expect(describableSql('explain analyze verbose select $1')).toBe('select $1')
         expect(describableSql('select explain from t where x = $1')).toBe('select explain from t where x = $1')
+        // a comment before it, the British spelling, and a parenthesised statement rather than options
+        expect(describableSql('/* tag */ explain select $1')).toBe('select $1')
+        expect(describableSql('-- why\nEXPLAIN ANALYSE select $1')).toBe('select $1')
+        expect(describableSql('explain (select * from t where id = $1)')).toBe('(select * from t where id = $1)')
+        expect(describableSql('explain (costs off) (with x as (select $1) table x)')).toBe(
+            '(with x as (select $1) table x)',
+        )
     })
 })
 
