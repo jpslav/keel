@@ -23,6 +23,16 @@ export class NotFoundError extends Error {
     }
 }
 
+/** Thrown when a precondition the caller supplied no longer holds: a storage `copy` whose `ifMatch` names a
+ *  version of the source that has since changed. The caller read something, decided, and the thing moved, so
+ *  it should read again rather than retry. Route glue maps it to a 409 or a 412 as the route sees fit. */
+export class PreconditionFailedError extends Error {
+    constructor(message = 'precondition failed') {
+        super(message)
+        this.name = 'PreconditionFailedError'
+    }
+}
+
 /** Thrown by real adapters when their cutover items are unfilled (fail-fast for dev:real). */
 export class CutoverPendingError extends Error {
     constructor(

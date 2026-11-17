@@ -109,6 +109,9 @@ export async function writeFileAtomic(
 
 /** A copy that has been made beside its target but not yet put there. */
 export interface StagedCopy {
+    /** The temp file holding the copy, which exists until `publish` or `discard`: what a caller inspects to
+     *  decide whether to publish. */
+    readonly file: string
     /** Puts the copy at the target with one rename. On failure the temp file is removed and the error thrown. */
     publish(): Promise<void>
     /** Removes the temp file. Safe after `publish` (it has nothing left to remove) and safe to call twice. */
@@ -132,6 +135,7 @@ export async function stageCopy(from: string, to: string): Promise<StagedCopy> {
         throw err
     }
     return {
+        file: tmp,
         async publish() {
             try {
                 await rename(tmp, to)

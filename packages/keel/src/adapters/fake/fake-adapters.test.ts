@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
-import { NotFoundError } from '../../ports/errors'
+import { NotFoundError, PreconditionFailedError } from '../../ports/errors'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the adapters.
 const tmp = makeTestTmpDir('app-fakes-')
@@ -304,6 +304,198 @@ describe('fake storage', () => {
             const missing = fakeStorage.copy(sub('same/never'), sub('same/never'))
             await expect(missing).rejects.toThrow(/same key/)
             await expect(missing).rejects.not.toBeInstanceOf(NotFoundError)
+        })
+    })
+
+    describe('head', () => {
+        const sub = (name: string) => `head-test/${name}`
+
+        test('reports size, content type, etag and last-modified, without the bytes', async () => {
+            const { fakeStorage } = await import('./storage')
+            const bytes = new Uint8Array([0, 255, 128, 10, 13, 0, 1, 254, 7])
+            const before = Date.now() - 1000
+            await fakeStorage.put(sub('basic'), bytes, 'application/x-keel-test')
+
+            const info = (await fakeStorage.head(sub('basic')))!
+
+            expect(info.size).toBe(bytes.length)
+            expect(info.contentType).toBe('application/x-keel-test')
+            expect(info.etag).toMatch(/^"[0-9a-f]{64}"$/)
+            expect(info.lastModified).toBeInstanceOf(Date)
+            expect(info.lastModified.getTime()).toBeGreaterThanOrEqual(before)
+            expect(info.lastModified.getTime()).toBeLessThanOrEqual(Date.now() + 1000)
+            // and it is the same object get returns
+            expect((await fakeStorage.get(sub('basic')))!.body.length).toBe(info.size)
+        })
+
+        test('a size of zero is a size of zero', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('empty'), '', 'text/plain')
+            expect(await fakeStorage.head(sub('empty'))).toMatchObject({ size: 0, contentType: 'text/plain' })
+        })
+
+        test('is null for a missing key, a directory and a bookkeeping name, as get is', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('dir/inner'), 'i', 'text/plain')
+            // Even with a sidecar sitting beside it, so nothing but "it is not a regular file" can say no.
+            writeFileSync(path.join(tmp, 'storage', `${sub('dir')}.meta.json`), JSON.stringify({ contentType: 'x/y' }))
+
+            expect(await fakeStorage.head(sub('nope'))).toBeNull()
+            expect(await fakeStorage.head(sub('dir'))).toBeNull() // a directory is not an object
+            expect(await fakeStorage.head(`${sub('dir/inner')}.meta.json`)).toBeNull()
+            expect(await fakeStorage.head('upload-secret')).toBeNull()
+        })
+
+        test('refuses a path escape, as get does', async () => {
+            const { fakeStorage } = await import('./storage')
+            await expect(fakeStorage.head('../outside.txt')).rejects.toThrow(/invalid storage key/)
+        })
+
+        test('the etag follows the bytes: same bytes, same etag; other bytes, another; a rewrite changes it', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('etag/a'), 'same bytes', 'text/plain')
+            await fakeStorage.put(sub('etag/b'), 'same bytes', 'application/json')
+            await fakeStorage.put(sub('etag/c'), 'other bytes', 'text/plain')
+
+            const [a, b, c] = await Promise.all(['a', 'b', 'c'].map((name) => fakeStorage.head(sub(`etag/${name}`))))
+            expect(b!.etag).toBe(a!.etag) // the content type is not part of it
+            expect(c!.etag).not.toBe(a!.etag)
+
+            await fakeStorage.put(sub('etag/a'), 'rewritten', 'text/plain')
+            expect((await fakeStorage.head(sub('etag/a')))!.etag).not.toBe(a!.etag)
+        })
+
+        test('last-modified moves on a rewrite, and a copy is a new object with its own time', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('time/from'), 'one', 'text/plain')
+            const first = (await fakeStorage.head(sub('time/from')))!.lastModified.getTime()
+            await new Promise((resolve) => setTimeout(resolve, 30))
+
+            await fakeStorage.copy(sub('time/from'), sub('time/to'))
+            const copied = (await fakeStorage.head(sub('time/to')))!
+            expect(copied.lastModified.getTime()).toBeGreaterThan(first)
+
+            await new Promise((resolve) => setTimeout(resolve, 30))
+            await fakeStorage.put(sub('time/from'), 'two', 'text/plain')
+            expect((await fakeStorage.head(sub('time/from')))!.lastModified.getTime()).toBeGreaterThan(
+                copied.lastModified.getTime(),
+            )
+        })
+
+        test('a copy has the etag of its source, so a head after copy can be compared with the one before', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('same/from'), 'bytes', 'text/plain')
+            await fakeStorage.copy(sub('same/from'), sub('same/to'))
+            expect((await fakeStorage.head(sub('same/to')))!.etag).toBe(
+                (await fakeStorage.head(sub('same/from')))!.etag,
+            )
+        })
+    })
+
+    describe('copy with ifMatch', () => {
+        const sub = (name: string) => `copy-if-match/${name}`
+        const text = (body: Uint8Array) => new TextDecoder().decode(body)
+
+        test('copies when the source is still the version the etag names, as finalize does (head, then copy)', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('ok/staged'), 'validated bytes', 'application/pdf')
+            const info = (await fakeStorage.head(sub('ok/staged')))!
+
+            await fakeStorage.copy(sub('ok/staged'), sub('ok/final'), { ifMatch: info.etag })
+
+            expect(await fakeStorage.get(sub('ok/final'))).toEqual({
+                body: new TextEncoder().encode('validated bytes'),
+                contentType: 'application/pdf',
+            })
+        })
+
+        test('copies nothing, and says so, when the source changed after the head', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('stale/staged'), 'what was checked', 'application/pdf')
+            const checked = (await fakeStorage.head(sub('stale/staged')))!
+            await fakeStorage.put(sub('stale/staged'), 'swapped after the check', 'application/pdf')
+
+            const failure = fakeStorage.copy(sub('stale/staged'), sub('stale/deep/final'), { ifMatch: checked.etag })
+
+            await expect(failure).rejects.toBeInstanceOf(PreconditionFailedError)
+            await expect(failure).rejects.toThrow(/no longer the version .*nothing was copied/)
+            expect(await fakeStorage.get(sub('stale/deep/final'))).toBeNull()
+            expect(existsSync(path.join(tmp, 'storage', sub('stale/deep')))).toBe(true) // the directory is made before staging
+            expect(readdirSync(path.join(tmp, 'storage', sub('stale/deep')))).toEqual([]) // and nothing, not even a temp file, is in it
+            expect(text((await fakeStorage.get(sub('stale/staged')))!.body)).toBe('swapped after the check')
+        })
+
+        test('leaves an existing destination exactly as it was when the precondition fails', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('keep/staged'), 'new', 'text/plain')
+            await fakeStorage.put(sub('keep/final'), 'previous', 'application/json')
+
+            await expect(
+                fakeStorage.copy(sub('keep/staged'), sub('keep/final'), { ifMatch: '"not-its-etag"' }),
+            ).rejects.toBeInstanceOf(PreconditionFailedError)
+
+            expect(await fakeStorage.get(sub('keep/final'))).toEqual({
+                body: new TextEncoder().encode('previous'),
+                contentType: 'application/json',
+            })
+        })
+
+        test('the etag must come back unchanged: it is opaque, so a stripped or reformatted one does not match', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('opaque/staged'), 'bytes', 'text/plain')
+            const { etag } = (await fakeStorage.head(sub('opaque/staged')))!
+
+            await expect(
+                fakeStorage.copy(sub('opaque/staged'), sub('opaque/a'), { ifMatch: etag.replaceAll('"', '') }),
+            ).rejects.toBeInstanceOf(PreconditionFailedError)
+            await expect(
+                fakeStorage.copy(sub('opaque/staged'), sub('opaque/b'), { ifMatch: etag }),
+            ).resolves.toBeUndefined()
+        })
+
+        test('the order of the checks: same key, then a missing source, then the precondition', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('order/k'), 'x', 'text/plain')
+
+            await expect(fakeStorage.copy(sub('order/k'), sub('order/k'), { ifMatch: '"wrong"' })).rejects.toThrow(
+                /same key/,
+            )
+            await expect(
+                fakeStorage.copy(sub('order/gone'), sub('order/to'), { ifMatch: '"wrong"' }),
+            ).rejects.toBeInstanceOf(NotFoundError)
+            await expect(
+                fakeStorage.copy(sub('order/k'), sub('order/to'), { ifMatch: '"wrong"' }),
+            ).rejects.toBeInstanceOf(PreconditionFailedError)
+        })
+
+        test('what lands is exactly the version that matched, even when a writer replaces the source mid-copy', async () => {
+            const { fakeStorage } = await import('./storage')
+            let lost = 0
+            // A real in-process race: each round the source is replaced while a conditional copy of the old version
+            // runs. Either the copy won (the destination holds the OLD bytes the etag names) or it was refused (the
+            // destination does not exist). The destination must never hold the NEW bytes under the old etag.
+            for (let round = 0; round < 1000 && lost < 3; round++) {
+                const from = sub(`race/${round}/from`)
+                const to = sub(`race/${round}/to`)
+                await fakeStorage.put(from, 'old bytes', 'text/plain')
+                const { etag } = (await fakeStorage.head(from))!
+
+                const [result] = await Promise.allSettled([
+                    fakeStorage.copy(from, to, { ifMatch: etag }),
+                    fakeStorage.put(from, 'new bytes', 'text/plain'),
+                ])
+
+                if (result.status === 'rejected') {
+                    lost++
+                    expect(result.reason).toBeInstanceOf(PreconditionFailedError)
+                    expect(await fakeStorage.get(to)).toBeNull()
+                } else {
+                    expect(text((await fakeStorage.get(to))!.body)).toBe('old bytes')
+                }
+            }
+            // Not vacuous: the write did land in the middle of a copy, and the precondition refused it. (That the
+            // copy succeeds when nothing changed is the test above; here only the invariant is raced.)
+            expect(lost).toBeGreaterThan(0)
         })
     })
 
