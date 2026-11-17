@@ -1433,7 +1433,15 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   that (`copyFile(from, to)` in place of the temp and rename), and against the body published before its
   sidecar. A filesystem that clones a file in one step has no such window, so on one the test cannot provoke the
   race; it is not evidence there, only a guard where the race exists.
-- **A guard nobody can test is not kept.** The fake first mapped an `ENOENT` during the copy to `NotFoundError`
-  for a source deleted after the existence check. Two mutations of the existence check survived because that
-  branch covered for it, and the race itself cannot be provoked deterministically. The branch was deleted, and the
-  early check is pinned by a test that a missing source creates not even the destination's directory.
+- **"Cannot be provoked" was wrong, and the review found it.** The fake first mapped an `ENOENT` during the
+  copy to `NotFoundError` for a source deleted after the existence check. Two mutations of the existence check
+  survived because that branch covered for it, and the race looked impossible to provoke, so the branch was
+  deleted. The review then reproduced it: `Promise.all([copy(a, b), delete([a])])` is an in-process
+  interleaving of two fs chains, and the delete won 200 times out of 200. Without the mapping that is a raw
+  `ENOENT` and an orphan sidecar (published before the body copy failed). The fix is structural: the fake STAGES
+  both temp copies, publishes only when both exist whole (sidecar, then body), and discards on any failure; the
+  mapping is back, and the test runs that race until the delete has won a few times and checks only the
+  invariant (never a raw error, an orphan sidecar or a temp file). Run it 3 times per mutation: the racy tests
+  were red 3 of 3 for each of the vanished-source mapping, the missing discards and the unstaged copy.
+- **A directory is not an object.** `existsSync` is true for `d` when `d/x` exists, so a copy from `d` failed on
+  the missing `d.meta.json`; `copy` now asks for a regular file. `get` has the same weakness (EISDIR) and is left alone.

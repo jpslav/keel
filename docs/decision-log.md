@@ -1764,11 +1764,15 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   upload ceiling, `UploadConstraints.maxBytes`, is the app's own, so an app that accepts uploads above 5 GB
   cannot copy them with this method and should keep `maxBytes` below it. The error is mapped from S3's
   wording, which has not been seen from a real bucket (the cutover row says how to prove it).
-- **The fake copies each file to a temp name beside the destination and renames it in**, the sidecar first and
-  the body last, so a key exists (to `get` and `list`) only once complete and with its content type in place.
-  Over an existing destination the content type changes a moment before the bytes, and a copy that fails
-  between the two leaves the new type on the old bytes; `put` has the same gap in its own order, and this is
-  a fake.
+- **The fake stages both copies, then publishes.** Each file is copied to a temp name beside its destination;
+  only when both exist whole are they renamed in, the sidecar first and the body last, so a key exists (to
+  `get` and `list`) only once complete and with its content type in place, and a failure or a source deleted
+  mid-copy leaves nothing behind. A directory is not an object, so it is a missing source.
+  Known gaps, all of the fake: over an existing destination the content type changes a moment before the
+  bytes; a body that cannot be published after its sidecar was (a destination that is an existing directory)
+  leaves a stray sidecar, invisible to `get` and `list`; and a source rewritten while it is copied can pair
+  one version's bytes with another's content type, where S3 snapshots an object. `put` has the same gap
+  between its own two files, and this is a fake.
 - **No static-demo twin:** the static demo implements no storage port, so there is nothing to mirror. **No
   IAM change:** the app role's `grantReadWrite` already covers `s3:GetObject*` on the source and `s3:PutObject`
   on the destination, plus the `s3:List*` that makes a missing key a 404 and not a 403. Cutover row

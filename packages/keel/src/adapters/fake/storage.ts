@@ -1,10 +1,10 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { NotFoundError } from '../../ports/errors'
 import type { StoragePort, StoredObject, UploadConstraints, UploadTarget } from '../../ports/storage'
-import { copyFileAtomic, writeFileAtomic, writeFileAtomicSync } from './atomic-write'
+import { stageCopy, writeFileAtomic, writeFileAtomicSync, type StagedCopy } from './atomic-write'
 import { dataDir } from './data-dir'
 
 const META_SUFFIX = '.meta.json'
@@ -28,6 +28,11 @@ function resolveKey(key: string): string {
  */
 function isReserved(key: string): boolean {
     return key.endsWith(META_SUFFIX) || resolveKey(key) === path.join(dataDir('storage'), UPLOAD_SECRET_FILE)
+}
+
+/** True for a regular file. A directory is not an object, though `existsSync` says yes to it. */
+function isFile(file: string): boolean {
+    return statSync(file, { throwIfNoEntry: false })?.isFile() === true
 }
 
 /** Every file under `dir`, as `/`-separated paths relative to `root`. A missing `dir` is empty. */
@@ -168,16 +173,38 @@ export const fakeStorage: StoragePort = {
         // quirk of every method of this fake, not of copy). Before the existence check, because the real
         // adapter refuses it before any request and so cannot know whether the key exists.
         if (source === target) throw new Error(`storage copy: source and destination are the same key: ${from}`)
-        if (isReserved(from) || !existsSync(source)) throw new NotFoundError(`storage object not found: ${from}`)
+        if (isReserved(from) || !isFile(source)) throw new NotFoundError(`storage object not found: ${from}`)
         await mkdir(path.dirname(target), { recursive: true })
-        // The sidecar first and the body LAST. The body is what makes a key exist (`get` and `list` both look
-        // for it), so `to` appears only once it is complete, with its content type already in place. The other
-        // order would leave a window where a new `to` has a body and no sidecar, and `get` would throw on the
-        // missing sidecar. (Over an EXISTING `to`, the content type changes a moment before the bytes do; a
-        // copy that fails between the two leaves the new type on the old bytes. `put` has the same gap in its
-        // own order, and this is a fake.)
-        await copyFileAtomic(`${source}${META_SUFFIX}`, `${target}${META_SUFFIX}`)
-        await copyFileAtomic(source, target)
+        // STAGE both files first, then publish. Nothing is visible at the destination until both copies exist
+        // whole, so a failure while staging (a full disk, a source deleted mid-copy) leaves no orphan sidecar.
+        const staged: StagedCopy[] = []
+        try {
+            staged.push(await stageCopy(`${source}${META_SUFFIX}`, `${target}${META_SUFFIX}`))
+            staged.push(await stageCopy(source, target))
+        } catch (error) {
+            await Promise.all(staged.map((copy) => copy.discard()))
+            // The source went away while it was being copied: it is a missing source, as it was a moment ago.
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !isFile(source)) {
+                throw new NotFoundError(`storage object not found: ${from}`)
+            }
+            throw error
+        }
+        const [sidecar, body] = staged as [StagedCopy, StagedCopy]
+        try {
+            // The sidecar first and the body LAST. The body is what makes a key exist (`get` and `list` both look
+            // for it), so `to` appears only once it is complete, with its content type already in place. The
+            // other order would leave a window where a new `to` has a body and no sidecar, and `get` would throw
+            // on the missing sidecar. Over an EXISTING `to` the content type changes a moment before the bytes
+            // do, and a source rewritten while it is being copied can pair one version's bytes with another's
+            // content type (S3 snapshots an object; `put` has the same gap between its own two files). A
+            // destination that is an existing DIRECTORY fails at the body, after the sidecar: the stray sidecar
+            // is invisible to `get` and `list`, and `put` fails on such a key the same way. It is a fake.
+            await sidecar.publish()
+            await body.publish()
+        } catch (error) {
+            await Promise.all(staged.map((copy) => copy.discard()))
+            throw error
+        }
     },
 
     async getSignedDownloadUrl(key): Promise<string> {

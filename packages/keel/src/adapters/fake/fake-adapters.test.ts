@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
@@ -162,6 +162,72 @@ describe('fake storage', () => {
             expect(await fakeStorage.list(sub('missing/'))).toEqual([])
             // Nothing at all: not even the destination's directory, which the check runs before.
             expect(existsSync(path.join(tmp, 'storage', sub('missing/deep')))).toBe(false)
+        })
+
+        test('a source that is a directory is a missing source too: a directory is not an object', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('dir/inner/x'), 'x', 'text/plain')
+
+            const failure = fakeStorage.copy(sub('dir/inner'), sub('dir/deep/dest'))
+
+            await expect(failure).rejects.toBeInstanceOf(NotFoundError)
+            expect(existsSync(path.join(tmp, 'storage', sub('dir/deep')))).toBe(false)
+            expect(await fakeStorage.list(sub('dir/'))).toEqual([sub('dir/inner/x')])
+        })
+
+        test('a source deleted while it is being copied is a missing source, and leaves nothing behind', async () => {
+            const { fakeStorage } = await import('./storage')
+            let missing = 0
+            // The two race for real (an in-process interleaving, not a mock), so each round may go either way; what
+            // may never happen is a raw filesystem error, an orphan sidecar or a temp file. It runs until the
+            // deletion has won a few times, so the failure path is known to have run, and gives up at 300 rounds.
+            for (let round = 0; round < 300 && missing < 3; round++) {
+                const from = sub(`gone/${round}/from`)
+                const to = sub(`gone/${round}/to`)
+                await fakeStorage.put(from, 'bytes', 'text/plain')
+
+                const [copied, deleted] = await Promise.allSettled([
+                    fakeStorage.copy(from, to),
+                    fakeStorage.delete([from]),
+                ])
+
+                expect(deleted.status).toBe('fulfilled')
+                const dir = path.join(tmp, 'storage', sub(`gone/${round}`))
+                expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+                if (copied.status === 'rejected') {
+                    missing++
+                    expect(copied.reason).toBeInstanceOf(NotFoundError)
+                    expect(readdirSync(dir)).not.toContain('to.meta.json')
+                    expect(await fakeStorage.get(to)).toBeNull()
+                } else {
+                    expect(text((await fakeStorage.get(to))!.body)).toBe('bytes')
+                }
+            }
+            // Not vacuous: the failure path ran.
+            expect(missing).toBeGreaterThan(0)
+        })
+
+        test('a destination that cannot be published fails and leaves no temp file, whichever file blocks it', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('pubfail/from'), 'f', 'text/plain')
+            // The fake cannot hold an object `d` beside the directory `d/` (`put` fails on such a key too), and
+            // the sidecar of `e` is `e.meta.json`, which a key like `e.meta.json/inner` makes a directory.
+            await fakeStorage.put(sub('pubfail/d/inner'), 'i', 'text/plain')
+            await fakeStorage.put(sub('pubfail/e.meta.json/inner'), 'i', 'text/plain')
+
+            // the body cannot be published (the sidecar already was)
+            await expect(fakeStorage.copy(sub('pubfail/from'), sub('pubfail/d'))).rejects.toThrow()
+            // the sidecar cannot be published (the body, staged beside it, must not be left behind)
+            await expect(fakeStorage.copy(sub('pubfail/from'), sub('pubfail/e'))).rejects.toThrow()
+
+            const dir = path.join(tmp, 'storage', sub('pubfail'))
+            expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+            expect(await fakeStorage.list(sub('pubfail/'))).toEqual([
+                sub('pubfail/d/inner'),
+                sub('pubfail/e.meta.json/inner'),
+                sub('pubfail/from'),
+            ])
+            expect((await fakeStorage.get(sub('pubfail/from')))!.contentType).toBe('text/plain')
         })
 
         test('a source that is a bookkeeping name is a missing source, and the bookkeeping is untouched', async () => {
