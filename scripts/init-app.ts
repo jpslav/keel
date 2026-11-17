@@ -362,7 +362,7 @@ function renameApp(current: Identity, slug: string, displayName: string): void {
     rewrite('vitest.contract.config.ts', [[`'${dir}'`, `'${slug}'`]], 'contract app')
     // tsconfig.json deliberately needs NO rewrite: no path in it names an app. `@app-config/*`
     // points at packages/keel/test-fixture, and there is no `@/*` entry to repoint.
-    // config/params too: infra/stack.ts reads `params.database.transport` to pick its network shape.
+    // config/params too: infra/app.ts reads `params.database.transport` to pick the network shape.
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
         rewrite(
             file,
