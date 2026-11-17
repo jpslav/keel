@@ -1481,3 +1481,22 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   main the computed getDb selector matched `db['getDb']` but not ``db[`getDb`]``, and `process['env']`
   passed the `process.env` ban outright. A key wrapped in a TypeScript assertion (`['getDb' as const]`) is still out
   of reach.
+
+## Import fences outside declarations, and getDb deny-by-default (2026-11-16, `fix/lint-import-fences-getdb-default`)
+
+- **A ban that names directories leaves the ones nobody named.** The getDb ban covered routes and
+  components, then domain/ and jobs/ once someone found them outside it. A `'use server'` action in
+  `src/actions` or `src/lib` serves a request too, and had no ban at all. Deny-by-default (all of an app's
+  `src/`, with exceptions listed by name and reason) is the shape that holds when someone adds a directory.
+- **Moving a ban to its own rule id is what made deny-by-default safe.** As `no-restricted-syntax`
+  selectors, a ban that wide would have had to be re-listed in every block matching any app file. That is
+  the merge trap, at its largest. `keel/no-raw-db-handle` takes no options, so no other block can replace it.
+- **To match an import group the way `no-restricted-imports` does, use what it uses.** It matches groups
+  with the `ignore` package (gitignore semantics, case-insensitive, after trimming the specifier). A
+  hand-written matcher drifts: core's `react-*` has a mid-name wildcard, and a bare `react` also matches
+  `@x/react` and `./react`. `eslint.config.mjs` loads `ignore` from ESLint's own dependencies. If ESLint
+  ever drops it, the config fails to load rather than mismatching.
+- **TSImportType is an import.** `import type { T } from 'x'` is a declaration, and `no-restricted-imports`
+  bans it. `type T = import('x').T` is a TSImportType that no import rule saw, which is how a type-only
+  `@/*` import could sit in keel's fixture. In typescript-eslint 8 its specifier is `node.source`; earlier
+  versions used `node.argument.literal`.

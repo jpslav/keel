@@ -1,8 +1,24 @@
 # The framework/app fence and keel/core's fence never see `import()` or a type-position import
 
-**Priority:** P1 · **Status:** open
+**Priority:** P1 · **Status:** resolved 2026-11-16 (`fix/lint-import-fences-getdb-default`)
 **Found by:** review round 1 of `fix/lint-fence-gaps`, 2026-11-16. The hole was already on main, and that
 branch left it alone because it is a different class from the ones it fixed.
+
+## Resolution
+
+- `eslint.config.mjs` builds every declarationless import ban from one factory,
+  `declarationlessImportBan`. It covers `import()`, `require()`, vitest/jest's four loaders and a
+  type-position `import('…')` (TSImportType). It takes no options, so the merge trap has nothing to replace.
+- Two new rules use it: `keel/no-dynamic-app-import` (appCodePattern's group, on `packages/keel/src` and the
+  fixture) and `keel/no-dynamic-framework-import-in-core` (the new `coreFrameworkPattern`, on
+  `packages/keel/src/core`). `keel/no-dynamic-vendor-import` moved onto the factory too, and so gained
+  the type position.
+- Matching: not the regex converter sketched below. The new rules load the `ignore` package from ESLint's
+  own dependencies and configure it exactly as `no-restricted-imports` does, so the two halves of each
+  fence cannot read a group differently. That carries over the group syntax's quirks (a bare `react` also
+  matches `@x/react` and `./react`; matching ignores case).
+- `tests/lint/framework-fence.test.ts` pins each form in each zone. It also has a parity table that lints
+  every specifier as a declaration and as `import()` and requires the same verdict from both.
 
 ## What is true
 

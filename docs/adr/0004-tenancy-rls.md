@@ -146,3 +146,13 @@ tenant ids, or names each table, is satisfied by a comment or an `expect(1)`, an
 half that an app with no tables of its own is allowed. It stays a convention, carried by the `/new-entity` and
 `/new-slice` scaffolds (which now say to write each table's section of the proof half, using both proof
 tenants) and by review.
+
+## Addendum — 2026-11-16 (later): the raw-client lint ban is deny-by-default
+
+"A lint rule bans reaching for the raw client (`getDb`) in request paths" was true only for the directories
+the ban named: routes, components, and later domain/ and jobs/. A `'use server'` action kept in `src/actions`
+or `src/lib` served requests with no ban at all. The ban is now `keel/no-raw-db-handle`, a rule of its own
+id that covers every module in an app's `src/`, keel's screens and keel's fixture. Its one exception is a
+test outside routes, screens and the fixture. Anything else that needs the raw client is a named exception
+in `eslint.config.mjs` with its reason; there are none today. As before, the ban is a fast, local reminder,
+and RLS in the database is the boundary.

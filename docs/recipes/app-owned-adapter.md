@@ -205,8 +205,8 @@ the extensions other than `.ts` and `.tsx`).
 
 ## Limits
 
-- The lint sees static imports, and `import()`, `require()` and vitest/jest's `importActual`-style
-  loaders with a literal specifier. A computed specifier is out of its reach, as for every rule in the
+- The lint sees static imports, and `import()`, `require()`, vitest/jest's `importActual`-style
+  loaders and a type-position `import('…')`, with a literal specifier. A computed specifier is out of its reach, as for every rule in the
   file.
 - It reads a specifier as written, not as resolved: an unnormalized path such as
   `@/adapters/fake/../real/kv` gets past the static real-adapter fences (the dynamic one, inside the

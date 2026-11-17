@@ -26,8 +26,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   tables or vocabulary fails to build). A change to keel is not done until BOTH apps are green. The
   app extends the framework through the `@app-config/*` seam — register new subjects, jobs, event kinds, tables, and migrations there, and
   **never edit a framework base union or registry**. Lint-enforced: inside `packages/keel` the
-  fence bans the app's `@/*` alias and `@app/seed` outright; the `@app-config/*` alias is the only
-  channel back.
+  fence bans the app's `@/*` alias and `@app/seed` outright, by `import()` and in a type `import('…')`
+  as well as in a declaration; the `@app-config/*` alias is the only channel back.
 - **keel's OWN tests run against keel's own app seam, never an app's** — `packages/keel/test-fixture`
   (outside `packages/keel/src` because that tree is what `keel/*` resolves to and what ships; the
   fixture is neither). Living outside that tree buys NO exemption: every gate names `test-fixture/**`
@@ -91,8 +91,12 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `apps/showcase/src/domain/db/tickets.ts` + `apps/showcase/src/app/api/tickets/route.ts`, with the
   index in `apps/showcase/src/app-config/db/migrations/1004_tickets_keyset_index.ts` and proofs in both
   RLS suites.
-- **Tenant-scoped queries only via `db.withTenant()`** — `getDb()` in request paths is lint-banned;
-  new tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
+- **Tenant-scoped queries only via `db.withTenant()`** — `getDb()` is lint-banned in every module under
+  `apps/*/src`, in keel's screens and in keel's fixture (`keel/no-raw-db-handle`, deny-by-default: a new
+  directory is covered before anyone names it; tests outside routes, screens and the fixture are the one
+  exception).
+  A module that truly needs the raw client is a named, reasoned exception in `eslint.config.mjs`, never a
+  directory. New tenant tables copy the RLS pattern from `apps/showcase/src/app-config/db/migrations/1001_tickets.ts` (app
   migrations are numbered ≥1001; framework migrations 0001–0999 live in
   `packages/keel/src/db/migrations` — ADR-0012).
 - **Every mutating route handler (POST/PUT/PATCH/DELETE) must call `authorize(...)`**

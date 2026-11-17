@@ -1823,3 +1823,21 @@ worth keeping.
 - **Tests under an app's adapters directory stay exempt from the dynamic `real/` ban**, as they are from
   the other syntax bans there. A story beside a fake was given it back, since the static form was already
   banned in stories.
+
+## The getDb ban is deny-by-default; two fences hold outside declarations (2026-11-16, `fix/lint-import-fences-getdb-default`)
+
+- **The getDb ban covers all of an app's `src/`, keel's screens (`components/`, `demo-static/`) and the
+  fixture.** It used to name `app/`, `components/`, `domain/` and `jobs/`. The alternative was adding
+  `actions/` and `lib/` to the list. It was rejected because the next directory would be missing in the
+  same way. The one exception is tests outside routes, screens and the fixture, which arrange cases through
+  the fake db. No production module needs the raw client today; one that does is added by exact path.
+- **The ban is a rule of its own id, `keel/no-raw-db-handle`**, not `no-restricted-syntax` selectors. Its
+  three selectors and messages are unchanged.
+- **keel's own `src/` outside its screens stays outside the ban.** keel/db's helpers and keel's adapters are
+  what open `withTenant`, and they are what the ban's message sends request code to.
+- **The framework/app fence and keel/core's fence gained declarationless halves** (`keel/no-dynamic-app-import`,
+  `keel/no-dynamic-framework-import-in-core`). They match through the `ignore` package loaded from ESLint, as
+  `no-restricted-imports` does. A regex converter was the alternative, as the future task sketched; it was
+  rejected because it would read some specifiers differently from the static half.
+- **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
+  outside an adapters directory is a finding, as `import type` from `pg` already was.
