@@ -78,7 +78,8 @@ The rules that come with it, each argued in the hard parts below:
 1. **The seam becomes a package the app provides** (part 1, option C). Its specifier is renamed from
    `@app-config/*` to `@<scope>/app-config/*`. Nothing else about ADR-0012's seam changes.
 2. **`@<scope>/keel` ships TypeScript source for 0.x, and every other package ships JavaScript** (part 2).
-   keel's source is only ever compiled by `tsc` or a bundler, never loaded by plain Node.
+   keel's source is only ever compiled by `tsc` or a bundler. Whatever Node loads directly is JavaScript, keel's
+   one compiled entry point (`keel/testing/e2e`) included.
 3. **pnpm 11 or later is a requirement for adopters.** Option C rests on pnpm's `link:` protocol and its peer
    linking, and `allowBuilds` is pnpm's.
 4. **Every keel package depends on `@<scope>/keel` as a peer, never as a dependency, and all of them are
@@ -265,9 +266,12 @@ accepted, ADR-0012 gets an addendum recording the new specifier.
 what both apps compile against today. It comes with:
 
 - a `files` allowlist;
-- **keel compiling under the strict options an adopter is likely to turn on** (`noUncheckedIndexedAccess`,
-  `exactOptionalPropertyTypes`; 42 errors to fix today). Code that passes them still compiles with them off,
-  so a stricter adopter cannot break keel;
+- **keel compiling under a named set of strict options**, so that an adopter who turns any of them on cannot
+  break keel: `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` (42 errors in keel's source in the
+  spike), `noPropertyAccessFromIndexSignature` (58) and `erasableSyntaxOnly` (8). The `noUnused*`,
+  `noImplicitReturns`, `noImplicitOverride` and `noFallthroughCasesInSwitch` flags already pass. Code that passes
+  a flag still compiles with it off. Pack and consume typechecks its consumer with the whole set on, so the set
+  is a tested promise, not a hope;
 - the `@types` keel's source needs: those of host singletons (`@types/react`) and `typescript` as peers, with
   keel's tested ranges, and the rest (`@types/pg`) as dependencies. Two `@types/react` trees would split
   keel's JSX and the app's the way two copies of React split context, and no runtime check sees it;
@@ -277,8 +281,13 @@ what both apps compile against today. It comes with:
 **Every other package ships JavaScript**: the ESLint plugin, `keel-tools`, `keel-cdk` and `create-keel-app`,
 since Node loads them directly. They may be written in TypeScript and built when packed. **What reaches keel
 from a Node-loaded context goes through a bundler or a compiled entry point.** The CLI runs keel code through
-esbuild. An e2e spec may import only what the kit ships compiled for it (`keel/testing/e2e`, starting with the
-webhook-signature check the showcase's spec uses), and the preset bans any other keel import in e2e specs.
+esbuild. Playwright loads e2e specs with Node, so an e2e spec may reach keel only through `keel/testing/e2e`,
+which the kit ships compiled. That entry point is seam-free: keel's `webhook-signing` reads `APP_SLUG` from the
+seam when it loads, so the signature check is split from the header constants, and packing fails if the
+compiled entry imports the seam. A lint ban on direct imports is not enough, because a spec reaches keel
+indirectly too: the showcase's `tickets-pagination.spec.ts` imports the app's `src/domain/tickets`, which
+imports `keel/core/state-machine`. So `keel check-e2e` bundles each spec with esbuild and fails if any keel file
+other than `keel/testing/e2e` is reached.
 
 **Keel code is always bundled or compiled.** Even a compiled keel under plain Node would load the app's seam
 with Node's resolver, which needs file extensions the seam does not write (`./1001_items`) and ignores tsconfig
@@ -299,7 +308,7 @@ workspace can hold packages that are not apps (Pages' `gate` and `cli`).
 | Gate                                                                                                                                                                                                               | Becomes                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | typecheck of ALL of keel against each app (the starter's `tsconfig.json` includes `packages/keel/src`)                                                                                                             | keel-repo-only: the two-consumer rule. A consumer typechecks the keel it reaches                                                                                                                                                                                                                      |
-| authorized-mutations scan (`packages/keel/src/authz/authorized-mutations.test.ts`)                                                                                                                                 | kit: a scan of the app's own `src/app`; keel keeps the fixture root and the exemption staleness check                                                                                                                                                                                                 |
+| authorized-mutations scan (`packages/keel/src/authz/authorized-mutations.test.ts`)                                                                                                                                 | kit: a scan of the app's own `src/app`, honouring app-owned exemptions (each with its required `mustMatch`, read from the app the way #51's `lint-exceptions.mjs` is), since an adopter can no longer edit keel's map; keel keeps the fixture root and the exemption staleness check                  |
 | i18n partition and parity (`packages/keel/src/i18n/*.test.ts`)                                                                                                                                                     | kit                                                                                                                                                                                                                                                                                                   |
 | the composed pglite RLS suite (`packages/keel/src/db/rls-pglite.test.ts`)                                                                                                                                          | kit                                                                                                                                                                                                                                                                                                   |
 | migration numbering and upgrade order (`packages/keel/src/db/migrate.test.ts`)                                                                                                                                     | kit                                                                                                                                                                                                                                                                                                   |
@@ -344,7 +353,10 @@ probes the composed config to prove nothing was replaced.
 file bind `keel` to different objects (`eslint.config.mjs` documents it). This repo's internal blocks and the
 preset both bind `keel`, and `keel/public-surface` matches every file. So the published plugin object carries
 every keel rule, internal ones included, the preset enables only the app-side ones, and this repo's config
-imports that same object. Rule ids stay `keel/…`, and existing disable comments keep working.
+imports that same object. Rule ids stay `keel/…`, and existing disable comments keep working. Some internal
+rules read this repo's files when the config module loads (`keel/public-surface` reads keel's `package.json`, and
+the fence and exceptions loader resolve paths against the repo root). Inside a published plugin that load would
+fail in every adopter's config, so those anchors become rule options, read when a rule runs.
 
 **The preset works from outside the app, per package.** In the spike, a stand-in preset outside the consumer's
 directory, as a package in `node_modules` is, used app-relative globs (`src/**`, ignoring `src/adapters/real/**`).
@@ -353,8 +365,9 @@ kept its own `eslint.config.mjs` in `apps/console`, and ESLint 10, run from the 
 app's files: a probe importing `@aws-sdk/client-s3` and reading `process.env` was reported twice in
 `src/domain/` and not at all in the app's own `src/adapters/real/` adapter. A whole-app run also showed that a
 preset of fences alone is not enough: the base config has to come with it. The preset is a factory,
-`configs.app({ root })`. An adopter calls it with the default `.` in the app's own config. keel's root config
-calls it with `apps/*`, so the same rules are proved against both apps before an adopter sees them. #51's
+`configs.app({ root })`. An adopter's app config passes its own directory (`import.meta.dirname`), not `.`,
+which would be relative to wherever ESLint was started. keel's root config passes `apps/*`, so the same rules
+are proved against both apps before an adopter sees them. #51's
 app-owned exceptions stay where #51 put them, `lint-exceptions.mjs` at the app's root, and the preset reads them.
 
 **`keel/public-surface` is redundant for a consumer.** In the spike, TypeScript's `bundler` resolution refused
@@ -381,16 +394,21 @@ peers, with `@types/react` and `typescript` (part 2).
 
 **`keel doctor`.** It runs in the app's verify and checks:
 
-- **one copy of each singleton**: for every peer keel declares, the real path of its entry point resolved from
-  keel's directory equals the one resolved from the app's. A peer keel cannot resolve fails, rather than
-  passing. In the spike the check reported one copy of each of `react`, `react-dom`, `next`, `next-intl` and
-  `@mantine/core`, and against the `dependencies` mistake it printed `TWO COPIES  react` and exited 1. It is the
-  `readlink -f` check build-notes tells a dependency PR to run by hand, made a command;
-- **one keel**: every keel package resolves the same `@<scope>/keel`, and the app's keel resolves the seam to
-  the app's own linked `src/app-config`. A sibling workspace package that imports keel without linking a seam
-  gets a keel instance with no seam, and since the seam peer is optional, nothing else would say so;
-- **versions in step**: the reusable workflow's pinned ref and the installed plugin's version match the
-  installed keel (parts 7 and 9).
+- **one copy of each singleton**: for every peer keel declares, the real path of the package's directory, found
+  from keel's directory, equals the one found from the app's. A peer that cannot be found from keel fails,
+  rather than passing. Package directories, not entry points, because `@types/react` has no entry point to
+  resolve. In the spike an entry-point version of the check reported one copy of each of `react`, `react-dom`,
+  `next`, `next-intl` and `@mantine/core`, and against the `dependencies` mistake it printed `TWO COPIES  react`
+  and exited 1. It is the `readlink -f` check build-notes tells a dependency PR to run by hand, made a command;
+- **one keel, with its seam**: every keel package found from the app's directory, and from each other workspace
+  package that imports keel (Pages' `infra`, say), resolves the same `@<scope>/keel`, and that keel's seam link
+  points at the app's own `src/app-config`. A workspace package that takes keel without linking a seam gets a
+  keel instance with no seam, and since the seam peer is optional, nothing else would say so. Inside this repo
+  the seam goes through aliases, not a link, so doctor has an in-repo mode that checks the aliases instead;
+- **versions in step, reported**: the release commit keel stamps into its package against the commit SHA the
+  app's workflow pins, and the plugin version the repository pins in `.claude/settings.json` against keel's
+  version. These are reported, not failed: a Claude Code plugin is installed per user, and CI and people not
+  using Claude Code have none.
 
 ### 6. Migrations, catalogs, screens, the static demo, CSS pruning and demo size
 
@@ -413,14 +431,17 @@ peers, with `@types/react` and `typescript` (part 2).
 
 **Pack and consume, built first.** A job (and a local script) packs every package, installs the tarballs into a
 workspace outside this repo, and runs that workspace's verify. Its first shape is the spike's Pages-shaped one,
-built from a copy of `apps/starter`: the app under `apps/<slug>` with its own `src/adapters/real/` adapter and
-`lint-exceptions.mjs`, beside a sibling package. Once `create-keel-app` exists, a second shape is its output. The
-verify covers typecheck, lint with `keel check-fences`, unit tests plus the kit, `keel doctor`, `next build` with
-`E2E_BUILD=1`, e2e (server and static demo), the static demo's size, and the migrator's bundle with its
-assertions. The install overrides every `@<scope>/*` package to its tarball (`pnpm.overrides`), and the job
-fails if the lockfile resolves any of them from a registry. Otherwise, once versions are published, a tarball's
-dependency on keel at the current version would quietly install the registry copy, and the job would test old
-keel and go green. It is a required check on every PR.
+built from a copy of `apps/starter`: the app under `apps/<slug>` with its own `src/adapters/real/` adapter,
+`lint-exceptions.mjs`, a seam module that imports through the app's `@/` alias (as the showcase's `jobs.ts`
+does), and an e2e spec that imports `keel/testing/e2e` and an app domain module; beside it, a sibling package
+that imports keel. Once `create-keel-app` exists, a second shape is its output. The verify covers typecheck with
+part 2's strict flags on, lint with `keel check-fences`, unit tests plus the kit, `keel doctor`,
+`keel check-e2e`, `next build` with `E2E_BUILD=1`, e2e (server and static demo), the static demo's size, and the
+migrator's bundle with its assertions. Each workspace package that takes keel depends on the tarballs directly
+(`"keel": "file:…/keel-<version>.tgz"`). No overrides are used: pnpm 11 no longer reads the `pnpm` field of
+`package.json` at all, and an override that maps a peer to a tarball turns it into a hard dependency, which
+rule 4 forbids. The job fails if the lockfile resolves any `@<scope>/*` package from a registry, so it can never
+test an older published keel and go green. It is a required check on every PR.
 
 What the spike found is the reason for the job: keel's tests reaching into the repo's `tests/`, `@types/pg`
 declared only at the workspace root, transitive build-script approvals that only keel's `pnpm-workspace.yaml`
@@ -446,14 +467,19 @@ directory and slug, the database transport (`pg` or `data-api`, #49's two networ
 params, and it exposes the resources an adopter's own constructs need (the server function, its URL, the
 distribution, the cluster).
 
-- **The migrator** is resolved from the package (`keel/adapters/real/migrate-handler`) and bundled by esbuild,
-  and the construct **always** passes the seam explicitly: `--alias:@<scope>/app-config=<app>/src/app-config`.
-  In a consumer that is redundant with the link; in this repo it is required, because there the fallback is the
-  root tsconfig's fixture mapping, today's bug.
+- **The migrator** is resolved **from the app's directory** (`keel/adapters/real/migrate-handler` as the app
+  installed it), not from the infra package's own keel, and bundled by esbuild. The construct **always** passes
+  the seam explicitly: `--alias:@<scope>/app-config=<app>/src/app-config`. In a consumer that is redundant with
+  the link; in this repo it is required, because there the fallback is the root tsconfig's fixture mapping,
+  today's bug. An adopter's `infra` is often its own workspace package (Pages' is), and keel-cdk's peer gives it
+  a keel instance of its own, with no seam and a version that can drift. So the construct also asserts that the
+  app's keel and its own peer keel are the same version.
 - **At synth the construct asserts** that the migrator bundle holds the app's own migrations, and that the
   server function's final environment has `APP_MODE: 'real'` and neither `DEMO_MODE` nor `E2E_BUILD`. That is
   the fail-closed guard `production-guard.test.ts` checks today by reading `infra/stack.ts`, which no adopter's
-  infra is. The test moves to the construct.
+  infra is. The test moves to the construct, and the kit also exports the check as a function over a
+  synthesized CloudFormation template, so an adopter whose infra does not use the construct (Pages, at the
+  switch) still runs it.
 - #49's `infra/check-shapes.ts`, which synthesizes both network shapes, becomes the package's own test.
 
 ### 9. Agent assets
@@ -463,17 +489,20 @@ distribution, the cluster).
   `doc-steward` agent. The maintainer commands stay in this repo: `/new-port` writes a keel port into
   `packages/keel`, which in an adopter's repo is `node_modules`. Commands address the app through its declared
   root (below), not `apps/<app>/…` and not a bare `src/…`, which is wrong from the root of a workspace like
-  Pages'. `keel doctor` checks the plugin's version against the installed keel, because a plugin installs from
-  its marketplace, not from the app's lockfile.
+  Pages'. A plugin installs per user from its marketplace, not from the app's lockfile, so the repository pins the
+  marketplace ref in `.claude/settings.json` and `keel doctor` reports when that ref and the installed keel
+  disagree.
 - **`CLAUDE.md` splits in two.** The rules an app author follows (the seam, vendor SDKs, `getDb`, i18n,
   router-agnostic screens, hermetic dev) ship as a markdown file inside `@<scope>/keel`. The adopter's own
   `CLAUDE.md` imports it with Claude Code's `@path` import, relative to the app's directory, since pnpm installs
-  keel there (Pages: `@apps/console/node_modules/@<scope>/keel/…`). A path inside the working directory loads
+  keel there under its alias (Pages: `@apps/console/node_modules/keel/…`). A path inside the working directory loads
   without the approval dialog external imports need. The guide an agent reads is then the version the app
   installed. The maintainer half (two apps, the fixture, the fence internals) stays in this repo's `CLAUDE.md`.
-- **One declared app root.** The CLI, the reusable workflow's input, the plugin's commands and `create-keel-app`
-  all read the app's directory from one place (a `keel.appRoot` field in the workspace's `package.json`), so a
-  workspace like Pages', where the app is not at the root, is first-class.
+- **The app is named where it is used.** Every `keel` command acts on the app in its current directory, or the
+  one an `--app` flag names, so each package's own scripts work as they are, and this repo's two apps each run
+  their own. A `keel.apps` list in the workspace's `package.json` is only the default for whatever fans out
+  across apps: a workspace-wide `keel` run, the plugin's commands and the reusable workflow's input. A workspace
+  like Pages', where the app is not at the root, is first-class.
 
 ### 10. Releases
 
@@ -481,7 +510,12 @@ distribution, the cluster).
   changelog.
 - **0.x semantics as npm reads them.** `^0.3.0` accepts only `0.3.x`, so a **minor** is the breaking channel and
   a patch must be compatible. Changesets turns a `major` changeset on 0.x into 1.0.0, so a breaking change is
-  filed as `minor`, and CI rejects `major` changesets while keel is on 0.x.
+  filed as `minor`. Changesets also bumps a package to `major` by default when a peer dependency of it is
+  bumped, and rule 4 makes every keel package peer on keel: the first `minor` on keel would lift the whole fixed
+  group to 1.0.0, from changeset files none of which says `major`, and npm versions cannot be withdrawn. So the
+  peers between keel's own packages are written `workspace:*`, Changesets is configured to bump a peer
+  dependent only when the new version leaves its range, and CI fails when the computed release plan
+  (`changeset status`) contains any version of 1.0.0 or higher.
 - **Breaking means:**
     - a seam change (a new required export in an `app-config` module, the kind `docs/adopting.md`'s "When an
       update changes what your seam must say" lists);
@@ -502,7 +536,8 @@ distribution, the cluster).
 - **Publishing uses the registry's trusted publishing from GitHub Actions (OIDC), with provenance**, so no
   long-lived registry token is stored.
 - **Before the registry is chosen** (D1), release candidates ship as tarballs attached to a GitHub prerelease
-  of this public repo, installable by URL with the overrides above.
+  of this public repo, installed by URL as each workspace package's direct dependency. The prerelease notes carry
+  the same "Seam changes" and "Framework migrations" sections, written by hand until Changesets exists.
 
 ### 11. Pages' migration from fork to dependency
 
@@ -510,8 +545,9 @@ The measurement in the Context is the reason this can be early and cheap: Pages 
 `packages/keel`. The steps are for exactly Pages' layout, and the spike's last consumer had that shape.
 
 1. **No catch-up merge.** Pages holds its keel merges and takes everything since 26d65a5 (#46, #49, #51, #52,
-   #53 and the seam rename) through the switch. The changelog's "Seam changes" since then are its list of seam
-   edits, and `tsc` points at each one.
+   #53 and the seam rename) through the switch. The release candidate's notes, whose "Seam changes" and
+   "Framework migrations" cover everything since 26d65a5, are its list of seam edits, and `tsc` points at each
+   one.
 2. **Delete what keel now ships:** `packages/keel`; keel's `scripts/` (`init-app.ts`, `check-demo-size.mjs`,
    `ports.mjs`, `print-port.mjs`, `write-launch-json.mjs`, `check-real-env.ts`, `serve-standalone.mjs`,
    `e2e-profile.mjs`, `check-tmpdir-leak.mjs`, `vite-prune-mantine-css.ts`); keel's own gates in `tests/`
@@ -522,11 +558,12 @@ The measurement in the Context is the reason this can be early and cheap: Pages 
    for an adopter**, even where Pages' copy is identical to keel's: `.husky/`, `commitlint.config.mjs`,
    `lint-staged.config.mjs`, `.prettierrc.json`, `.prettierignore`, `.editorconfig`, `.nvmrc`, `.gitleaks.toml`,
    `.jscpd.json`, `knip.json`, the issue templates and owner files. Those are the adopter's from now on.
-3. **Install the release candidate.** In `apps/console/package.json`: `keel` (the alias of `@<scope>/keel`),
-   `@<scope>/keel-tools`, `@<scope>/eslint-plugin-keel`, and the seam link
-   `"@<scope>/app-config": "link:./src/app-config"`, with `apps/console/src/app-config/package.json`. At the
-   root: `pnpm.overrides` naming every `@<scope>/*` tarball, `packageManager` and `engines` for pnpm 11, the
-   `allowBuilds` entries keel's dependencies need, and `keel.appRoot: "apps/console"`.
+3. **Install the release candidate**, by tarball URL, as direct dependencies. In `apps/console/package.json`:
+   `keel` (the alias of `@<scope>/keel`), `@<scope>/keel-tools`, `@<scope>/eslint-plugin-keel`, and the seam link
+   `"@<scope>/app-config": "link:./src/app-config"`, with `apps/console/src/app-config/package.json`. Any other
+   workspace package that takes keel lists the same tarball URLs. At the root: `packageManager` and `engines`
+   for pnpm 11, the `allowBuilds` entries keel's dependencies need (in `pnpm-workspace.yaml`), and
+   `keel.apps: ["apps/console"]`.
 4. **Config, per package.** `apps/console/eslint.config.mjs` is the app preset plus Pages' own blocks.
    `apps/console/lint-exceptions.mjs` lists `src/domain/pages/maintainer-db.ts` with its reason, replacing the
    exception in the root config. `apps/console/tsconfig.json` extends the base. `next.config.ts`,
@@ -538,9 +575,12 @@ The measurement in the Context is the reason this can be early and cheap: Pages 
 6. **CI.** `checks.yml` keeps its triggers, its concurrency group and its gitleaks job. The `adoption-probe` job
    goes. Its other jobs keep running Pages' scripts until the reusable workflow exists, and then call it for
    keel's jobs beside Pages' own.
-7. **Infra stays Pages'.** Its `infra/` is already its own composition (`PagesEdge`, the edge stack, the
-   conformance scripts, separate CDK apps). It moves its keel-derived stack onto the `KeelApp` construct when
-   that lands, and gains the construct's synth assertions then.
+7. **Infra stays Pages', with two edits.** Its `infra/` is already its own composition (`PagesEdge`, the edge
+   stack, the conformance scripts, separate CDK apps). Its keel-derived `infra/stack.ts` bundles the migrator from
+   `../packages/keel/src/adapters/real/migrate-handler.ts` with the root tsconfig, so the entry is re-pointed at
+   the keel `apps/console` installed, with the seam alias. And the fail-closed check `production-guard.test.ts`
+   ran against `infra/stack.ts` leaves with `packages/keel`, so Pages calls the kit's template check from its
+   infra tests instead. It moves the stack onto the `KeelApp` construct when that lands.
 8. **Read the 28 files that differ from `init-app`'s output** (the Context's split). Pages' own changes are kept
    (its CI, its gitleaks entries, its `pages` script, `packages/cli` in its configs, its `CLAUDE.md`, its cutover
    checklist, `docs/keel-readme.md`) or folded into a preset option. Stale keel files go with the rest of keel's
@@ -628,24 +668,24 @@ Each step is one PR and leaves both apps green, because each moves the in-repo a
 same PR, and from P1 on pack and consume proves the piece the way an adopter gets it. **D2 blocks P3. D3 blocks
 P7. D1 blocks P14.**
 
-| Step | PR                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Depends on     |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| P1   | **Pack and consume.** The job and a local script: pack keel, build the Pages-shaped workspace from a copy of `apps/starter` outside the repo, and run its verify (typecheck, unit and conformance suites, `next build`, e2e, the static demo, the migrator bundle). It lands green by listing today's gaps as named workarounds (the seam aliases, `@types/pg`, the copied prune plugin, the skipped `demo-presets-seam` suite); each later step deletes the ones it closes. | —              |
-| P2   | **Package hygiene.** A `files` allowlist; keel compiling under `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`; `@types/react`, `typescript` and `kysely` as peers, the other `@types` as dependencies; the helpers 23 of keel's tests import from the repo's `tests/support`, moved into keel. `private` stays until P14.                                                                                                                                       | P1             |
-| P3   | **Rename the seam and the package.** `@app-config/*` becomes `@<scope>/app-config/*` and `packages/keel` becomes `@<scope>/keel` (in-repo apps: `"keel": "workspace:@<scope>/keel@*"`), by codemod across keel's source, tests and fixture, both apps' aliases, the root tsconfig, both Vitest configs, the lint fence and its tests, and the docs; then grep for the old tokens. The seam peer is optional. Pack and consume switches to the link and to the `npm:` alias.  | P1, D2         |
-| P4   | **The conformance kit at `keel/testing`** (the mutation scan per app root, i18n partition and parity, the pglite RLS runner, migration order, demo presets, the seam-map check, `keel/testing/e2e`) and **`keel doctor`**. Each app runs the kit from its own test file, as a consumer will, instead of `vitest.config.ts` including keel's test files.                                                                                                                      | P2             |
-| P5   | **`@<scope>/eslint-plugin-keel`**, as JavaScript: one plugin object with every rule, every app-side fence under its own rule id, `configs.app({ root })`, and `keel check-fences`. This repo's config imports the same object. Pack and consume lints with the app's own config.                                                                                                                                                                                             | P3             |
-| P6   | **`@<scope>/keel-tools`**, as JavaScript: the `keel` CLI (demo size, ports, launch config, `dev:real` preflight through esbuild, standalone serve, e2e profile, the temp-dir leak wrapper, `check-doc-paths`, `ci <job>`), the Next, Vite and Vitest presets, and the tsconfig base. Both apps switch; `scripts/` keeps only what is keel's own.                                                                                                                             | P2             |
-| P7   | **The first release candidate.** Pack and consume attaches its tarballs to a GitHub prerelease, with the overrides snippet in its notes. **This is the first step that lets Pages switch**: it needs no registry, no generator, no CDK construct and no reusable workflow.                                                                                                                                                                                                   | P4, P5, P6, D3 |
-| P8   | **Pages switches** (in `safeinsights/pages`, part 11).                                                                                                                                                                                                                                                                                                                                                                                                                       | P7             |
-| P9   | **`@<scope>/keel-cdk`**, as JavaScript: the `KeelApp` construct (both transports), the explicit seam alias, the synth assertions (the app's migrations, the fail-closed environment), `check-shapes` as its test, and the production-guard test moved onto it. `infra/` becomes an instantiation for the showcase. Pages adopts it when it chooses.                                                                                                                          | P3             |
-| P10  | **The reusable workflow** (orchestration only, the app-root input, an optional `synth` job), called by this repo's own CI for both apps, pinned by SHA.                                                                                                                                                                                                                                                                                                                      | P6             |
-| P11  | **The starter's own contract project and database, and its own `params.ts`**, so the generator's template carries the gates `init-app` used to copy from the showcase. It closes `.claude/future-tasks/contract-suite-single-app.md`.                                                                                                                                                                                                                                        | —              |
-| P12  | **`@<scope>/create-keel-app`**: the starter template plus generated config (presets, the seam link, `allowBuilds`, `keel.appRoot`, a workflow calling the reusable one, the owner files from flags). Pack and consume gains its second shape. `init-app`, the adoption probe and the adopter-identity test are retired in the same PR.                                                                                                                                       | P4–P6, P9–P11  |
-| P13  | **The Claude Code plugin** (the app-author commands; the maintainer ones stay), and **the `CLAUDE.md` split**, with the app guide checked by the doc gate against `apps/starter`.                                                                                                                                                                                                                                                                                            | P12            |
-| P14  | **Registry releases**: Changesets in a fixed group with `major` rejected on 0.x, the logical-id and `REQUIRED_ENV` snapshots, trusted publishing with provenance, then 0.1.0. JP sets up the registry's trusted publisher for this repository.                                                                                                                                                                                                                               | P10, D1–D3     |
-| P15  | **ADR-0013 Superseded** and `docs/adopting.md` rewritten around the generator.                                                                                                                                                                                                                                                                                                                                                                                               | P8, P12        |
+| Step | PR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Depends on    |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| P1   | **Pack and consume.** The job and a local script: pack keel, build the Pages-shaped workspace from a copy of `apps/starter` outside the repo (part 7), and run its verify (typecheck, unit tests, keel's five seam-conformance suites run from the tarball, `next build`, e2e, the static demo, the migrator bundle). It lands green by naming today's gaps as workarounds, each tied to the step that removes it: for example the seam aliases (P3), `@types/pg` added by the consumer (P2), the copied prune plugin, `ports.mjs`, `print-port.mjs` and `check-demo-size.mjs` (P4), the next-intl request path written into `node_modules` (P4), and the skipped `demo-presets-seam` suite (P2). | —             |
+| P2   | **Package hygiene.** A `files` allowlist that still ships the five seam-conformance suites until P5 replaces them; keel compiling under part 2's strict flags, and the consumer typechecked with them on; `@types/react`, `typescript` and `kysely` as peers, the other `@types` as dependencies; the helpers 23 of keel's tests import from the repo's `tests/support`, moved into keel. `private` stays until P14.                                                                                                                                                                                                                                                                              | P1            |
+| P3   | **Rename the seam and the package.** `@app-config/*` becomes `@<scope>/app-config/*` and `packages/keel` becomes `@<scope>/keel` (in-repo apps: `"keel": "workspace:@<scope>/keel@*"`), by codemod across keel's source, tests and fixture, both apps' aliases, the root tsconfig, both Vitest configs, the lint fence and its tests, and the docs; then grep for the old tokens. The seam peer is optional. Pack and consume switches to the link and to the `npm:` alias, and checks peers resolve through it.                                                                                                                                                                                  | P1, D2        |
+| P4   | **`@<scope>/keel-tools`**, as JavaScript: the `keel` CLI (demo size, ports, launch config, `dev:real` preflight through esbuild, standalone serve, e2e profile, the temp-dir leak wrapper, `check-doc-paths`, `check-e2e`, `ci <job>`), the Next, Vite and Vitest presets, and the tsconfig base. Both apps switch; `scripts/` keeps only what is keel's own. It comes before P5 and P6, whose checks are `keel` commands.                                                                                                                                                                                                                                                                        | P2, P3        |
+| P5   | **The conformance kit at `keel/testing`** (the mutation scan per app root with app-owned exemptions, i18n partition and parity, the pglite RLS runner, migration order, demo presets, the seam-map check, the fail-closed template check, the seam-free `keel/testing/e2e`) and **`keel doctor`**. Each app runs the kit from its own test file, as a consumer will, instead of `vitest.config.ts` including keel's test files; the `files` allowlist then drops keel's tests.                                                                                                                                                                                                                    | P2, P3, P4    |
+| P6   | **`@<scope>/eslint-plugin-keel`**, as JavaScript: one plugin object with every rule, every app-side fence under its own rule id, repo anchors as rule options, `configs.app({ root })`, and `keel check-fences`. This repo's config imports the same object. Pack and consume lints with the app's own config.                                                                                                                                                                                                                                                                                                                                                                                    | P3, P4        |
+| P7   | **The first release candidate.** Pack and consume attaches its tarballs to a GitHub prerelease, whose notes carry hand-written "Seam changes" and "Framework migrations" since 26d65a5 and the install lines for each workspace package. **This is the first step that lets Pages switch**: it needs no registry, no generator, no CDK construct and no reusable workflow.                                                                                                                                                                                                                                                                                                                        | P5, P6, D3    |
+| P8   | **Pages switches** (in `safeinsights/pages`, part 11).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | P7            |
+| P9   | **`@<scope>/keel-cdk`**, as JavaScript: the `KeelApp` construct (both transports), the migrator resolved from the app with the explicit seam alias, the synth assertions (the app's migrations, the fail-closed environment, one keel version), `check-shapes` as its test, and the production-guard test moved onto it. `infra/` becomes an instantiation for the showcase. Pages adopts it when it chooses.                                                                                                                                                                                                                                                                                     | P3, P5        |
+| P10  | **The reusable workflow** (orchestration only, the apps input, an optional `synth` job), called by this repo's own CI for both apps, pinned by SHA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | P4, P5, P6    |
+| P11  | **The starter's own contract project and database, and its own `params.ts`**, so the generator's template carries the gates `init-app` used to copy from the showcase. It closes `.claude/future-tasks/contract-suite-single-app.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                             | —             |
+| P12  | **`@<scope>/create-keel-app`**: the starter template plus generated config (presets, the seam link, `allowBuilds`, `keel.apps`, a workflow calling the reusable one, the owner files from flags). Pack and consume gains its second shape. `init-app`, the adoption probe and the adopter-identity test are retired in the same PR.                                                                                                                                                                                                                                                                                                                                                               | P4–P6, P9–P11 |
+| P13  | **The Claude Code plugin** (the app-author commands; the maintainer ones stay), and **the `CLAUDE.md` split**, with the app guide checked by the doc gate against `apps/starter`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | P12           |
+| P14  | **Registry releases**: Changesets in a fixed group, with `workspace:*` peers between keel's packages, peer dependents bumped only out of range, and the release plan capped below 1.0.0; the logical-id and `REQUIRED_ENV` snapshots; trusted publishing with provenance; then 0.1.0. JP sets up the registry's trusted publisher for this repository.                                                                                                                                                                                                                                                                                                                                            | P10, D1–D3    |
+| P15  | **ADR-0013 Superseded** and `docs/adopting.md` rewritten around the generator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | P8, P12       |
 
-P2 and P6 can start before D2 is decided, and P9, P10 and P11 can run beside the steps on Pages' path. **Pages'
-critical path is D2, P3, P5, P7, P8, with P1, P2, P4 and P6 alongside.** P4, P5 and P6 all touch the root
-`package.json`, the lockfile and `knip.json`, so they land one after another, not at once.
+P1, P2 and P11 can start before D2 is decided, and P9, P10 and P11 can run beside the steps on Pages' path.
+**Pages' critical path is D2, P3, P4, then P5 and P6, P7, P8**, with P1 and P2 first. P4, P5 and P6 all touch the
+root `package.json`, the lockfile and `knip.json`, so they land one after another, not at once.
