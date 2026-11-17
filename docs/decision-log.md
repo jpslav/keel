@@ -2261,6 +2261,79 @@ runbook and clicking fifteen things in the right order.
 - **The vendor rule gained the type position too.** It now shares the factory, so `type T = import('pg').X`
   outside an adapters directory is a finding, as `import type` from `pg` already was.
 
+## Storage port: `head(key)` and `copy`'s `ifMatch` (2026-11-17, `storage-head`)
+
+Requested because `copy` alone cannot serve a finalize step that re-checks each staged file's size and content
+type before making it live: the port could only read them by fetching the whole object. A metadata read is a
+generic primitive (S3 `HeadObject`; a stat in the fake).
+
+- **Named `head`, after the port's verbs.** `put`, `get` and `delete` are HTTP verbs already; `head` is `get`
+  without the body and is S3's own name for it. `stat` would have been the filesystem's.
+- **It returns `StoredObjectInfo { size, contentType, etag, lastModified }`.** Size and content type are what
+  finalize needs. The etag is there so the check can be tied to the copy (below); it pins the bytes, so the size
+  check is exact, while the content-type check stays advisory, because neither adapter's etag covers the content
+  type (a rewrite with identical bytes and another type keeps it). A flow that must hold the type relies on the
+  upload target's `eq Content-Type` condition. `lastModified` is the one
+  field nobody asked for; both adapters give it truthfully and a stat without a time looks wrong, but nothing
+  else depends on it.
+- **The etag is opaque.** AWS's own reference calls it "an opaque identifier", so callers compare two for equality
+  and pass one back UNCHANGED as `ifMatch`; the port promises no format and not whether rewriting identical
+  bytes changes it. Real: exactly what S3 sent, quotes included. Fake: a quoted SHA-256 of the bytes, shaped like
+  S3's so a caller that mishandles the quotes fails here too. The fake computes size, modification time and hash
+  from ONE open handle, so a writer that renames a new file over the old one cannot make them describe two
+  versions; the cost is that a fake `head` reads the whole file.
+- **A missing object is `null`, as for `get`; `copy` throws.** A read has a natural "nothing" to return, so a
+  caller asks `if (!info)`; `copy` has nothing to return and a silent no-op would hide a lost file. Both
+  adapters agree: the real one maps S3's `NotFound` (the SDK's error for a HEAD 404) and `NoSuchKey`; the fake
+  answers `null` for anything that is not a regular file (a directory, a bookkeeping name).
+- **What S3's HEAD cannot say.** A HEAD response has no body, so AWS gives only a generic status ("It's not
+  possible to retrieve the exact exception"): a missing BUCKET, which S3 also reports as a 404 (not stated on the HeadObject page, so the
+  cutover row confirms it), could not be told apart and reads as `null`, where `put` or `get` would surface it. A 403 (the role lacks `s3:ListBucket`, so a missing key is not a 404) is not
+  mapped and throws, as in `copy`. A response without a size, ETag or date throws: defaulting a size to 0
+  would let a maximum-size check pass on something S3 never said.
+- **A stat-then-copy check is advisory; `ifMatch` makes it exact.** The object can change between the two
+  calls, so `copy(from, to, { ifMatch: info.etag })` copies only if the source is still that version, else throws
+  the new `PreconditionFailedError` and copies nothing. Real: S3's `CopySourceIfMatch`, which S3 evaluates with
+  the copy. Fake: it compares the staged copy's hash, the very bytes about to be published, so the bytes that land
+  are exactly the ones that matched even if a writer replaces the source mid-copy (a test races exactly that). The order
+  of the other checks is same key, missing source, precondition (the real adapter leaves the last two to S3, whose order for a
+  missing source with an `ifMatch` is unconfirmed; the cutover row asks). An `ifMatch` that is empty or `*` is refused first of all, on both adapters, with a
+  plain `Error`: HTTP gives an empty If-Match no meaning and `*` the meaning "any version", so S3 could read either as no
+  condition and copy unchecked where the fake refuses (what S3 does with them is unverified, and no etag `head` returns is
+  either). No route glue maps the new error; the caller says
+  409 or 412.
+- **412 is inferred, not read.** The CopyObject reference states 412 for its other conditional headers and gives no
+  code for `x-amz-copy-source-if-match`, which is HTTP's rule for a failed If-Match. The adapter maps the name
+  `PreconditionFailed` or a bare 412, and the cutover row `storage-head` asks to confirm it.
+- **No IAM change** (`HeadObject` needs `s3:GetObject` per AWS; `grantReadWrite` has `s3:GetObject*` and
+  `s3:List*`), **no static-demo twin** (no storage port there). **Not done:** `copy` returning the new object's
+  info, a create-only copy (`ifNoneMatch`), and reading a specific version.
+- **The finalize sequence an app uses:**
+
+    ```ts
+    import { NotFoundError, PreconditionFailedError } from 'keel/ports/errors'
+
+    const info = await storage.head(stagedKey)
+    if (!info) return (await storage.head(finalKey)) ? alreadyFinalized : stagedFileVanished
+    if (info.size > MAX_BYTES || info.contentType !== EXPECTED_TYPE) {
+        await storage.delete([stagedKey])
+        return rejected
+    }
+    try {
+        // exactly the version that was checked, copied server-side
+        await storage.copy(stagedKey, finalKey, { ifMatch: info.etag })
+    } catch (error) {
+        if (error instanceof PreconditionFailedError) return changedAfterTheCheck // re-head, or reject
+        if (error instanceof NotFoundError) return stagedFileVanished
+        throw error
+    }
+    await storage.delete([stagedKey]) // idempotent
+    ```
+
+    A retry after a copy that succeeded and a delete that failed finds the staged file again, gets the same etag,
+    and converges over `finalKey`. A retry after both succeeded gets `null` from `head(stagedKey)`, which the
+    first line of the snippet reads as "already finalized" by checking `head(finalKey)`.
+
 ## The migrating role may switch to `app_user` (2026-11-16, `fix/grant-app-user-to-owner`)
 
 The design is in ADR-0004's addendum of the same date.
@@ -2316,3 +2389,50 @@ The design is in ADR-0004's addendum of the same date.
   their memberships are cluster-wide. Restored into another cluster, the ledger says 0001 and 0015 ran, so
   neither runs again, and neither `app_user` nor anyone's switch to it came along. The
   `db-role-not-superuser` cutover row says what to do before and after a restore.
+
+## JSX banned in keel/core; paths into apps/ fenced; getDb as a string banned (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **JSX in keel/core is banned with a rule of its own, `keel/no-jsx-in-core`,** reported for each outermost
+  element or fragment, so a disable comment on one does not hide the next. Banning `*.{tsx,jsx}` files under
+  core was the alternative. It was rejected because the extension is not what imports React: the JSX is.
+- **A path into app code is judged by where it lands, not how it is spelled.** `keel/no-path-to-app-code`
+  resolves a relative or absolute specifier against the importing file, following symlinks, and reports it if it
+  lands in `apps/` or `packages/seed/`. The first version was a `regex` on the spelling (an `apps/` segment anywhere in a
+  specifier). It closed the seam for `@app-config/apps/…`; round 1's fix, which kept `@` specifiers out of it, let
+  `@scope/../../apps/…` through; and each review round found a spelling it missed. Listing the two
+  apps' directories was rejected too: an adopter renames and adds apps.
+- **A `..` in any package or alias specifier is banned** (`bareTraversalPattern`), not only after
+  `@app-config/`: no package specifier has a reason to climb, and TypeScript resolves one that does out of
+  node_modules. So is **any specifier through `node_modules`** (`nodeModulesPathPattern`), where pnpm links the apps
+  and the seed. Both travel with `appCodePattern` as `appCodePatterns`.
+- **A specifier two patterns match is two findings, in both halves.** The declarationless half now reports every
+  pattern a specifier matches, as `no-restricted-imports` does. The alternative, exempting from the traversal ban
+  what the alias pattern "already bans", was tried and rejected: written as spellings, the exemptions let
+  `@\..\..\apps\…` and then `@//../../apps/…` through, because the alias group matches neither.
+- **The app's aliases are a `regex`, not a `group`** (`^(@[\\/]|@app[\\/]+seed([\\/]|$))`). A fuzz of 7,069 specifier
+  spellings against TypeScript's resolver found `@//domain/tickets` past the `@/*` group, whose gitignore syntax
+  does not match an empty segment. The regex matches every specifier the group did on the fuzz's corpus, plus the
+  empty-segment and backslash spellings, which no published package uses.
+- **The getDb ban also matches the name as a string.** Type positions are left out because they load nothing,
+  and so are keys that define a member. Strings the computed and destructure selectors already report are left
+  to them, so each finding is reported once. A spy's key (`vi.spyOn(db, 'getDb')`) is exempt in a test file
+  only: a spy calls through, so anywhere else it is the raw handle.
+- **Two gaps stay documented and filed, not fixed:** a hand-written `.mjs` in the generated styles directory
+  (`.claude/future-tasks/generated-styles-mjs-unlinted.md`), and the vendor ban's two halves reading the list
+  differently (`.claude/future-tasks/vendor-ban-matcher-parity.md`).
+
+## App-owned lint exceptions (2026-11-16, `fix/lint-core-jsx-app-paths-getdb-string`)
+
+- **An app's exceptions to a fence live in `apps/<app>/lint-exceptions.mjs`**, read by `eslint.config.mjs` for
+  every app at load. The alternative, an exact path in `eslint.config.mjs`, stops matching after `pnpm init-app`: the path named
+  the app's directory, which `pnpm init-app` renames without rewriting keel's config. Every upstream change to the
+  file would also conflict with the adopter's edit.
+- **Only `keel/no-raw-db-handle` takes one.** It is the one fence the docs tell an adopter to except a module
+  from. The recipe and `/new-port` still say to add a vendor to `vendorSdkPattern` in `eslint.config.mjs`. That
+  widens a ban rather than excepting a file, and is left where it is.
+- **Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.**
+  The alternative was warning on a broad glob. It was rejected because a warning is easy to scroll past, while a
+  failed load names the entry. A Next route's `[locale]` is escaped, so the path matches literally.
+- **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
+  end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
+  cannot swap the exceptions; that guards against accidents and is not a boundary.
