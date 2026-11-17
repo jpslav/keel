@@ -2522,7 +2522,7 @@ The design is in ADR-0012's addendum of the same date. It was asked for by the p
 
 ## ADR-0014's open decisions, decided by JP (2026-11-17, `docs/adr-package-model`)
 
-ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, and added an eighth, in a chat with the
+ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, and the same day added D8 to D10 and revised D3, in a chat with the
 keel manager session, which relayed them to the session writing the ADR. The ADR records each with its reasons.
 
 - **D1, registry: public npm.** GitHub Packages was the alternative. It needs a classic personal access token to
@@ -2547,3 +2547,15 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
   404), and that Strake is an existing project. JP is choosing another name. It is reserved on npm first (step
   zero in ADR-0014's plan: organization ownership confirmed, placeholders published, trusted publishing set up),
   and only then written into the repository.
+- **D3 revised, the same day: copyright assigned to Rice University.** JP transfers keel's copyright to SafeInsights,
+  that is Rice University. The `LICENSE` line becomes "Copyright (c) 2026 Rice University", MIT unchanged. The line
+  records an assignment JP makes, and changes only once JP has executed it, before the first release candidate.
+- **D9, stewardship: maintained by SafeInsights, not SafeInsights-specific.** The universality test
+  (`docs/development-approach.md`, "What the template ships") is the guard. The rename PR says so in `README.md`,
+  `CONTRIBUTING.md` and `docs/README.md`.
+- **D10, a new home.** `jpslav/keel` is archived after a commit pointing its README at `safeinsights/<name>`, which
+  starts as a copy of the full git history, so every commit and author is kept. The rename is its first PR. PR
+  numbers restart there, so the doctrine docs qualify old references (`jpslav/keel#54`), and each dated record
+  gets an appended entry saying which repository its earlier numbers refer to. Rewriting the records' numbers
+  was the alternative, and it was rejected because the records are append-only. The npm organization is created
+  by the SafeInsights npm account, with JP as co-owner. In-flight `jpslav/keel` PRs land before the copy.
