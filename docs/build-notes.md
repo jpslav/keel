@@ -1407,3 +1407,16 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   the registry's dynamic imports, keel's registry and pglite: 54 MB for the starter. `check:demo-size` is
   what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
   registries).
+
+## A gate that is green at adoption time can be red at the next merge (2026-11-16, `fix/adopter-merge-friction`)
+
+- **Every adoption gate is checked on the day `init-app` runs, and the failure that matters comes later.**
+  `doc-paths.test.ts` passed in an ejected tree right after `init-app` and went red after the next upstream
+  merge, because the merge brought a doc that named `apps/starter`, and `init-app` had already finished. The
+  adoption probe (`pnpm init-app …` then `pnpm verify`) cannot see this class. A test of an adoption-time
+  tool needs a second step that plays an upstream merge into the adopted tree, which is what the identity
+  suite now does with a new doc laid into its real adopted probe trees.
+- **A number kept in a shared script is an "edit the shared file" instruction in disguise.** The demo size
+  script's default was the showcase's budget, and its header said to record changes there. Nothing about it
+  looked like an instruction to edit a keel-owned file until an adopter tried to follow it. Ask of any value
+  an adopter is told to change: whose file is it, and will an upstream merge touch it?

@@ -326,7 +326,9 @@ other 37 modules of the package are internals — private sub-components, the fa
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
-really is part of the contract and merely has no importer yet, promote it by adding one line to the map.
+really is part of the contract and merely has no importer yet, that is a keel change: add the line upstream
+(ADR-0013, "Sending a keel fix back upstream") and take it back by merge, because in your fork the map is a
+conflict on every later update.
 
 Two call sites reach keel by file path instead of by subpath, because their tools need a file rather
 than a module specifier, and they are the two to remember if you move things: each app's

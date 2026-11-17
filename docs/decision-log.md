@@ -1756,3 +1756,39 @@ worth keeping.
   `DEFAULT_BUDGET_BYTES` and `WHEN IT GOES RED`; the no-number branch is reached by a `--dry-run` rename
   of the showcase; a script that is neither shape gets no bullet; and a renamed showcase counts as still
   there on a dry run and a real one alike. Each was watched failing against a deliberate break.
+
+## Nothing an upstream merge brings should need the adopter to edit keel's files (2026-11-16, `fix/adopter-merge-friction`)
+
+Two reports from the first adopter's second upstream merge, one bug class: keel depending on, or telling an
+adopter to edit, something a later merge (ADR-0013) will change. `init-app` runs once; a merge happens every
+update.
+
+- **A doc citing the reference apps no longer turns an adopter's path gate red.** Reproduced first: a tree
+  adopted from the commit before the app-owned-adapters work, then given that work's new docs verbatim as a
+  merge would, failed `doc-paths.test.ts` on `docs/recipes/app-owned-adapter.md:167`
+  (`apps/starter/src/app/[locale]/signin/page.tsx`). `resolves` in `tests/docs/doc-set.ts` now treats a
+  citation under `apps/showcase/` or `apps/starter/` as keel's whenever that app's directory is absent, and
+  checks it like any other wherever the app exists. The template stays strict (a broken one fails, watched
+  failing), a rename-only tree is strict about the showcase it kept, and the adopter's own app and
+  `packages/keel` are strict everywhere. Rejected: asking every doc to cite `apps/<app>/…` (it depends on
+  each future author, and the live docs hold about 150 citations of the showcase in 43 files and 40 of the
+  starter in 15, most of them pointing at keel's worked examples and not at the reader's own app), and a rule in the
+  test alone (`init-app` asks `resolves` which citations are gone before it generalizes them, so the rule
+  lives where both read it). The list is closed at two names: `init-app` reserves `showcase`, and an adopter
+  who keeps the name `starter` has the directory, so their own citations of it are still checked.
+- **keel's demo size script holds no number and no history.** Its header told an adopter to record every
+  budget change in it, and its default was the showcase's number, so changing either meant editing a file
+  upstream also edits. The budget is now a required argument from each app's `package.json` (the showcase
+  passes `840000` explicitly), the history moved verbatim (every number checked) into `apps/<app>/DEMO-SIZE.md`
+  beside it, and the script's header is generic. Each `DEMO-SIZE.md` keeps the adopter's "Changes" section
+  above keel's history, so a later upstream addition to the history and an adopter's own entries sit in
+  different regions of the file. Rejected: a comment in `package.json` (JSON has none), and leaving the history
+  in the decision log only (the starter's history is what an adopter inherits, so it should travel with the
+  starter). `init-app`'s bullet from the previous change lost its no-number branch and its "the header still
+  describes the showcase" sentence, since neither is true any more, and points at `DEMO-SIZE.md` when the app
+  has one.
+- **The sweep for other instructions of this kind** fixed the one that was plainly wrong (`docs/adopting.md`
+  told adopters to promote a keel module "by adding one line" to `packages/keel/package.json`, which ADR-0013
+  says never to carry in a fork). The rest each need a decision and are in
+  `.claude/future-tasks/adopter-instructions-edit-keel-owned-files.md`, including the largest: `init-app`'s
+  day-one rewrite of about 60 docs, which is a conflict waiting at every later upstream edit.
