@@ -1811,13 +1811,16 @@ worth keeping.
 - **Three packages raised past their advisories, staying on their current majors.** `@sentry/nextjs`
   `^10.75.2` (resolves 10.78.0) clears GHSA-mchm-gjx6-7h55, a critical middleware bypass through the
   tunnel route. keel configures no `tunnelRoute`, but the version is raised anyway rather than relying on
-  that. `vitest` and `@vitest/coverage-v8` `^4.1.11` (resolve 4.1.12) clear GHSA-82fw-gwwq-j7x9.
+  that. `vitest` and `@vitest/coverage-v8` `^4.1.12` (resolve 4.1.12) clear GHSA-82fw-gwwq-j7x9 (fixed in
+  4.1.11) and two `@vitest/mocker` advisories fixed only in 4.1.12, GHSA-qxg6-89mg-rqv8 and
+  GHSA-xp26-3454-mjgp. Review caught that the first floor, `^4.1.11`, still admitted both.
   `happy-dom` `^21.0.4` clears GHSA-5fpq-26gf-qwcr, GHSA-c8p4-j97h-3vg8 and GHSA-834v-8h66-3h79. The
   last two have no fix on 20.x, so this is a major bump. 21.0.0's one breaking change turns off CSS-file
   and iframe loading by default, its fix for the SSRF; no keel test configures happy-dom or loads either.
   GitHub's advisory database lists nothing against any of the four resolved versions. Not taken: Sentry 11
   and vitest 5 (new majors, no advisory requiring them).
 - **`withSentryConfig` stays imported from `@sentry/nextjs`.** Since 10.73.0 Sentry also exports it from
-  `@sentry/nextjs/config`, its v11 path, and the old import logs a deprecation warning once. The showcase
-  wraps its config with Sentry only when a DSN is set (cutover row `errors`), so nothing here exercises
-  the import. Moving it belongs with the Sentry 11 upgrade.
+  `@sentry/nextjs/config`, its v11 path, and calling the old export logs a deprecation warning once.
+  `apps/showcase/next.config.ts` imports it on every `next dev` and build, but calls it only when a DSN is
+  set (cutover row `errors`), so no run here prints the warning. Moving it belongs with the Sentry 11
+  upgrade.
