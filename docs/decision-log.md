@@ -2437,6 +2437,52 @@ The design is in ADR-0004's addendum of the same date.
   end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
   cannot swap the exceptions; that guards against accidents and is not a boundary.
 
+## Audit events take the simulated world's time; an ejected app carries the cron route (2026-11-17, `fix/audit-clock-and-cron-route`)
+
+Two requests from the first adopter (pages), both written so they work the same whether an app takes keel by fork
+or as a package: the logic is in `packages/keel`, and the app holds thin wrappers.
+
+- **An audit event's time comes from the database port, never from a caller.** `audit_events.at` defaulted to the
+  database's `now()` and nothing set it, so a demo that advanced the Simulator's world clock still recorded events
+  in real time, and anything comparing an event's age with that clock (a retention demo) never lined up. `DbPort`
+  gains an optional `now(): Date`; the fake database implements it as the world clock (`worldNow()`), and
+  `recordAuditEvent` stamps `at` from it when it exists. A real adapter must not define it, so `at` stays
+  Postgres's `now()` there. Rejected: an `at` field on `AuditEventInput`, which is exactly what must not exist
+  (every route could then supply a time, and "real mode ignores it" is a rule somebody has to keep); and reading
+  `isSimulated` inside `recordAuditEvent` (it would couple the db module to the adapter registry, and the port
+  already is the place that differs between modes). Every writer reaches the table through that one function, so
+  schedules, webhooks, inbound mail and invites are covered without a change. The file:// demo twin had the same
+  defect (`appendAudit` defaulted to real time, and the inbound-mail path passed a real-time `at` explicitly); it
+  now uses its own world clock, with the inbound ROW keeping real time as the server's `inbound_emails.created_at`
+  does. Known consequence, not fixed: the Simulator's "reset clock" returns to real time while the database
+  persists, so events recorded afterwards sort below ones stamped in the advanced future in the Events tab, which
+  orders by `at desc`; and because that tab shows the newest 100, a world holding 100 or more future-stamped rows
+  hides every event recorded after the reset until it is re-seeded (a sequence column would fix the order; it is
+  not worth a migration for a demo-only tab). Not changed here: the other timestamp columns (`jobs`, notifications, deliveries) still use
+  the database's `now()`; only the audit trail was asked for.
+- **The starter has the scheduled-tick route.** The showcase's `/api/webhooks/cron` route held the whole tick, so an
+  app built from the starter had no route and nothing ticked keel's scheduler in a deployment (the `scheduled-tick`
+  cutover row needs it). The tick is now keel's `runScheduledTick` (`keel/server-lib/scheduled-tick`, one new
+  published subpath, 131), and both apps' routes are `withWebhookSecret(...)` around it. `withWebhookSecret` joins
+  `keel/service-auth/webhook` (no new module for it) and maps nothing but the opaque 401; the showcase keeps its
+  own guard of the same name, which also maps port errors. The route has to name `withWebhookSecret(` in its own
+  file because the authorization scan accepts a `webhooks/` route on that text, so a bare re-export of a framework
+  handler would fail the scan; watched failing with the guard removed. The starter's coverage is a route test and
+  the framework's tests, not an e2e: its e2e is deliberately one claim.
+- **`pnpm dev` without the Simulator has no tick source, and that is documented, not fixed.** The showcase's
+  Simulator controls are buttons; nothing polls. An automatic dev ticker would change when the showcase's e2e and
+  demos see digests fire, so `docs/adopting.md` ("The scheduled tick") says how to tick by hand with the dev
+  secret instead. A `pnpm tick` helper or an opt-in ticker is the next step if it is wanted.
+- **The audit write is total against a bad clock file; the tick is not, and that is left as it was.** A corrupt or
+  absurd `.data/simulator/clock.json` makes `fakeDb.now()` fall back to real time (any instant Postgres cannot
+  store counts as absurd: past year 9999 or before year 0), because an audited mutation has already committed
+  and must not answer 500 with no audit row. `runScheduledTick` calls `worldNow()` directly, so the same file
+  makes the cron route answer 500 until it is fixed, exactly as the showcase's route did before this change; a
+  tick that silently ran on real time would hide that the demo's clock is broken. Not worth a second fallback.
+- **Corrected figure:** the adopter guide said the starter imports 32 of keel's published subpaths; it was 33 before
+  this change (every counting rule gives 33) and is 35 of 131 now from the starter's source, 37 counting its tests (the new cron route test imports
+  `keel/adapters/fake/db` and `keel/adapters/fake/service-auth`), so from here on the figure depends on the rule: say which.
+
 ## Audit rows carry a `detail` (2026-11-17, `feat/audit-detail`)
 
 The design is in ADR-0012's addendum of the same date. It was asked for by the pages console (item T-037).

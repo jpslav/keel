@@ -330,7 +330,10 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         },
         tenantSlug: string,
         orgSlug: string,
-        at = new Date().toISOString(),
+        // The twin's WORLD clock, like the server's (DbPort.now in the fake database): real time plus the offset the
+        // demo advanced, so an event recorded after a jump is dated in that time and two events a moment apart still
+        // differ. (Not `mountedAtMs + offset`, which is frozen between advances; that is for the clock DISPLAY.)
+        at = new Date(Date.now() + clockOffsetMs).toISOString(),
     ) {
         setAuditEntries((prev) => [{ id: `audit-${prev.length}`, at, ...entry, tenantSlug, orgSlug }, ...prev])
     }
@@ -802,6 +805,8 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         }
         const fromEmail = normalizeEmailAddress(input.from) || input.from.trim().toLowerCase()
         const bodyText = normalizeInboundBody(input.body)
+        // The inbound ROW keeps real time, as the server's inbound_emails.created_at does (the database's own
+        // now()); its AUDIT rows take the world clock, through appendAudit's default.
         const at = new Date().toISOString()
         const id = `inbound-${at}-${inbound.length}`
 
@@ -829,7 +834,7 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
                     fromEmail,
                     subject: input.subject,
                     bodyText,
-                    recordAudit: (entry) => appendAudit(entry, seedOrg.tenantSlug, seedOrg.slug, at),
+                    recordAudit: (entry) => appendAudit(entry, seedOrg.tenantSlug, seedOrg.slug),
                 })
                 if (result.status === 'handled') {
                     status = 'handled'
@@ -872,7 +877,6 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             },
             seedOrg.tenantSlug,
             seedOrg.slug,
-            at,
         )
         pushNotice(
             tSimulator('noticeInboundSent', {

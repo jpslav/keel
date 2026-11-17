@@ -1779,6 +1779,19 @@ the panel is the element that carries it.
   (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that
   spelling: it passed the doc-path gate here, where the directory exists, and failed it in CI's adoption probe.
 
+## Two small lessons from the audit clock and the cron route (2026-11-17, `fix/audit-clock-and-cron-route`)
+
+- **A hook that exists only on the fake is the cheapest way to keep a caller out of a trusted value.** The audit
+  time needed "the world clock in a simulated world, the database's clock otherwise, and never the caller's".
+  Putting the clock on the database PORT, defined by the fake and absent from the real adapter, made the safe
+  state the default: there is no argument to forge and no mode check to forget. A test that builds a port without
+  the hook (`{ ...fakeDb, now: undefined }`) is the real-mode case, and a test that the real adapter never
+  defines it is the guard on the one way that could silently change.
+- **Test a "first call, then read the file" instruction by deleting the file first.** The adopter guide tells a
+  developer to POST once so the dev secret exists, then read it. The first version of the test passed because
+  earlier tests in the same file had already created the file. Removing it before the request made the assertion
+  capable of failing, and a mutation (a secret that is never written) turned it red.
+
 ## The migrator bundled the test fixture's migrations (2026-11-17, `fix/migrator-bundles-app-seam`)
 
 - **A tsconfig decides what a bundle contains, not only how it type-checks.** `infra/stack.ts` bundled
