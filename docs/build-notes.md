@@ -1408,6 +1408,47 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
   registries).
 
+## Storage `copy` (2026-11-16, `storage-copy`)
+
+- **`CopySource` is not encoded for you, and the obvious encoders are wrong.** The SDK sends the string as
+  given (`@aws-sdk/client-s3` 3.1096.0 binds `CopySource` to the `x-amz-copy-source` header and its S3 middleware handles it only for endpoint resolution and the SSE-C copy-source keys; nothing encodes it) and AWS says "The value
+  must be URL-encoded", so a `?` left in a key would start the `?versionId=` suffix AWS documents and a `%`
+  would start an escape; a `+` is ambiguous in URL decoding. `encodeURI` leaves `+`, `?` and `#` alone; `encodeURIComponent` on the whole key turns every
+  `/` into `%2F`, away from AWS's own example (`awsexamplebucket/reports/january.pdf`). Each segment encoded and the
+  slashes kept was the one that held for every row of the test, and each of those encoders was seen failing it.
+- **A missing key is a 404 only if the caller may list the bucket.** AWS's GetObject reference says a missing
+  object is a `404 Not Found` with `s3:ListBucket` and a `403 Access Denied` without it. The CopyObject
+  reference does not repeat it for a missing copy source, so `copy`'s `NoSuchKey` to `NotFoundError` mapping
+  rests on that rule holding there too, which the cutover row asks to confirm. CDK's
+  `grantReadWrite` includes `s3:List*` (aws-cdk-lib `BUCKET_READ_ACTIONS`: `s3:GetObject*`, `s3:GetBucket*`,
+  `s3:List*`), and the cutover row asks to confirm it on the deployed policy.
+- **A 200 from `CopyObject` can carry an error in its body**; the SDK handles it. `CopyObjectCommand` is built
+  with the `getThrow200ExceptionsPlugin` middleware (the `_mw1` list in `@aws-sdk/client-s3` 3.1096.0's `dist-cjs/index.js`), so a
+  failed copy throws and the adapter never reports a false success.
+- **A mocked builtin did not reach the adapter.** The first test of the fake's mechanism used
+  `vi.mock('node:fs/promises')` to record the order of `copyFile` and `rename`. The test file saw the mock
+  (`vi.isMockFunction` was true there) and the adapter module, which imports the same builtin, did not: zero
+  calls recorded, with or without `vi.resetModules()`. The cause was not found. It was dropped for a poll:
+  while a 64 MB copy runs, the destination is stat-ed on every turn of the event loop and may only ever be
+  absent or whole.
+- **That poll can fail only where a copy takes time.** On this machine (macOS, APFS) a plain `copyFile` into
+  the destination shows thousands of distinct partial sizes for 100 MB, and the test went red against exactly
+  that (`copyFile(from, to)` in place of the temp and rename), and against the body published before its
+  sidecar. A filesystem that clones a file in one step has no such window, so on one the test cannot provoke the
+  race; it is not evidence there, only a guard where the race exists.
+- **"Cannot be provoked" was wrong, and the review found it.** The fake first mapped an `ENOENT` during the
+  copy to `NotFoundError` for a source deleted after the existence check. Two mutations of the existence check
+  survived because that branch covered for it, and the race looked impossible to provoke, so the branch was
+  deleted. The review then reproduced it: `Promise.all([copy(a, b), delete([a])])` is an in-process
+  interleaving of two fs chains, and the delete won 200 times out of 200. Without the mapping that is a raw
+  `ENOENT` and an orphan sidecar (published before the body copy failed). The fix is structural: the fake STAGES
+  both temp copies, publishes only when both exist whole (sidecar, then body), and discards on any failure; the
+  mapping is back, and the test runs that race until the delete has won a few times and checks only the
+  invariant (never a raw error, an orphan sidecar or a temp file). Run it 3 times per mutation: the racy tests
+  were red 3 of 3 for each of the vanished-source mapping, the missing discards and the unstaged copy.
+- **A directory is not an object.** `existsSync` is true for `d` when `d/x` exists, so a copy from `d` failed on
+  the missing `d.meta.json`; `copy` now asks for a regular file. `get` has the same weakness (EISDIR) and is left alone.
+
 ## A Dependabot group left keel's peers behind (2026-11-16, `deps/catch-up-2026-11`)
 
 - **A group bump of a host-owned singleton can fork it, and only e2e shows it.** Dependabot's group PR
