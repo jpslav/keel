@@ -185,8 +185,13 @@ const appRealAdapterStaticPattern = {
 //
 // MERGE TRAP (see the vendorSdkPattern note): a later no-restricted-imports block REPLACES an earlier
 // one for matching files, so every framework block re-lists BOTH vendorSdkPattern AND appCodePatterns.
+//
+// A `regex`, not a `group`: the `@/*` group (gitignore syntax, through the `ignore` package) does not match an
+// empty segment, and an app's tsconfig maps `@/*` to `./src/*`, so `@//domain/tickets` reached app code past it.
+// So `@` followed by ANY slash is the alias, and `@app` then slashes then `seed` is the seed; nothing published is
+// named either way. A fuzz of some 7,000 spellings against TypeScript's resolver found no other alias spelling.
 const appCodePattern = {
-    group: ['@/*', '@app/seed', '@app/seed/*'],
+    regex: String.raw`^(@[\\/]|@app[\\/]+seed([\\/]|$))`,
     message:
         'Framework code (packages/keel) must reach app content only through the seam — import from the ' +
         "@app-config/* alias (apps/*/src/app-config/*), never the app's @/* alias or @app/seed (ADR-0012).",
@@ -200,18 +205,23 @@ const appCodePattern = {
 //  4. a specifier through a `node_modules` directory, where pnpm links the apps and the seed among other
 //     workspace packages (nodeModulesPathPattern);
 //  5. an app's package by name: keel depends on no app package, so a bare `showcase` resolves to nothing.
-// Out of reach of every import rule, here as everywhere: a computed specifier (`import(name)`), and a `data:` URL,
-// whose module can name a file of its own.
+// Out of reach of every import rule, here as everywhere: a computed specifier (`import(name)`), a `data:` URL,
+// whose module can name a file of its own, and a require not called by that name (`createRequire(…)(…)`,
+// `module.require(…)`).
+//
+// A specifier that matches two of these patterns is two findings, in both halves: no-restricted-imports reports
+// every pattern that matches, and so does the declarationless half (matchesPatterns). Nothing is exempted from one
+// pattern because another "already bans it": the traversal ban once exempted `@/…` and `@app/seed…` that way,
+// and missed `@\..\..\apps\…` and then `@//../../apps/…`, two spellings (1)'s group does not match. A double
+// report on a strange specifier costs less than a hole.
 //
 // (3) `@app-config/../seed` resolves to the app's seed through the one door the fence leaves open, and
-// `@scope/../../apps/…`, `.x/../../apps/…` and `lodash/../../packages/seed/src/index` resolve (TypeScript's
-// resolver and Node's alike) out of node_modules into app code; no package specifier has a reason to say `..`.
-// Banned in any specifier that is not a `./`, `../`, `/` or `\` path (a path is (2)'s), bar `@/…` and
-// `@app/seed…` with a FORWARD slash, which (1) already bans whole (one finding, not two). (1)'s group does not
-// match the backslash spellings, and TypeScript reads a backslash as a slash, so `@\..\..\apps\…` is this
-// pattern's.
+// `@scope/../../apps/…`, `.x/../../apps/…` and `lodash/../../packages/seed/src/index` resolve out of node_modules
+// into app code (TypeScript's resolver does, and Node's `require()` when the specifier spells the file's
+// extension); no package specifier has a reason to say `..`. Banned in any specifier that is not a path (a `./`,
+// `../`, `/` or `\` path, or a `file:` URL, is (2)'s).
 const bareTraversalPattern = {
-    regex: String.raw`^(?!\.{1,2}([\\/]|$))(?![\\/])(?!@/)(?!@app/seed(/|$))(.*[\\/])?\.\.([\\/]|$)`,
+    regex: String.raw`^(?!\.{1,2}([\\/]|$))(?![\\/])(?!file:)(.*[\\/])?\.\.([\\/]|$)`,
     message:
         'Framework code (packages/keel) must reach app content only through the seam — a `..` in a package or ' +
         'alias specifier climbs out of it, into app code the seam does not register. Import the module directly ' +
@@ -568,8 +578,9 @@ const declarationlessVisitors = (check) => ({
     'CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name=/^(importActual|requireActual|importMock|requireMock)$/]':
         (node) => check(node.arguments[0]),
 })
-// `what` names the thing the specifier is. `matches` returns the fence's own sentence for a banned specifier
-// (appended to the message, so a finding says which pattern it hit) and nothing for an allowed one.
+// `what` names the thing the specifier is. `matches` returns the fence's own sentence for each pattern a banned
+// specifier matches (appended to the message, so a finding says which pattern it hit), one finding each, as
+// no-restricted-imports reports them, and nothing for an allowed one.
 /** @returns {import('eslint').Rule.RuleModule} */
 const declarationlessImportBan = ({ description, what, matches }) => ({
     meta: {
@@ -585,9 +596,10 @@ const declarationlessImportBan = ({ description, what, matches }) => ({
     create(context) {
         return declarationlessVisitors((node) => {
             const specifier = literalSpecifier(node)
-            const rule = typeof specifier === 'string' ? matches(specifier.trim()) : undefined
-            if (!rule) return
-            context.report({ node, messageId: 'banned', data: { specifier, rule } })
+            if (typeof specifier !== 'string') return
+            for (const rule of matches(specifier.trim())) {
+                context.report({ node, messageId: 'banned', data: { specifier, rule } })
+            }
         })
     },
 })
@@ -598,7 +610,7 @@ const vendorDeclarationlessRule =
 const keelNoDynamicVendorImportRule = declarationlessImportBan({
     description: 'Vendor SDKs are not imported dynamically outside an adapters directory.',
     what: 'a vendor SDK',
-    matches: (specifier) => (isVendorSpecifier(specifier) ? vendorDeclarationlessRule : undefined),
+    matches: (specifier) => (isVendorSpecifier(specifier) ? [vendorDeclarationlessRule] : []),
 })
 
 // THE FRAMEWORK/APP FENCE AND keel/core's FENCE, outside declarations. Both are no-restricted-imports groups
@@ -623,10 +635,10 @@ const patternMatcher = (pattern) => {
     const matcher = ignore({ allowRelativePaths: true, ignorecase: true }).add(pattern.group)
     return (specifier) => matcher.ignores(specifier)
 }
-// The message of the first pattern a specifier matches, or nothing.
+// The message of every pattern a specifier matches, as no-restricted-imports reports every one.
 const matchesPatterns = (patterns) => {
     const matchers = patterns.map((pattern) => ({ test: patternMatcher(pattern), message: pattern.message }))
-    return (specifier) => matchers.find(({ test }) => test(specifier))?.message
+    return (specifier) => matchers.filter(({ test }) => test(specifier)).map(({ message }) => message)
 }
 const keelNoDynamicAppImportRule = declarationlessImportBan({
     description: 'Framework code does not reach app content by import(), require() or a type import().',
@@ -670,7 +682,7 @@ const pathTarget = (filename, specifier) => {
         try {
             return fileURLToPath(specifier)
         } catch {
-            return undefined // a URL with a remote host names no file here
+            return undefined // a remote host, an encoded slash or a malformed URL: Node loads no file from it
         }
     }
     if (!/^(\.{1,2}([\\/]|$)|[\\/])/.test(specifier)) return undefined

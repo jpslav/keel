@@ -83,6 +83,23 @@ describe('the framework/app fence holds outside declarations', () => {
         expect(fired(await lint(FIXTURE, code), APP_CODE_DYNAMIC)).toBe(0)
     })
 
+    // An app's tsconfig maps `@/*` to `./src/*`, so `@//domain/tickets` is `./src//domain/tickets` to TypeScript:
+    // the alias with an empty segment, which a `@/*` group does not match. Every spelling is one finding, in each half.
+    it.each([
+        '@/domain/tickets',
+        '@//domain/tickets',
+        '@///domain\\tickets',
+        '@app/seed',
+        '@app/seed/world',
+        '@app//seed/world',
+    ])('the app’s alias spelled %s is one finding, in each half', async (specifier) => {
+        const at = JSON.stringify(specifier)
+        const declared = await lint(FIXTURE, `import { x } from ${at}\nexport { x }\n`)
+        expect(fired(declared, APP_CODE_STATIC)).toBe(1)
+        const loaded = await lint(FIXTURE, `export const load = () => import(${at})\n`)
+        expect(fired(loaded, APP_CODE_DYNAMIC)).toBe(1)
+    })
+
     it('an app reaching its own @/* alias is not crossing the fence', async () => {
         const code =
             "export const load = () => import('@/domain/tickets')\nexport type T = import('@/domain/tickets').T\n"
@@ -159,11 +176,14 @@ describe('the two halves of each fence read the group the same way', () => {
         '.x/../../apps/showcase/src/domain/tickets',
         '.pnpm/../../apps/showcase/src/domain/tickets',
         '@\\..\\..\\apps\\showcase\\src\\domain\\tickets',
-        // ...but not one that does not climb, nor one appCodePattern already bans whole (one finding, not two)
+        '@//../../apps/showcase/src/domain/tickets',
+        // ...but not one that does not climb
         '@app-config/apps/registry',
         '@app-config/x..y',
+        // a specifier two patterns match is two findings, in BOTH halves: each reports every pattern it matches
         '@/../domain/tickets',
         '@app/seed/../world',
+        'lodash/../../node_modules/.pnpm/node_modules/showcase/src/domain/tickets',
         // a package reached through node_modules, where pnpm links the apps and the seed (nodeModulesPathPattern)
         '.pnpm/node_modules/showcase/src/domain/tickets',
         'node_modules/@app/seed',
@@ -253,6 +273,22 @@ describe('a path into app code crosses the framework/app fence too', () => {
         }
     })
 
+    // A `file:` URL with a literal `..` is still a path (pathToFileURL would normalize the `..` away, so it is
+    // written out): the path rule judges where it lands, and the traversal ban, which is for package specifiers,
+    // stays out of it.
+    it.each([
+        ['into apps/', 'packages/keel/../../apps/showcase/src/domain/tickets.ts', 1],
+        ['anywhere else', 'packages/keel/../../tests/support/tmp-dir.ts', 0],
+    ])('a file: URL with a `..` %s', async (_where, rest, expected) => {
+        const url = `${pathToFileURL(process.cwd()).href}/${rest}`
+        const declared = await lint(FIXTURE, `import { x } from ${JSON.stringify(url)}\nexport { x }\n`)
+        expect(fired(declared, APP_CODE_PATH)).toBe(expected)
+        expect(fired(declared, APP_CODE_STATIC)).toBe(0)
+        const loaded = await lint(FIXTURE, `export const load = () => import(${JSON.stringify(url)})\n`)
+        expect(fired(loaded, APP_CODE_PATH)).toBe(expected)
+        expect(fired(loaded, APP_CODE_DYNAMIC)).toBe(0)
+    })
+
     it('every other path out of keel stays open: its own modules, and the repo’s test helpers', async () => {
         const file = 'packages/keel/src/server-lib/kv.test.ts'
         const code = [
@@ -277,31 +313,33 @@ describe('a path into app code crosses the framework/app fence too', () => {
         expect(fired(await lint(file, code), APP_CODE_PATH)).toBe(0)
     })
 
-    // `@scope/../../apps/…` and `@app-config/../seed` are package and alias specifiers, not paths: TypeScript and
-    // Node resolve them out of node_modules or the seam into app code. bareTraversalPattern bans the `..`, in both
-    // halves (the parity table holds them together), and each is one finding.
+    // `@scope/../../apps/…` and `@app-config/../seed` are package and alias specifiers, not paths: TypeScript
+    // resolves them out of node_modules or the seam into app code. bareTraversalPattern bans the `..`, in both
+    // halves (the parity table holds them together). A specifier that is also the app's alias is that pattern's
+    // finding too: two, not one, since no pattern exempts what another bans.
     describe.each([...KEEL, FIXTURE])('%s', (file) => {
         it.each([
-            '@app-config/../seed',
-            '@app-config/../domain/tickets',
-            '@app-config/x/../../seed',
-            '@scope/../../apps/showcase/src/domain/tickets',
-            'lodash/../../packages/seed/src/index',
+            ['@app-config/../seed', 1],
+            ['@app-config/../domain/tickets', 1],
+            ['@app-config/x/../../seed', 1],
+            ['@scope/../../apps/showcase/src/domain/tickets', 1],
+            ['lodash/../../packages/seed/src/index', 1],
             // a name that starts with a dot is a package name, not a path: only `./` and `../` are relative
-            '.x/../../apps/showcase/src/domain/tickets',
-            '.pnpm/../../apps/showcase/src/domain/tickets',
-            // only the forward-slash `@/` and `@app/seed` are appCodePattern's to ban; TypeScript reads a backslash
-            // as a slash, and so resolves these out of node_modules into app code as well
-            '@\\..\\..\\apps\\showcase\\src\\domain\\tickets',
-            '@app\\seed\\..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
-        ])('may not climb out of a package or alias with %s, in either half', async (specifier) => {
+            ['.x/../../apps/showcase/src/domain/tickets', 1],
+            ['.pnpm/../../apps/showcase/src/domain/tickets', 1],
+            // the app's alias, spelled with a backslash (read as a slash) or an empty segment, and climbing
+            ['@\\..\\..\\apps\\showcase\\src\\domain\\tickets', 2],
+            ['@app\\seed\\..\\..\\..\\apps\\showcase\\src\\domain\\tickets', 2],
+            ['@//../../apps/showcase/src/domain/tickets', 2],
+            ['@///../../apps/showcase/src/domain/tickets', 2],
+        ] as const)('may not climb out of a package or alias with %s, in either half', async (specifier, findings) => {
             const at = JSON.stringify(specifier)
             const declared = await lint(file, `import { seed } from ${at}\nexport { seed }\n`)
             expect(fired(declared, BARE_TRAVERSAL_STATIC)).toBe(1)
-            expect(fired(declared, APP_CODE_STATIC), 'one finding, not two').toBe(1)
+            expect(fired(declared, APP_CODE_STATIC)).toBe(findings)
             const loaded = await lint(file, `export const load = () => import(${at})\n`)
             expect(fired(loaded, BARE_TRAVERSAL_DYNAMIC)).toBe(1)
-            expect(fired(loaded, APP_CODE_DYNAMIC), 'one finding, not two').toBe(1)
+            expect(fired(loaded, APP_CODE_DYNAMIC)).toBe(findings)
         })
     })
 
