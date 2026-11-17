@@ -31,7 +31,10 @@ afterAll(() => {
 function tick(authorization?: string): Promise<Response> {
     const headers: Record<string, string> = {}
     if (authorization !== undefined) headers.authorization = authorization
-    return POST(new Request('http://localhost/api/webhooks/cron', { method: 'POST', headers }))
+    // The showcase's guard (which also maps port errors) takes Next's route context as a second argument.
+    return POST(new Request('http://localhost/api/webhooks/cron', { method: 'POST', headers }), {
+        params: Promise.resolve({}),
+    })
 }
 
 describe('POST /api/webhooks/cron', () => {
