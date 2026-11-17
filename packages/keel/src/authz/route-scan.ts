@@ -11,8 +11,9 @@ import ts from 'typescript'
  *
  * WHAT "REACHES" MEANS. A call counts for a handler when it sits on that handler's own path:
  *
- * - in the handler's body, before any statement that always leaves the block (`return`, `throw`, `break`,
- *   `continue`, or an `if`/`try` whose every branch does);
+ * - in the handler's body, before any statement control cannot get past: `return`, `throw`, `break`,
+ *   `continue`; an `if`, `try`, `switch` or labeled block every way through which does; a `while (true)` or
+ *   `for (;;)` nothing breaks out of; a `do` whose body never falls through;
  * - not in a branch a constant condition rules out: `if (false)`, `false && …`, `true ? … : here`,
  *   `'x' ?? …`, or a `const` bound to such a literal. Constants are literals, `!`, `void` and parentheses;
  *   nothing else is evaluated;
@@ -20,19 +21,29 @@ import ts from 'typescript'
  *   ASSUMED to invoke. That is the wrapper idiom every route uses, and the one trust this module extends:
  *   it cannot read an imported wrapper to see whether it really calls its argument;
  * - in a function declared in the SAME module and called (or passed as an argument) from the handler's
- *   path, followed to any depth. A function that is only defined is not followed.
+ *   path, followed to any depth. A function that is only defined, or that the file reassigns, is not
+ *   followed.
+ *
+ * For a handler that is a wrapper's result (`export const POST = withX(fn)`), the wrapper call itself and
+ * its other arguments run once, when the module loads; only the functions handed to it run per request, so
+ * only those are the handler's path.
  *
  * What is NOT followed, and so does not count: a call into another module (an imported helper that calls
  * `authorize` inside it), a method on an object, a getter, a class body, and a parameter or destructuring
  * default (it runs only when the value is missing). Each of those fails the handler.
  *
  * WHAT COUNTS AS `authorize`: a call to the `authorize` imported from one of `ScanOptions.authorizeModules`
- * (keel's `keel/authz/authorize` by default), under any local name or through a namespace import. A local
- * function that happens to be named `authorize` is followed like any other, so it counts only if it calls
- * the real one.
+ * (keel's `keel/authz/authorize` by default), under any local name or through a namespace import, by a
+ * value import (not `import type`, not a JSDoc `@import`). A local function that happens to be named
+ * `authorize` is followed like any other, so it counts only if it calls the real one.
  *
- * A handler the module cannot resolve at all (a destructured export, a `let`, an unresolvable re-export,
- * a file that does not parse) is REFUSED with the reason, and a refusal is a failure.
+ * WHAT COUNTS AS A GATE'S NAME: the same rule, by binding. `withWebhookSecret`, `auth.updateProfile`,
+ * `isSimulated` count only when the name (the head of a dotted one) is a value import, from any module; a
+ * local look-alike (`const isSimulated = true`) is not the gate.
+ *
+ * A handler the module cannot resolve at all (a destructured export, a `let`, a reassigned function, an
+ * unresolvable re-export, a file that does not parse, a module that is not an ES module) is REFUSED with
+ * the reason, and a refusal is a failure.
  */
 
 /** The verbs that mutate. GET, HEAD and OPTIONS are never judged. */
@@ -56,12 +67,15 @@ export interface ScanRoot {
 }
 
 /**
- * What an exemption's gate requires of ONE handler. Each kind is checked per verb:
+ * What an exemption's gate requires of ONE handler. Each kind is checked per verb, and every name in it
+ * must be a value import in the route's module (see the header):
  *
  * - `wrapped-by`: the handler IS a call to one of `callees` (`export const POST = withWebhookSecret(…)`).
  *   For a guard that wraps the handler, reaching it is not enough: the guard has to be what Next calls.
  * - `calls`: the handler reaches a call to one of `callees` (dotted names, `auth.updateProfile`).
- * - `opens-with-simulated-404`: the handler's FIRST statement is `if (!isSimulated) return/throw …`.
+ * - `opens-with-simulated-404`: the handler's FIRST statement is `if (!isSimulated)` and its branch does
+ *   nothing but return or throw a response built from inert values (`return new Response(null, { status:
+ *   404 })`, `return Response.json(…)`, `throw new NotFoundError(…)`), so the real-mode path does nothing.
  */
 export type Gate =
     | { kind: 'wrapped-by'; callees: readonly string[] }
@@ -72,11 +86,11 @@ export type Gate =
 export interface HandlerFacts {
     /** A call to `authorize` imported from one of the scan's authorize modules is on the handler's path. */
     reachesAuthorize: boolean
-    /** Dotted callee of the call the handler IS (`export const POST = withX(…)` → `withX`), or null. */
+    /** Dotted callee of the call the handler IS (`export const POST = withX(…)` → `withX`), if imported; else null. */
     wrappedBy: string | null
-    /** Dotted callee of every call on the handler's path (`auth.updateProfile`, `withPortErrors`). */
+    /** Dotted callee of every call on the handler's path whose head is a value import (`auth.updateProfile`). */
     calls: ReadonlySet<string>
-    /** The handler's first statement is `if (!isSimulated) <return|throw>`. */
+    /** The handler's first statement is the inert `if (!isSimulated)` gate, `isSimulated` imported. */
     opensWithSimulated404: boolean
 }
 
@@ -170,11 +184,14 @@ export function describeGate(gate: Gate): string {
     const names = (callees: readonly string[]) => callees.map((c) => `${c}(…)`).join(' or ')
     switch (gate.kind) {
         case 'wrapped-by':
-            return `the handler is itself a call to ${names(gate.callees)}, as in \`export const POST = ${gate.callees[0]}(…)\``
+            return `the handler is itself a call to an imported ${names(gate.callees)}, as in \`export const POST = ${gate.callees[0]}(…)\``
         case 'calls':
-            return `the handler reaches a call to ${names(gate.callees)} on its own path`
+            return `the handler reaches a call to an imported ${names(gate.callees)} on its own path`
         case 'opens-with-simulated-404':
-            return 'the handler opens with `if (!isSimulated) return …` (or `throw`)'
+            return (
+                'the handler opens with `if (!isSimulated) return new Response(null, { status: 404 })` (an imported ' +
+                '`isSimulated`, and a branch that only returns or throws a response built from inert values)'
+            )
     }
 }
 
@@ -190,7 +207,7 @@ export function judge(route: ScannedRoute, handler: Handler, policy: ScanPolicy)
         return (
             `${where} sits under an exemption that holds only when ${describeGate(exemption.mustMatch)}, and this ` +
             `handler does not: the exemption's justification does not hold here. Add the gate to THIS handler, or call ` +
-            `authorize(...). (A string, a comment, or the gate on another verb does not count.)`
+            `authorize(...). (A string, a comment, a local look-alike, or the gate on another verb does not count.)`
         )
     }
     const required = requiredFor(policy, route.rel)
@@ -218,6 +235,8 @@ interface Source {
     fileName: string
     sf: ts.SourceFile
     checker: ts.TypeChecker
+    /** Symbols the file assigns to (`POST = …`, `check = …`, `x++`): never trusted as a handler or helper. */
+    reassigned: ReadonlySet<ts.Symbol>
 }
 
 /** What an exported name is bound to. */
@@ -280,10 +299,14 @@ class RootScanner {
         else if (program.getSyntacticDiagnostics(sf).length > 0) {
             const [first] = program.getSyntacticDiagnostics(sf)
             result = `the file does not parse (${ts.flattenDiagnosticMessageText(first?.messageText, ' ')})`
-        } else if (assignsCommonJsExports(sf)) {
-            result =
-                'the file assigns `module.exports` or `exports`, which the scan does not read (route modules are ES modules)'
-        } else result = { fileName, sf, checker: program.getTypeChecker() }
+        } else {
+            const checker = program.getTypeChecker()
+            if (!ts.isExternalModule(sf) || usesCommonJsExports(sf, checker)) {
+                result =
+                    'the file is not an ES module, or touches `module.exports`/`exports`, which the scan does not read ' +
+                    '(route modules are ES modules)'
+            } else result = { fileName, sf, checker, reassigned: reassignedSymbols(sf, checker) }
+        }
         this.sources.set(fileName, result)
         return result
     }
@@ -347,7 +370,13 @@ class RootScanner {
         if (seen.has(decl)) return { reason: 'the handler is defined in terms of itself' }
         seen.add(decl)
         if (ts.isFunctionDeclaration(decl)) {
-            return decl.body ? { src, fn: decl } : { reason: 'the handler is a declaration with no body' }
+            if (!decl.body) return { reason: 'the handler is a declaration with no body' }
+            if (isReassigned(src, decl)) {
+                return {
+                    reason: 'the handler is a function the file reassigns, so the declaration is not what Next calls',
+                }
+            }
+            return { src, fn: decl }
         }
         if (ts.isVariableDeclaration(decl)) {
             if (!isConst(decl)) {
@@ -360,6 +389,8 @@ class RootScanner {
             if (!decl.initializer) return { reason: 'the handler has no initializer' }
             return this.handlerFromExpression(src, decl.initializer, seen)
         }
+        if (ts.isExportAssignment(decl) && !decl.isExportEquals)
+            return this.handlerFromExpression(src, decl.expression, seen)
         return { reason: `the handler is a ${ts.SyntaxKind[decl.kind]}, not a function` }
     }
 
@@ -390,10 +421,11 @@ class RootScanner {
                 opensWithSimulated404: opensWithSimulated404(node.src, node.fn),
             }
         }
-        reach.visit(node.call)
+        reach.wrapped(node.call)
+        const callee = unwrap(node.call.expression)
         return {
             reachesAuthorize: reach.authorize,
-            wrappedBy: dottedName(node.call.expression) ?? null,
+            wrappedBy: importedHead(node.src, callee) ? (dottedName(callee) ?? null) : null,
             calls: reach.calls,
             opensWithSimulated404: false,
         }
@@ -419,6 +451,22 @@ class Reach {
         if (!fn.body) return
         if (ts.isBlock(fn.body)) this.statements(fn.body.statements)
         else this.visit(fn.body)
+    }
+
+    /**
+     * A handler that is a call's result. The call and its non-function arguments ran when the module loaded;
+     * per request, only the functions handed to it run (a nested wrapper's, too: `withA(withB(fn))`).
+     */
+    wrapped(call: ts.CallExpression): void {
+        for (const argument of call.arguments) {
+            const a = unwrap(argument)
+            if (isFunctionLiteral(a)) this.invoke(a)
+            else if (ts.isCallExpression(a)) this.wrapped(a)
+            else {
+                const local = this.localFunction(a)
+                if (local) this.invoke(local)
+            }
+        }
     }
 
     visit(node: ts.Node): void {
@@ -447,7 +495,7 @@ class Reach {
     private call(node: ts.CallExpression | ts.NewExpression): void {
         const callee = unwrap(node.expression)
         const name = dottedName(callee)
-        if (name) this.calls.add(name)
+        if (name && importedHead(this.src, callee)) this.calls.add(name)
         if (this.isAuthorize(callee)) this.authorize = true
         this.callable(callee)
         for (const argument of node.arguments ?? []) this.callable(argument)
@@ -466,7 +514,7 @@ class Reach {
         if (!ts.isIdentifier(e)) return undefined
         const decl = declarationOf(this.src, e)
         if (!decl) return undefined
-        if (ts.isFunctionDeclaration(decl)) return decl.body ? decl : undefined
+        if (ts.isFunctionDeclaration(decl)) return decl.body && !isReassigned(this.src, decl) ? decl : undefined
         if (ts.isVariableDeclaration(decl) && isConst(decl) && decl.initializer) {
             const init = unwrap(decl.initializer)
             if (isFunctionLiteral(init)) return init
@@ -476,13 +524,11 @@ class Reach {
 
     private isAuthorize(callee: ts.Expression): boolean {
         if (ts.isIdentifier(callee)) {
-            const decl = declarationOf(this.src, callee)
+            const imported = valueImportOf(declarationOf(this.src, callee))
             return (
-                decl !== undefined &&
-                ts.isImportSpecifier(decl) &&
-                !decl.isTypeOnly &&
-                exportNameText(decl.propertyName ?? decl.name) === 'authorize' &&
-                this.authorizeModules.includes(importModuleOf(decl))
+                imported?.kind === 'named' &&
+                imported.name === 'authorize' &&
+                this.authorizeModules.includes(imported.module)
             )
         }
         if (
@@ -490,10 +536,8 @@ class Reach {
             callee.name.text === 'authorize' &&
             ts.isIdentifier(callee.expression)
         ) {
-            const decl = declarationOf(this.src, callee.expression)
-            return (
-                decl !== undefined && ts.isNamespaceImport(decl) && this.authorizeModules.includes(importModuleOf(decl))
-            )
+            const imported = valueImportOf(declarationOf(this.src, callee.expression))
+            return imported?.kind === 'namespace' && this.authorizeModules.includes(imported.module)
         }
         return false
     }
@@ -584,7 +628,7 @@ function exportsOf(src: Source): { named: Map<string, Binding>; stars: string[] 
                             name: exportNameText(element.propertyName ?? element.name),
                         })
                     } else {
-                        const decl = src.checker.getExportSpecifierLocalTargetSymbol(element)?.declarations?.[0]
+                        const decl = preferBody(src.checker.getExportSpecifierLocalTargetSymbol(element)?.declarations)
                         named.set(
                             exported,
                             decl
@@ -596,17 +640,19 @@ function exportsOf(src: Source): { named: Map<string, Binding>; stars: string[] 
             }
             continue
         }
-        if (
-            !hasModifier(statement, ts.SyntaxKind.ExportKeyword) ||
-            hasModifier(statement, ts.SyntaxKind.DefaultKeyword)
-        ) {
+        if (ts.isExportAssignment(statement)) {
+            // `export default <expression>`; `export =` is CommonJS and never reaches here (not an ES module).
+            if (!statement.isExportEquals) named.set('default', { kind: 'decl', src, decl: statement })
             continue
         }
-        if (ts.isFunctionDeclaration(statement) && statement.name) {
+        if (!hasModifier(statement, ts.SyntaxKind.ExportKeyword)) continue
+        const isDefault = hasModifier(statement, ts.SyntaxKind.DefaultKeyword)
+        if (ts.isFunctionDeclaration(statement) && (statement.name || isDefault)) {
+            const name = isDefault ? 'default' : statement.name!.text
             // An overload signature has no body; the implementation is the handler.
-            if (statement.body || !named.has(statement.name.text)) {
-                named.set(statement.name.text, { kind: 'decl', src, decl: statement })
-            }
+            if (statement.body || !named.has(name)) named.set(name, { kind: 'decl', src, decl: statement })
+        } else if (isDefault) {
+            if (ts.isClassDeclaration(statement)) named.set('default', { kind: 'decl', src, decl: statement })
         } else if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
                 if (ts.isIdentifier(decl.name)) named.set(decl.name.text, { kind: 'decl', src, decl })
@@ -635,17 +681,47 @@ function exportsOf(src: Source): { named: Map<string, Binding>; stars: string[] 
 }
 
 function bindingOfDeclaration(src: Source, decl: ts.Declaration): Binding {
-    if (ts.isImportSpecifier(decl)) {
-        return {
-            kind: 'module',
-            src,
-            specifier: importModuleOf(decl),
-            name: exportNameText(decl.propertyName ?? decl.name),
-        }
+    if (ts.isImportSpecifier(decl) || ts.isImportClause(decl) || ts.isNamespaceImport(decl)) {
+        const imported = valueImportOf(decl)
+        if (!imported) return { kind: 'refused', reason: 'the handler is a type-only import' }
+        if (imported.kind === 'namespace') return { kind: 'refused', reason: 'a namespace import is not a handler' }
+        return { kind: 'module', src, specifier: imported.module, name: imported.name }
     }
-    if (ts.isImportClause(decl)) return { kind: 'module', src, specifier: importModuleOf(decl), name: 'default' }
-    if (ts.isNamespaceImport(decl)) return { kind: 'refused', reason: 'a namespace import is not a handler' }
     return { kind: 'decl', src, decl }
+}
+
+type ValueImport = { kind: 'named'; module: string; name: string } | { kind: 'namespace'; module: string }
+
+/**
+ * What a declaration imports, when it is a VALUE import of an `import` statement: not `import type`, not
+ * `import { type x }`, not a JSDoc `@import` (whose parent chain is a comment's, not an import's).
+ */
+function valueImportOf(decl: ts.Declaration | undefined): ValueImport | undefined {
+    if (!decl) return undefined
+    let clause: ts.ImportClause
+    if (ts.isImportSpecifier(decl)) {
+        if (decl.isTypeOnly) return undefined
+        clause = decl.parent.parent
+    } else if (ts.isNamespaceImport(decl)) clause = decl.parent
+    else if (ts.isImportClause(decl)) clause = decl
+    else return undefined
+    const statement = clause.parent
+    if (clause.isTypeOnly || !ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+        return undefined
+    }
+    const from = statement.moduleSpecifier.text
+    if (ts.isImportSpecifier(decl)) {
+        return { kind: 'named', module: from, name: exportNameText(decl.propertyName ?? decl.name) }
+    }
+    if (ts.isNamespaceImport(decl)) return { kind: 'namespace', module: from }
+    return { kind: 'named', module: from, name: 'default' }
+}
+
+/** The head identifier of `callee` (`auth` in `auth.updateProfile`) is a value import. */
+function importedHead(src: Source, callee: ts.Expression): boolean {
+    let head = unwrap(callee)
+    while (ts.isPropertyAccessExpression(head)) head = unwrap(head.expression)
+    return ts.isIdentifier(head) && valueImportOf(declarationOf(src, head)) !== undefined
 }
 
 function boundNames(pattern: ts.BindingName): string[] {
@@ -657,22 +733,54 @@ function exportNameText(name: ts.ModuleExportName): string {
     return name.text
 }
 
-function importModuleOf(decl: ts.ImportSpecifier | ts.ImportClause | ts.NamespaceImport): string {
-    let node: ts.Node = decl
-    while (!ts.isImportDeclaration(node)) node = node.parent
-    return ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : ''
-}
-
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
     return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((m) => m.kind === kind)
 }
 
+/** An overloaded function has a declaration per signature; the one with a body is the function. */
+function preferBody(declarations: readonly ts.Declaration[] | undefined): ts.Declaration | undefined {
+    return declarations?.find((d) => ts.isFunctionDeclaration(d) && d.body !== undefined) ?? declarations?.[0]
+}
+
 function declarationOf(src: Source, id: ts.Identifier): ts.Declaration | undefined {
-    return src.checker.getSymbolAtLocation(id)?.declarations?.[0]
+    return preferBody(src.checker.getSymbolAtLocation(id)?.declarations)
 }
 
 function isConst(decl: ts.VariableDeclaration): boolean {
     return (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0
+}
+
+function isReassigned(src: Source, decl: ts.FunctionDeclaration): boolean {
+    const symbol = decl.name ? src.checker.getSymbolAtLocation(decl.name) : undefined
+    return symbol !== undefined && src.reassigned.has(symbol)
+}
+
+/** Every symbol an assignment, compound assignment or `++`/`--` in the file writes to by name. */
+function reassignedSymbols(sf: ts.SourceFile, checker: ts.TypeChecker): Set<ts.Symbol> {
+    const out = new Set<ts.Symbol>()
+    const mark = (target: ts.Expression) => {
+        const e = unwrap(target)
+        if (!ts.isIdentifier(e)) return
+        const symbol = checker.getSymbolAtLocation(e)
+        if (symbol) out.add(symbol)
+    }
+    const walk = (node: ts.Node): void => {
+        if (
+            ts.isBinaryExpression(node) &&
+            node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+            node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        ) {
+            mark(node.left)
+        } else if (
+            (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+            (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)
+        ) {
+            mark(node.operand)
+        }
+        ts.forEachChild(node, walk)
+    }
+    walk(sf)
+    return out
 }
 
 function isFunctionLiteral(node: ts.Node): node is ts.ArrowFunction | ts.FunctionExpression {
@@ -704,6 +812,16 @@ function dottedName(e: ts.Expression): string | undefined {
     return undefined
 }
 
+/** The `const` initializer an identifier is bound to, followed a few names deep; undefined if it is not one. */
+function constInitializer(src: Source, e: ts.Expression, depth: number): ts.Expression | undefined {
+    if (!ts.isIdentifier(e) || depth >= 4) return undefined
+    const decl = declarationOf(src, e)
+    if (decl && ts.isVariableDeclaration(decl) && isConst(decl) && decl.initializer && ts.isIdentifier(decl.name)) {
+        return decl.initializer
+    }
+    return undefined
+}
+
 /**
  * The truthiness of a condition the scan can decide without running anything, or undefined. Literals,
  * `!`, `void`, and a `const` bound to one of those (to a depth of a few names); nothing else.
@@ -725,21 +843,22 @@ function constantTruth(src: Source, expression: ts.Expression, depth = 0): boole
         const inner = constantTruth(src, e.operand, depth)
         return inner === undefined ? undefined : !inner
     }
-    if (ts.isIdentifier(e) && depth < 4) {
-        const decl = declarationOf(src, e)
-        if (!decl) return e.text === 'undefined' ? false : undefined
-        if (ts.isVariableDeclaration(decl) && isConst(decl) && decl.initializer && ts.isIdentifier(decl.name)) {
-            return constantTruth(src, decl.initializer, depth + 1)
-        }
+    if (ts.isIdentifier(e)) {
+        if (e.text === 'undefined' && !declarationOf(src, e)) return false
+        const init = constInitializer(src, e, depth)
+        return init === undefined ? undefined : constantTruth(src, init, depth + 1)
     }
     return undefined
 }
 
-/** Whether the value is a literal known not to be null or undefined (so `??` never reaches its right side). */
-function constantlyNonNullish(src: Source, expression: ts.Expression): boolean {
+/** Whether the value is a constant known not to be null or undefined (so `??` never reaches its right side). */
+function constantlyNonNullish(src: Source, expression: ts.Expression, depth = 0): boolean {
     const e = unwrap(expression)
     if (e.kind === ts.SyntaxKind.NullKeyword || e.kind === ts.SyntaxKind.VoidExpression) return false
-    if (ts.isIdentifier(e)) return false
+    if (ts.isIdentifier(e)) {
+        const init = constInitializer(src, e, depth)
+        return init !== undefined && constantlyNonNullish(src, init, depth + 1)
+    }
     return constantTruth(src, e) !== undefined
 }
 
@@ -760,52 +879,180 @@ function rightIsDead(src: Source, node: ts.BinaryExpression): boolean {
     return kind === ts.SyntaxKind.AmpersandAmpersandToken ? left === false : left === true
 }
 
-/** Whether control never falls through `s` to the statement after it. */
-function alwaysExits(src: Source, s: ts.Statement): boolean {
+/**
+ * Whether control never falls through `s` to the statement after it. `label` is the label `s` carries, if
+ * any, so a `break` aimed at it by name counts as falling through.
+ */
+function alwaysExits(src: Source, s: ts.Statement, label?: string): boolean {
     if (ts.isReturnStatement(s) || ts.isThrowStatement(s) || ts.isBreakStatement(s) || ts.isContinueStatement(s)) {
         return true
     }
-    if (ts.isBlock(s)) return s.statements.some((inner) => alwaysExits(src, inner))
+    // A labeled block, `if` or `try` falls through after all when a `break` names its label.
+    const named = (exits: boolean) => exits && (label === undefined || !breaksOut(s, label, false, false))
+    if (ts.isBlock(s)) return named(s.statements.some((inner) => alwaysExits(src, inner)))
     if (ts.isIfStatement(s)) {
         const condition = constantTruth(src, s.expression)
-        if (condition === true) return alwaysExits(src, s.thenStatement)
-        if (condition === false) return s.elseStatement !== undefined && alwaysExits(src, s.elseStatement)
-        return s.elseStatement !== undefined && alwaysExits(src, s.thenStatement) && alwaysExits(src, s.elseStatement)
+        if (condition === true) return named(alwaysExits(src, s.thenStatement))
+        if (condition === false) return named(s.elseStatement !== undefined && alwaysExits(src, s.elseStatement))
+        return named(
+            s.elseStatement !== undefined && alwaysExits(src, s.thenStatement) && alwaysExits(src, s.elseStatement),
+        )
     }
     if (ts.isTryStatement(s)) {
-        if (s.finallyBlock && alwaysExits(src, s.finallyBlock)) return true
-        return alwaysExits(src, s.tryBlock) && (!s.catchClause || alwaysExits(src, s.catchClause.block))
+        if (s.finallyBlock && alwaysExits(src, s.finallyBlock)) return named(true)
+        return named(alwaysExits(src, s.tryBlock) && (!s.catchClause || alwaysExits(src, s.catchClause.block)))
+    }
+    if (ts.isLabeledStatement(s)) return alwaysExits(src, s.statement, s.label.text)
+    // A loop that only a `break` can leave: `while (true)`, `for (;;)`, `for (; true;)`.
+    if (ts.isWhileStatement(s) || ts.isForStatement(s)) {
+        const condition = ts.isWhileStatement(s) ? s.expression : s.condition
+        const forever = condition === undefined || constantTruth(src, condition) === true
+        return forever && !breaksOut(s.statement, label, true, false)
+    }
+    if (ts.isDoStatement(s)) {
+        if (alwaysExits(src, s.statement) && !breaksOut(s.statement, label, true, true)) return true
+        return constantTruth(src, s.expression) === true && !breaksOut(s.statement, label, true, false)
+    }
+    // A switch with a default that nothing breaks out of: control leaves only through the last clause's end.
+    if (ts.isSwitchStatement(s)) {
+        const clauses = s.caseBlock.clauses
+        const last = clauses[clauses.length - 1]
+        return (
+            clauses.some(ts.isDefaultClause) &&
+            last !== undefined &&
+            last.statements.some((inner) => alwaysExits(src, inner)) &&
+            !breaksOut(s.caseBlock, label, true, false)
+        )
     }
     return false
 }
 
-/** The handler's first statement is `if (!isSimulated) <a statement that always exits>`. */
+/**
+ * Whether `body` holds a jump that lands just after the statement it belongs to: a `break` naming `label`;
+ * with `unlabeled`, a bare `break` not inside a nested loop or switch; with `continues`, a bare `continue`
+ * not inside a nested loop, or one naming `label` (a `do`'s continue goes to its condition, then on).
+ */
+function breaksOut(body: ts.Node, label: string | undefined, unlabeled: boolean, continues: boolean): boolean {
+    let found = false
+    const walk = (node: ts.Node, loops: number, switches: number): void => {
+        if (found || ts.isFunctionLike(node) || ts.isClassLike(node)) return
+        if (ts.isBreakStatement(node)) {
+            if (node.label ? node.label.text === label : unlabeled && loops + switches === 0) found = true
+            return
+        }
+        if (ts.isContinueStatement(node)) {
+            if (continues && (node.label ? node.label.text === label : loops === 0)) found = true
+            return
+        }
+        const loop = ts.isIterationStatement(node, false) ? 1 : 0
+        const swtch = ts.isSwitchStatement(node) ? 1 : 0
+        ts.forEachChild(node, (child) => walk(child, loops + loop, switches + swtch))
+    }
+    walk(body, 0, 0)
+    return found
+}
+
+/**
+ * The handler's first statement is `if (!isSimulated) <branch>`, `isSimulated` is a value import, and the
+ * branch does nothing but return or throw a response built from inert values, so in real mode the handler
+ * does nothing at all.
+ */
 function opensWithSimulated404(src: Source, fn: ts.FunctionLikeDeclaration): boolean {
     if (!fn.body || !ts.isBlock(fn.body)) return false
     const [first] = fn.body.statements
     if (!first || !ts.isIfStatement(first)) return false
     const condition = unwrap(first.expression)
-    return (
-        ts.isPrefixUnaryExpression(condition) &&
-        condition.operator === ts.SyntaxKind.ExclamationToken &&
-        ts.isIdentifier(unwrap(condition.operand)) &&
-        (unwrap(condition.operand) as ts.Identifier).text === 'isSimulated' &&
-        alwaysExits(src, first.thenStatement)
-    )
+    if (!ts.isPrefixUnaryExpression(condition) || condition.operator !== ts.SyntaxKind.ExclamationToken) return false
+    const operand = unwrap(condition.operand)
+    if (!ts.isIdentifier(operand) || operand.text !== 'isSimulated') return false
+    if (valueImportOf(declarationOf(src, operand)) === undefined) return false
+    return isInertExit(src, first.thenStatement)
 }
 
-/** A top-level `module.exports = …`, `module.exports.X = …` or `exports.X = …`. */
-function assignsCommonJsExports(sf: ts.SourceFile): boolean {
-    return sf.statements.some((statement) => {
-        if (!ts.isExpressionStatement(statement)) return false
-        const e = statement.expression
-        if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false
-        const target = dottedName(e.left)
-        return (
-            target !== undefined &&
-            (target === 'module.exports' || target.startsWith('module.exports.') || target.startsWith('exports.'))
-        )
-    })
+const RESPONSE_CONSTRUCTORS = ['Response', 'NextResponse']
+const RESPONSE_FACTORIES = ['Response.json', 'Response.redirect', 'NextResponse.json', 'NextResponse.redirect']
+
+/** `return <response>` or `throw new X(…)`, alone or alone in a block, built from inert values only. */
+function isInertExit(src: Source, s: ts.Statement): boolean {
+    if (ts.isBlock(s)) return s.statements.length === 1 && isInertExit(src, s.statements[0]!)
+    if (ts.isReturnStatement(s)) {
+        const e = s.expression && unwrap(s.expression)
+        if (!e || !(ts.isNewExpression(e) || ts.isCallExpression(e))) return false
+        const name = dottedName(e.expression)
+        const allowed = ts.isNewExpression(e) ? RESPONSE_CONSTRUCTORS : RESPONSE_FACTORIES
+        return name !== undefined && allowed.includes(name) && isGlobalOrImported(src, e) && argumentsInert(e)
+    }
+    if (ts.isThrowStatement(s)) {
+        const e = unwrap(s.expression)
+        return ts.isNewExpression(e) && ts.isIdentifier(unwrap(e.expression)) && argumentsInert(e)
+    }
+    return false
+}
+
+/** The head of a call's or `new`'s callee is a global (no declaration in the file) or a value import. */
+function isGlobalOrImported(src: Source, e: ts.CallExpression | ts.NewExpression): boolean {
+    let head = unwrap(e.expression)
+    while (ts.isPropertyAccessExpression(head)) head = unwrap(head.expression)
+    if (!ts.isIdentifier(head)) return false
+    const decl = declarationOf(src, head)
+    return decl === undefined || valueImportOf(decl) !== undefined
+}
+
+/** No call, `new`, `await`, `yield`, tagged template, function, assignment, `++`/`--` or `delete` in the arguments. */
+function argumentsInert(e: ts.CallExpression | ts.NewExpression): boolean {
+    let inert = true
+    const walk = (node: ts.Node): void => {
+        if (!inert) return
+        if (
+            ts.isCallExpression(node) ||
+            ts.isNewExpression(node) ||
+            ts.isAwaitExpression(node) ||
+            ts.isYieldExpression(node) ||
+            ts.isTaggedTemplateExpression(node) ||
+            ts.isFunctionLike(node) ||
+            ts.isClassLike(node) ||
+            ts.isDeleteExpression(node) ||
+            (ts.isBinaryExpression(node) &&
+                node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+                node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+            ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+                (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken))
+        ) {
+            inert = false
+            return
+        }
+        ts.forEachChild(node, walk)
+    }
+    for (const argument of e.arguments ?? []) walk(argument)
+    return inert
+}
+
+/** The file reads `module.exports`, `module['exports']` or a free `exports`: CommonJS, whatever else it has. */
+function usesCommonJsExports(sf: ts.SourceFile, checker: ts.TypeChecker): boolean {
+    let found = false
+    const free = (node: ts.Node, name: string) =>
+        ts.isIdentifier(node) && node.text === name && !checker.getSymbolAtLocation(node)?.declarations?.length
+    const walk = (node: ts.Node): void => {
+        if (found) return
+        if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+            const member = ts.isPropertyAccessExpression(node)
+                ? node.name.text
+                : ts.isStringLiteralLike(node.argumentExpression)
+                  ? node.argumentExpression.text
+                  : undefined
+            if ((free(node.expression, 'module') && member === 'exports') || free(node.expression, 'exports')) {
+                found = true
+                return
+            }
+        }
+        if (ts.isCallExpression(node) && node.arguments.some((a) => free(a, 'exports'))) {
+            found = true
+            return
+        }
+        ts.forEachChild(node, walk)
+    }
+    walk(sf)
+    return found
 }
 
 function readCompilerOptions(tsconfig: string): ts.CompilerOptions {

@@ -201,6 +201,42 @@ describe('the export forms a mutating handler can take', () => {
             expect: { POST: 'authorized' },
         },
         {
+            name: 'export { h as POST } where h is overloaded',
+            files: {
+                'route.ts': `${AUTHORIZE}${DECLS}function h(): Promise<void>\nfunction h(r?: Request) { ${CALL}; return Promise.resolve() }\nexport { h as POST }`,
+            },
+            expect: { POST: 'authorized' },
+        },
+        {
+            name: "a module's default function, re-exported as a verb",
+            files: {
+                'route.ts': "export { default as POST } from './impl'",
+                'impl.ts': `${AUTHORIZE}${DECLS}export default async function () { ${CALL} }`,
+            },
+            expect: { POST: 'authorized' },
+        },
+        {
+            name: "a module's default expression, re-exported as a verb",
+            files: {
+                'route.ts': "export { default as POST, default as DELETE } from './impl'",
+                'impl.ts': `${AUTHORIZE}${DECLS}export default async () => { ${CALL} }`,
+            },
+            expect: { POST: 'authorized', DELETE: 'authorized' },
+        },
+        {
+            name: "a module's default, imported and exported as a verb",
+            files: {
+                'route.ts': "import h from './impl'\nexport { h as POST }",
+                'impl.ts': 'export default async function named() {}',
+            },
+            expect: { POST: 'open' },
+        },
+        {
+            name: "a module's default class is not a handler",
+            files: { 'route.ts': "export { default as POST } from './impl'", 'impl.ts': 'export default class {}' },
+            expect: { POST: /ClassDeclaration, not a function/ },
+        },
+        {
             name: 'a GET-only route has no mutating handler',
             files: { 'route.ts': 'export async function GET() {}\nexport const HEAD = async () => {}' },
             expect: {},
@@ -320,6 +356,43 @@ describe('what the analyser refuses, and says why', () => {
             expect: { '*': /module\.exports/ },
         },
         {
+            name: 'a handler function the file reassigns',
+            files: {
+                'route.ts': `${AUTHORIZE}${DECLS}export async function POST() { ${CALL} }\nPOST = async () => {}`,
+            },
+            expect: { POST: /reassigns/ },
+        },
+        {
+            name: 'a route file with exports and an exports[...] assignment',
+            files: { 'route.ts': "export const GET = 1\nexports['POST'] = async () => {}" },
+            expect: { '*': /module\.exports/ },
+        },
+        {
+            name: 'a route file with exports and Object.assign(module.exports, …)',
+            files: { 'route.ts': 'export const GET = 1\nObject.assign(module.exports, { POST: async () => {} })' },
+            expect: { '*': /module\.exports/ },
+        },
+        {
+            name: "a route file with exports and module['exports'] in a block",
+            files: { 'route.ts': "export const GET = 1\n{ module['exports'] = {} }" },
+            expect: { '*': /module\.exports/ },
+        },
+        {
+            name: 'a route file with exports and a bare exports passed along',
+            files: { 'route.ts': 'export const GET = 1\nObject.assign(exports, {})' },
+            expect: { '*': /module\.exports/ },
+        },
+        {
+            name: 'a route file that is no module at all',
+            files: { 'route.ts': 'const x = 1' },
+            expect: { '*': /not an ES module/ },
+        },
+        {
+            name: 'export * into a CommonJS module',
+            files: { 'route.ts': "export * from './impl.js'", 'impl.js': 'module.exports = { POST: async () => {} }' },
+            expect: { '*': /not an ES module/ },
+        },
+        {
             name: 'a route file that assigns exports.X',
             files: { 'route.ts': 'exports.DELETE = async () => {}' },
             expect: { '*': /module\.exports/ },
@@ -376,6 +449,19 @@ describe("what counts as a handler's own path", () => {
         { name: 'right of true &&', files: post(`true && ${CALL}`), expect: 'authorized' },
         { name: 'right of false ||', files: post(`false || ${CALL}`), expect: 'authorized' },
         { name: 'right of an unknown ??', files: post(`cond ?? ${CALL}`), expect: 'authorized' },
+        { name: 'right of a const string ??', files: post(`OK ?? ${CALL}`, "const OK = 'yes'\n"), expect: 'open' },
+        { name: 'right of a const false ??', files: post(`NO ?? ${CALL}`, 'const NO = false\n'), expect: 'open' },
+        {
+            name: 'right of a const null ??',
+            files: post(`NONE ?? ${CALL}`, 'const NONE = null\n'),
+            expect: 'authorized',
+        },
+        {
+            name: 'right of a let string ??',
+            files: post(`ok ?? ${CALL}`, "let ok: string | null = 'yes'\n"),
+            expect: 'authorized',
+        },
+        { name: 'right of undefined ??', files: post(`undefined ?? ${CALL}`), expect: 'authorized' },
         { name: 'the false arm of true ? :', files: post(`true ? 1 : ${CALL}`), expect: 'open' },
         { name: 'the true arm of false ? :', files: post(`false ? ${CALL} : 1`), expect: 'open' },
         { name: 'either arm of an unknown ? :', files: post(`cond ? 1 : ${CALL}`), expect: 'authorized' },
@@ -408,6 +494,152 @@ describe("what counts as a handler's own path", () => {
             expect: 'open',
         },
         { name: 'in a labeled block', files: post(`outer: { ${CALL} }`), expect: 'authorized' },
+        {
+            name: 'after a switch whose every clause returns, with a default',
+            files: post(`switch (cond) { case true: return 1; default: return 2 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a switch whose clauses fall through to a return',
+            files: post(`switch (cond) { case true: default: return 2 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a switch with no default',
+            files: post(`switch (cond) { case true: return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a switch a clause breaks out of',
+            files: post(`switch (cond) { case true: break; default: return 2 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a switch whose last clause falls off the end',
+            files: post(`switch (cond) { default: return 2; case true: }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a switch whose inner loop breaks (not out of the switch)',
+            files: post(`switch (cond) { default: for (;;) { break } return 2 }\n${CALL}`),
+            expect: 'open',
+        },
+        { name: 'after while (true) that returns', files: post(`while (true) { return 1 }\n${CALL}`), expect: 'open' },
+        { name: 'after for (;;) that returns', files: post(`for (;;) { return 1 }\n${CALL}`), expect: 'open' },
+        {
+            name: 'after for (; true;) that returns',
+            files: post(`for (; true; ) { return 1 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after while (true) that can break',
+            files: post(`while (true) { if (cond) break; return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after while (true) whose body is a break',
+            files: post(`while (true) break\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after while (true) whose only break is in an inner loop',
+            files: post(`while (true) { for (;;) { break } return 1 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after while (true) whose inner loop breaks it by label',
+            files: post(`outer: while (true) { for (;;) { break outer } }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            // Invalid (a break cannot cross a function), but it parses, and must not count as leaving the loop.
+            name: 'after while (true) whose only bare break is in a nested function',
+            files: post(`while (true) { ;(() => { break })(); return 1 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after while (cond) that returns',
+            files: post(`while (cond) { return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        { name: 'after do that returns', files: post(`do { return 1 } while (cond)\n${CALL}`), expect: 'open' },
+        {
+            name: 'after do that continues',
+            files: post(`do { continue } while (false)\n${CALL}`),
+            expect: 'authorized',
+        },
+        { name: 'after do-while (true)', files: post(`do {} while (true)\n${CALL}`), expect: 'open' },
+        {
+            name: 'after do-while (true) that breaks',
+            files: post(`do { break } while (true)\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after do-while (cond) with an empty body',
+            files: post(`do {} while (cond)\n${CALL}`),
+            expect: 'authorized',
+        },
+        { name: 'after a labeled block that returns', files: post(`l: { return 1 }\n${CALL}`), expect: 'open' },
+        {
+            name: 'after a labeled block a break names',
+            files: post(`l: { if (cond) break l; return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a labeled if a break names',
+            files: post(`l: if (cond) { break l } else { return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a labeled try a break names',
+            files: post(`l: try { break l } finally { return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a labeled try whose catch a break names',
+            files: post(`l: try { return 1 } catch { break l }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a labeled try that returns',
+            files: post(`l: try { return 1 } catch { return 2 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a labeled block whose if returns both ways',
+            files: post(`l: if (cond) { return 1 } else { return 2 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a labeled if (true) that returns',
+            files: post(`l: if (true) { return 1 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a labeled if (false) whose else returns',
+            files: post(`l: if (false) {} else { return 1 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a labeled while (true) a break names',
+            files: post(`l: while (true) { break l }\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a labeled while (true) that returns',
+            files: post(`l: while (true) { return 1 }\n${CALL}`),
+            expect: 'open',
+        },
+        {
+            name: 'after a labeled do whose continue names it',
+            files: post(`l: do { if (cond) continue l; return 1 } while (false)\n${CALL}`),
+            expect: 'authorized',
+        },
+        {
+            name: 'after a labeled switch a break names',
+            files: post(`l: switch (cond) { default: if (cond) break l; return 1 }\n${CALL}`),
+            expect: 'authorized',
+        },
         { name: 'after return', files: post(`return Response.json({})\n${CALL}`), expect: 'open' },
         { name: 'after throw', files: post(`throw new Error('no')\n${CALL}`), expect: 'open' },
         { name: 'in the returned expression', files: post(`return ${CALL}`), expect: 'authorized' },
@@ -541,6 +773,31 @@ describe("what counts as a handler's own path", () => {
             expect: 'open',
         },
         {
+            name: 'an import type clause of authorize',
+            files: {
+                'route.ts': `import type { authorize } from 'keel/authz/authorize'\n${DECLS}export async function POST() { ${CALL} }`,
+            },
+            expect: 'open',
+        },
+        {
+            name: 'a same-file helper the file reassigns',
+            files: post('check()', `function check() { ${CALL} }\ncheck = () => {}\n`),
+            expect: 'open',
+        },
+        {
+            name: 'a same-file helper the file increments (still a write)',
+            files: post('check()', `function check() { ${CALL} }\ncheck++\n`),
+            expect: 'open',
+        },
+        {
+            name: 'an overloaded same-file helper',
+            files: post(
+                'check(1)',
+                `function check(a: string): void\nfunction check(a: number): void\nfunction check(a: unknown) { ${CALL} }\n`,
+            ),
+            expect: 'authorized',
+        },
+        {
             name: 'a type-only import of authorize',
             files: {
                 'route.ts': `import { type authorize } from 'keel/authz/authorize'\n${DECLS}export async function POST() { ${CALL} }`,
@@ -650,6 +907,21 @@ describe("what counts as a handler's own path", () => {
         expectVerdicts(verdicts(files, undefined, { authorizeModules: ['@acme/authz'] }), { POST: 'authorized' })
     })
 
+    it('a JSDoc @import in a route.js is a type, not the choke point, and does not stop the scan', () => {
+        const route = scanTree({
+            'route.js':
+                "/** @import { authorize } from 'keel/authz/authorize' */\nexport async function POST() { authorize() }",
+        })[0]
+        expect(route?.handlers.map((h) => [h.verb, outcome(h)])).toEqual([['POST', 'open']])
+    })
+
+    it('a route.js that reassigns its handler is refused', () => {
+        const route = scanTree({
+            'route.js': `${AUTHORIZE}export async function POST() { authorize() }\nPOST = async () => {}`,
+        })[0]
+        expect(route?.handlers[0]?.refusal).toMatch(/reassigns/)
+    })
+
     it('reads a route.js the same way', () => {
         const route = scanTree({
             'route.js': `${AUTHORIZE}export async function POST() { authorize() }\nexport function DELETE() {}`,
@@ -662,75 +934,140 @@ describe("what counts as a handler's own path", () => {
 })
 
 describe('the facts a gate is judged on', () => {
-    it('wrappedBy is the callee of the call the handler IS, with type arguments and wrappers seen through', () => {
-        expect(factsOf('declare const withX: Function\nexport const POST = withX(async () => {})').wrappedBy).toBe(
+    const WITH_X = "import { withX } from './wrappers'\n"
+    const SIM = "import { isSimulated } from 'keel/adapters/index'\n"
+
+    it('wrappedBy is the imported callee of the call the handler IS, with type arguments and wrappers seen through', () => {
+        expect(factsOf(`${WITH_X}export const POST = withX(async () => {})`).wrappedBy).toBe('withX')
+        expect(factsOf(`${WITH_X}export const POST = (withX<{ id: string }>(async () => {})) as never`).wrappedBy).toBe(
             'withX',
         )
-        expect(
-            factsOf(
-                'declare const withX: Function\nexport const POST = (withX<{ id: string }>(async () => {})) as never',
-            ).wrappedBy,
-        ).toBe('withX')
-        expect(factsOf('declare const a: any\nexport const POST = a.b.withX(async () => {})').wrappedBy).toBe(
+        expect(factsOf("import * as a from './w'\nexport const POST = a.b.withX(async () => {})").wrappedBy).toBe(
             'a.b.withX',
         )
+        expect(factsOf(`${WITH_X}const inner = withX(async () => {})\nexport const POST = inner`).wrappedBy).toBe(
+            'withX',
+        )
+        expect(factsOf("import withX from './w'\nexport const POST = withX(async () => {})").wrappedBy).toBe('withX')
+    })
+
+    it('wrappedBy is null for a wrapper that is not a value import: a local look-alike is not the guard', () => {
         expect(
-            factsOf('declare const withX: Function\nconst inner = withX(async () => {})\nexport const POST = inner')
-                .wrappedBy,
-        ).toBe('withX')
+            factsOf('const withX = (h: unknown) => h\nexport const POST = withX(async () => {})').wrappedBy,
+        ).toBeNull()
+        expect(factsOf('declare const withX: Function\nexport const POST = withX(async () => {})').wrappedBy).toBeNull()
+        expect(
+            factsOf("import type { withX } from './w'\nexport const POST = withX(async () => {})").wrappedBy,
+        ).toBeNull()
+        expect(
+            factsOf("import { type withX } from './w'\nexport const POST = withX(async () => {})").wrappedBy,
+        ).toBeNull()
     })
 
     it('wrappedBy is null for a function handler, even one that returns the wrapper', () => {
-        expect(
-            factsOf('declare const withX: Function\nexport async function POST() { return withX(async () => {}) }')
-                .wrappedBy,
-        ).toBeNull()
+        expect(factsOf(`${WITH_X}export async function POST() { return withX(async () => {}) }`).wrappedBy).toBeNull()
         expect(factsOf('export const POST = async () => {}').wrappedBy).toBeNull()
     })
 
-    it('wrappedBy is undefined-safe for a callee that is not a dotted name', () => {
-        expect(
-            factsOf('declare const make: () => Function\nexport const POST = make()(async () => {})').wrappedBy,
-        ).toBeNull()
-        expect(
-            factsOf("declare const w: Record<string, Function>\nexport const POST = w['withX'](async () => {})")
-                .wrappedBy,
-        ).toBeNull()
+    it('wrappedBy is null for a callee that is not a dotted name', () => {
+        expect(factsOf("import { make } from './w'\nexport const POST = make()(async () => {})").wrappedBy).toBeNull()
+        expect(factsOf("import * as w from './w'\nexport const POST = w['withX'](async () => {})").wrappedBy).toBeNull()
     })
 
-    it('calls holds the dotted callees on the path, and only those', () => {
+    it('calls holds the imported dotted callees on the path, and only those', () => {
         const facts = factsOf(
-            "declare const auth: any\ndeclare const other: any\nconst note = 'auth.signOut('\n" +
-                'export async function POST() { await auth.updateProfile({}); if (false) other.thing(); return note }\n' +
+            "import { auth, other } from 'keel/adapters/index'\nconst local = { signOut() {} }\n" +
+                "const note = 'auth.signOut('\n" +
+                'export async function POST() { await auth.updateProfile({}); local.signOut(); if (false) other.thing(); return note }\n' +
                 'export async function DELETE() { other.elsewhere() }',
         )
         expect([...facts.calls].sort()).toEqual(['auth.updateProfile'])
     })
 
-    it('opensWithSimulated404 needs the gate as the first statement, exiting', () => {
-        const gate = (body: string) =>
-            factsOf(`declare const isSimulated: boolean\nexport async function POST() {\n${body}\n}`)
+    it('calls ignores a local look-alike of a port', () => {
+        const facts = factsOf(
+            'const auth = { updateProfile: () => {} }\nexport async function PUT() { auth.updateProfile() }',
+            'PUT',
+        )
+        expect([...facts.calls]).toEqual([])
+    })
+
+    it("a wrapper handler's path is the functions handed to it, not what ran when the module loaded", () => {
+        const route = (src: string) => verdicts({ 'route.ts': `${AUTHORIZE}${DECLS}${WITH_X}${src}` })
+        // Load-time: the wrapper's own other arguments, and a same-file factory's body.
+        expectVerdicts(route(`export const POST = withX(async () => {}, ${CALL})`), { POST: 'open' })
+        expectVerdicts(route(`function make() { ${CALL}; return async () => {} }\nexport const POST = make()`), {
+            POST: 'open',
+        })
+        // Per request: a function literal, a same-file function by name, a nested wrapper's function.
+        expectVerdicts(route(`export const POST = withX(async () => { ${CALL} })`), { POST: 'authorized' })
+        expectVerdicts(route(`async function h() { ${CALL} }\nexport const POST = withX(h)`), { POST: 'authorized' })
+        expectVerdicts(route(`export const POST = withX(withX(async () => { ${CALL} }))`), { POST: 'authorized' })
+        expectVerdicts(route(`export const POST = withX({ run: async () => { ${CALL} } })`), { POST: 'open' })
+    })
+
+    it('opensWithSimulated404 needs the imported gate as the first statement, with a branch that only exits', () => {
+        const gate = (body: string, prelude = SIM) =>
+            factsOf(`${prelude}declare const db: { wipe(): Promise<void> }\nexport async function POST() {\n${body}\n}`)
                 .opensWithSimulated404
         expect(gate('if (!isSimulated) return new Response(null, { status: 404 })\nreturn 1')).toBe(true)
-        expect(gate('if (!isSimulated) { return 1 }')).toBe(true)
+        expect(gate("if (!isSimulated) { return Response.json({ error: 'not found' }, { status: 404 }) }")).toBe(true)
         expect(gate("if (!isSimulated) throw new Error('no')")).toBe(true)
-        expect(gate('if (!(isSimulated)) return 1')).toBe(true)
-        expect(gate('const x = 1\nif (!isSimulated) return x')).toBe(false)
+        expect(gate('if (!(isSimulated)) return new Response(null)')).toBe(true)
+        expect(gate('if (!isSimulated) return new Response(null)\nelse return 2')).toBe(true)
+        expect(gate('if (!isSimulated) { return new Response(null); }')).toBe(true)
+        expect(
+            gate(
+                'if (!isSimulated) return NextResponse.json({})',
+                `${SIM}import { NextResponse } from 'next/server'\n`,
+            ),
+        ).toBe(true)
+        // Not first, not exiting, not this condition.
+        expect(gate('const x = 1\nif (!isSimulated) return new Response(x)')).toBe(false)
         expect(gate('if (!isSimulated) console.log(1)')).toBe(false)
-        expect(gate('if (!isSimulated) return 1\nelse return 2')).toBe(true)
-        expect(gate('if (isSimulated === false) return 1')).toBe(false)
-        expect(gate('if (!other) return 1')).toBe(false)
-        expect(gate('if (isSimulated) return 1')).toBe(false)
-        expect(gate('if (-isSimulated) return 1')).toBe(false)
+        expect(gate('if (isSimulated === false) return new Response(null)')).toBe(false)
+        expect(gate('if (!other) return new Response(null)', `${SIM}import { other } from 'k'\n`)).toBe(false)
+        expect(gate('if (isSimulated) return new Response(null)')).toBe(false)
+        expect(gate('if (-isSimulated) return new Response(null)')).toBe(false)
         expect(gate('return 1')).toBe(false)
         expect(gate('')).toBe(false)
+        // Not the imported isSimulated.
+        expect(gate('if (!isSimulated) return new Response(null)', 'const isSimulated = true\n')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(null)', 'declare const isSimulated: boolean\n')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(null)', "import type { isSimulated } from 'k'\n")).toBe(
+            false,
+        )
+        // A real-mode branch that does something before, or while, it exits.
+        expect(gate('if (!isSimulated) { await db.wipe(); return new Response(null) }')).toBe(false)
+        expect(gate('if (!isSimulated) return db.wipe()')).toBe(false)
+        expect(gate('if (!isSimulated) throw await db.wipe()')).toBe(false)
+        expect(gate('if (!isSimulated) throw new Error(String(db.wipe()))')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(await db.wipe())')).toBe(false)
+        expect(gate('if (!isSimulated) return Response.json({ x: db.wipe() })')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(null, { status: n++ })', `${SIM}let n = 0\n`)).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(null, { status: (n = 1) })', `${SIM}let n = 0\n`)).toBe(
+            false,
+        )
         expect(
-            factsOf('declare const isSimulated: boolean\nexport const POST = async () => (!isSimulated ? 1 : 2)')
-                .opensWithSimulated404,
+            gate('if (!isSimulated) return new Response(null, { s: delete o.x })', `${SIM}const o: any = {}\n`),
         ).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(tag`x`)', `${SIM}declare const tag: any\n`)).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(() => 1)')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(new Uint8Array())')).toBe(false)
+        expect(gate('if (!isSimulated) return')).toBe(false)
+        expect(gate('if (!isSimulated) { log(); return new Response(null) }', `${SIM}declare const log: any\n`)).toBe(
+            false,
+        )
+        expect(gate('if (!isSimulated) try { return new Response(null) } finally { await db.wipe() }')).toBe(false)
+        expect(gate('if (!isSimulated) return db.Response(null)')).toBe(false)
+        expect(gate('if (!isSimulated) return new Response(null)', `${SIM}const Response = class {}\n`)).toBe(false)
+        expect(gate('if (!isSimulated) throw make()', `${SIM}declare const make: any\n`)).toBe(false)
+        expect(factsOf(`${SIM}export const POST = async () => (!isSimulated ? 1 : 2)`).opensWithSimulated404).toBe(
+            false,
+        )
         expect(
             factsOf(
-                'declare const withX: Function\nexport const POST = withX(async () => { if (!isSimulated) return 1 })',
+                `${SIM}${WITH_X}export const POST = withX(async () => { if (!isSimulated) return new Response(null) })`,
             ).opensWithSimulated404,
         ).toBe(false)
     })
@@ -789,7 +1126,9 @@ describe('judging a handler against a policy', () => {
             { verb: 'POST', facts: facts({ reachesAuthorize: true, wrappedBy: 'other' }) },
             policy,
         )
-        expect(failure).toMatch(/exemption that holds only when the handler is itself a call to withSecret\(…\)/)
+        expect(failure).toMatch(
+            /exemption that holds only when the handler is itself a call to an imported withSecret\(…\)/,
+        )
     })
 
     it('an exact exemption wins over the prefix it sits under', () => {
@@ -818,7 +1157,7 @@ describe('judging a handler against a policy', () => {
             judge(svc, { verb: 'POST', facts: facts({ reachesAuthorize: true, wrappedBy: 'withCaller' }) }, policy),
         ).toBeUndefined()
         expect(judge(svc, { verb: 'POST', facts: facts({ reachesAuthorize: true }) }, policy)).toMatch(
-            /must also satisfy: the handler is itself a call to withCaller\(…\).*the wrapper builds the actor/,
+            /must also satisfy: the handler is itself a call to an imported withCaller\(…\).*the wrapper builds the actor/,
         )
         expect(judge(svc, { verb: 'POST', facts: facts({ wrappedBy: 'withCaller' }) }, policy)).toMatch(
             /does not reach authorize/,
@@ -842,12 +1181,14 @@ describe('judging a handler against a policy', () => {
 
     it('describes each gate in words an author can act on', () => {
         expect(describeGate({ kind: 'wrapped-by', callees: ['withA', 'withB'] })).toBe(
-            'the handler is itself a call to withA(…) or withB(…), as in `export const POST = withA(…)`',
+            'the handler is itself a call to an imported withA(…) or withB(…), as in `export const POST = withA(…)`',
         )
         expect(describeGate({ kind: 'calls', callees: ['a.b'] })).toBe(
-            'the handler reaches a call to a.b(…) on its own path',
+            'the handler reaches a call to an imported a.b(…) on its own path',
         )
-        expect(describeGate({ kind: 'opens-with-simulated-404' })).toMatch(/opens with `if \(!isSimulated\) return …`/)
+        expect(describeGate({ kind: 'opens-with-simulated-404' })).toMatch(
+            /opens with `if \(!isSimulated\) return new Response\(null, \{ status: 404 \}\)` \(an imported `isSimulated`/,
+        )
     })
 })
 

@@ -81,7 +81,11 @@ const ROOTS: ScanRoot[] = [
             label: `apps/${entry.name}`,
             dir: path.join(APPS_DIR, entry.name, 'src/app'),
             exemptDir: path.join(APPS_DIR, entry.name, 'src/app/api'),
-            tsconfig: path.join(APPS_DIR, entry.name, 'tsconfig.json'),
+            // An app without one (a JS app's jsconfig.json, or neither) still gets scanned: relative
+            // re-exports resolve without a config, and an alias that does not resolve is refused, loudly.
+            tsconfig: ['tsconfig.json', 'jsconfig.json']
+                .map((name) => path.join(APPS_DIR, entry.name, name))
+                .find((file) => existsSync(file)),
         }))
         .filter((root) => existsSync(root.dir)),
     {
@@ -454,6 +458,28 @@ describe('the shapes the text-matching scan passed now fail', () => {
             name: 'a simulator route naming its gate only in a string',
             rel: 'simulator/repro/route.ts',
             src: "const note = 'if (!isSimulated)'\nexport async function POST() { return Response.json({ note }) }\n",
+            fails: ['POST'],
+        },
+        {
+            name: 'a webhook route wrapped by a local look-alike of its guard',
+            rel: 'webhooks/repro/route.ts',
+            src: 'const withWebhookSecret = (h: unknown) => h\nexport const POST = withWebhookSecret(async () => Response.json({ open: true }))\n',
+            fails: ['POST'],
+        },
+        {
+            name: 'a simulator route whose isSimulated is a local constant',
+            rel: 'simulator/repro/route.ts',
+            src:
+                'const isSimulated = true\n' +
+                'export async function POST() { if (!isSimulated) return new Response(null, { status: 404 }); return Response.json({}) }\n',
+            fails: ['POST'],
+        },
+        {
+            name: 'a simulator route whose real-mode branch mutates before the 404',
+            rel: 'simulator/repro/route.ts',
+            src:
+                "import { isSimulated } from 'keel/adapters/index'\ndeclare const db: { wipe(): Promise<void> }\n" +
+                'export async function POST() { if (!isSimulated) { await db.wipe(); return new Response(null, { status: 404 }) } return Response.json({}) }\n',
             fails: ['POST'],
         },
     ]

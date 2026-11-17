@@ -1,5 +1,5 @@
 import { abilityActorFromService, authorize } from 'keel/authz/authorize'
-import type { ServiceIdentity } from 'keel/service-auth/verify'
+import { withServiceCaller } from '../../stand-ins'
 
 /**
  * FIXTURE ROUTE — SCANNED, NEVER SERVED. See ../../dockets/route.ts for what this tree is.
@@ -12,24 +12,8 @@ import type { ServiceIdentity } from 'keel/service-auth/verify'
  * caller and builds that actor: the scan requires both under `service/`, per verb, so the handler is itself
  * the call (`export const POST = withServiceCaller(…)`), the shape the showcase's service route has.
  *
- * The wrapper is a local stand-in rather than an import: `withServiceCaller` is app-side machinery
- * (each app composes it over its own respond helpers), so there is no framework symbol to reach for. It
- * returns the handler Next would call, as the apps' wrapper does.
+ * `withServiceCaller` is imported from ../../stand-ins.ts, for the reason given there.
  */
-const IDENTITY: ServiceIdentity = {
-    kind: 'org-service',
-    keyId: 'wharf-key',
-    tenantId: 'harbor',
-    tenantSlug: 'harbor',
-    orgId: 'wharf',
-    orgSlug: 'wharf',
-}
-
-const withServiceCaller =
-    (handler: (ctx: { identity: ServiceIdentity }) => Promise<Response>): ((request: Request) => Promise<Response>) =>
-    () =>
-        handler({ identity: IDENTITY })
-
 export const POST = withServiceCaller(async ({ identity }) => {
     authorize(abilityActorFromService(identity), 'update', { type: 'Job', orgId: identity.orgId })
     return Response.json({ ok: true })
