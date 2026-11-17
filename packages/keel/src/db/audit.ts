@@ -50,6 +50,9 @@ type AuditAction = FrameworkAuditAction | AppAuditAction
  * are deliberately outside the trail. When a real-mode acceptance route exists, audit it there.
  */
 export interface AuditEventInput {
+    // There is deliberately no `at`. An audit log's time must not be forgeable by whoever records the event,
+    // so it comes from the database port: the database's own `now()`, or, in a simulated world only, the
+    // Simulator's clock (DbPort.now). A caller that tried to pass one would be ignored.
     tenantId: string
     /** The active org the action happened in (NOT NULL in the table). */
     orgId: string
@@ -333,6 +336,8 @@ export async function recordAuditEvent(db: DbPort, input: AuditEventInput): Prom
                 subject_id: input.subjectId ?? null,
                 credential_kind: input.credential?.kind ?? null,
                 credential_id: input.credential?.id ?? null,
+                // Undefined means the column default, the database's `now()`: what a real adapter gets.
+                at: db.now?.().toISOString(),
                 detail: detail === null ? null : jsonb(detail),
             })
             .execute(),
