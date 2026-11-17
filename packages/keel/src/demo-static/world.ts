@@ -323,9 +323,10 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         entry: { action: string; subjectType: string; subjectId: string | null; actorUserId: string },
         tenantSlug: string,
         orgSlug: string,
-        // The twin's WORLD clock, like the server's (DbPort.now in the fake database): an event recorded after
-        // the demo advanced time is dated in that time, not in real time.
-        at = new Date(mountedAtMs + clockOffsetMs).toISOString(),
+        // The twin's WORLD clock, like the server's (DbPort.now in the fake database): real time plus the offset the
+        // demo advanced, so an event recorded after a jump is dated in that time and two events a moment apart still
+        // differ. (Not `mountedAtMs + offset`, which is frozen between advances; that is for the clock DISPLAY.)
+        at = new Date(Date.now() + clockOffsetMs).toISOString(),
     ) {
         setAuditEntries((prev) => [{ id: `audit-${prev.length}`, at, ...entry, tenantSlug, orgSlug }, ...prev])
     }

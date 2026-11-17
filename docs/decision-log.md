@@ -2456,7 +2456,9 @@ or as a package: the logic is in `packages/keel`, and the app holds thin wrapper
   now uses its own world clock, with the inbound ROW keeping real time as the server's `inbound_emails.created_at`
   does. Known consequence, not fixed: the Simulator's "reset clock" returns to real time while the database
   persists, so events recorded afterwards sort below ones stamped in the advanced future in the Events tab, which
-  orders by `at desc`. Not changed here: the other timestamp columns (`jobs`, notifications, deliveries) still use
+  orders by `at desc`; and because that tab shows the newest 100, a world holding 100 or more future-stamped rows
+  hides every event recorded after the reset until it is re-seeded (a sequence column would fix the order; it is
+  not worth a migration for a demo-only tab). Not changed here: the other timestamp columns (`jobs`, notifications, deliveries) still use
   the database's `now()`; only the audit trail was asked for.
 - **The starter has the scheduled-tick route.** The showcase's `/api/webhooks/cron` route held the whole tick, so an
   app built from the starter had no route and nothing ticked keel's scheduler in a deployment (the `scheduled-tick`

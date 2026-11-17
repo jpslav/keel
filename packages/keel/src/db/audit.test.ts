@@ -207,6 +207,21 @@ describe('the time an audit event carries', () => {
         expect(at, 'a forged 1970 time must not reach the row').toBeGreaterThanOrEqual(before - 2000)
     })
 
+    test('a corrupt clock file, or an offset past the Date range, costs the demo its clock and not the app its audit write', async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { writeFileSync } = await import('node:fs')
+        const path = await import('node:path')
+        const clockFile = path.join(tmp, 'simulator', 'clock.json')
+
+        for (const bad of ['{"offsetMs": ', '{"offsetMs":1e16}']) {
+            writeFileSync(clockFile, bad)
+            const before = Date.now()
+            const at = await recordedAt(fakeDb)
+            expect(at, bad).toBeGreaterThanOrEqual(before - 2000)
+            expect(at, bad).toBeLessThanOrEqual(Date.now() + 2000)
+        }
+    })
+
     test('the real database adapter never defines a clock of its own', async () => {
         // Constructing the pool connects to nothing; it is destroyed at once. The only simulated-world thing a
         // DbPort may add is `now`, and a real adapter that did would make an audit row's time caller-influenced.

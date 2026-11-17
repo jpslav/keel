@@ -4,7 +4,7 @@ import type { JobsPort, SubmittedJob } from '../ports/jobs'
 
 // The registry is the one thing `runScheduledTick` takes from '../adapters/index' (a real import trips
 // server-only in a test env), so hand it the fake database and a jobs port that records what the tick spawns.
-const state = vi.hoisted(() => ({ calls: [] as SubmittedJob[] }))
+const state = vi.hoisted(() => ({ calls: [] as SubmittedJob[], simulated: true }))
 vi.mock('../adapters/index', async () => {
     const { fakeDb } = await import('../adapters/fake/db')
     const jobs: JobsPort = {
@@ -12,7 +12,13 @@ vi.mock('../adapters/index', async () => {
             state.calls.push(job)
         },
     }
-    return { db: fakeDb, jobs, isSimulated: true }
+    return {
+        db: fakeDb,
+        jobs,
+        get isSimulated() {
+            return state.simulated
+        },
+    }
 })
 
 const tmp = makeTestTmpDir('app-scheduled-tick-')
@@ -24,6 +30,7 @@ afterAll(() => {
 })
 afterEach(async () => {
     state.calls.length = 0
+    state.simulated = true
     const { resetClock } = await import('../adapters/fake/clock')
     resetClock()
 })
@@ -102,6 +109,18 @@ describe('runScheduledTick', () => {
         advanceClockMs(3 * DAY_MS)
         await runScheduledTick()
         expect(firedFor(id), 'due once the world clock is three days on').toBe(1)
+    })
+
+    test('in a real build it ticks on REAL time, whatever a world clock says (the clock is a simulated-world thing)', async () => {
+        const { runScheduledTick } = await import('./scheduled-tick')
+        const { advanceClockMs } = await import('../adapters/fake/clock')
+        const id = await insertSchedule(new Date(Date.now() + 2 * DAY_MS))
+        state.simulated = false
+        advanceClockMs(3 * DAY_MS) // a stray offset file: three days on in world time, nothing in real time
+
+        await runScheduledTick()
+
+        expect(firedFor(id), 'due only in world time, so a real tick must leave it').toBe(0)
     })
 
     test('reports the outbound-delivery drain beside the schedules', async () => {
