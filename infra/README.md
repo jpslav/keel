@@ -21,7 +21,8 @@ proves the shape compiles offline before anyone has an AWS account.
 ## Two network shapes — decide before the first deploy
 
 `params.database.transport` in the app's `config/params.ts` picks one (ADR-0001 and ADR-0002, addenda
-2026-11-16). Switching after the first deploy replaces the VPC and the cluster.
+2026-11-16). On an existing stack a switch does not replace anything: it fails on overlapping subnet
+CIDRs and rolls back. Changing shape later means a new stack and a snapshot restore.
 
 - **`pg` (default):** both Lambdas inside the VPC, reaching Aurora over a socket. One NAT gateway carries
   their egress.
@@ -33,8 +34,8 @@ proves the shape compiles offline before anyone has an AWS account.
     Cutover rows `data-api` (the transport, proven live by `docs/runbooks/data-api.md`) and
     `data-api-access` (this shape, deployed) close it.
 
-Both shapes synthesize offline. To check the opt-in one, set the parameter to `'data-api'` and run
-`pnpm --filter infra synth`.
+`pnpm --filter infra synth` builds both shapes offline: `cdk synth` builds the one the params choose, then
+`check-shapes.ts` builds both and checks each against the runtime's list of required variables.
 
 ## Deploys — checks in CI, deploys in your own pipeline
 

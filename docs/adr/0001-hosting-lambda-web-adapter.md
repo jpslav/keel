@@ -65,7 +65,8 @@ a dedicated infrastructure repo is a supported end state: `infra/` imports exact
 The Decision's network shape stays the default: both Lambdas inside the VPC, and one NAT gateway for their
 egress. The app's `params.database.transport` now chooses between two shapes (`infra/stack.ts`):
 
-- **`pg` (default):** unchanged.
+- **`pg` (default):** unchanged. The cluster synthesizes exactly as before, and both Lambdas now say
+  `DATABASE_TRANSPORT=pg` explicitly.
 - **`data-api` (opt-in):** the RDS Data API transport, from ADR-0002's addendum of the same date.
     - Only the Aurora cluster lives in the VPC, in isolated subnets with no NAT gateway and no internet
       gateway.
@@ -86,9 +87,11 @@ egress. The app's `params.database.transport` now chooses between two shapes (`i
 - Every SQL statement is an HTTPS round trip. A `withTenant` is at least BeginTransaction, one setup
   statement, the queries, and Commit.
 - The Data API's limits apply to the app and to its migrations: 1 MiB responses, 45 seconds per call,
-  one hour per transaction.
+  one hour per transaction (AWS's `BeginTransaction` API reference; older SDK doc comments say 24 hours).
 - Anyone holding both the IAM grant and the secret can run SQL as the database user, so the grant is
-  scoped to the one cluster.
+  scoped to the one cluster. That user is the cluster's master user, as on `pg` today. Closing
+  `db-role-not-superuser` on this shape means a second, non-superuser secret, and a hand-written grant
+  on that secret instead of CDK's.
 
 **Why the VPC path stays the default:**
 
@@ -96,14 +99,19 @@ egress. The app's `params.database.transport` now chooses between two shapes (`i
 - A socket has lower latency per statement.
 - A migration or query that cannot fit the Data API's limits needs the socket.
 
-Switching shapes after the first deploy replaces the VPC and the cluster, so decide before it.
-`pnpm --filter infra synth` was run offline for both shapes. The `data-api` shape has:
+**Decide before the first deploy.** On an existing stack a switch does not replace anything: the new
+subnets' CIDRs overlap the old ones, so the update fails and rolls back. Changing shape means a new
+stack and a restore from a snapshot.
+
+`pnpm --filter infra synth` now runs `infra/check-shapes.ts` after `cdk synth`. It builds BOTH shapes and
+checks each against the runtime's own list of required variables, so the opt-in shape is built by a gate
+even though the app's params choose `pg`. It was also run offline by hand for both shapes. The `data-api` shape has:
 
 - no NAT gateway, no internet gateway, and two isolated subnets;
 - the cluster's HTTP endpoint enabled;
 - both Lambdas without VPC configuration;
 - the `rds-data` and secret-read grants scoped as above.
 
-The `pg` shape keeps its NAT gateway, its subnets, its in-VPC Lambdas and its secret-read grants, now
-with `DATABASE_TRANSPORT=pg` set explicitly. The cutover row `data-api-access` proves the deployed
+The `pg` shape keeps its NAT gateway, its subnets, its in-VPC Lambdas and its secret-read grants. It now
+sets `DATABASE_TRANSPORT=pg` explicitly on both Lambdas, and its cluster is unchanged. The cutover row `data-api-access` proves the deployed
 shape.

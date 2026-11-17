@@ -1521,3 +1521,17 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   "this never loads" assertion then passes vacuously, depending on test order. Register counting mocks
   with `vi.doMock` in `beforeEach`, after the reset, and prove it by mutation in both test orders (as
   `packages/keel/src/adapters/real/index.test.ts` was).
+
+## Checking both infra shapes (2026-11-16, `feat/rds-data-api-infra`)
+
+- **`cdk synth` builds one shape: the one the app's params choose.** An opt-in shape is therefore never
+  built by any gate until someone deploys it. `infra/check-shapes.ts` constructs the stack once per
+  shape with CDK's own `Template`, and checks each against the runtime's list of required variables
+  (`DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`, imported by path).
+  `pnpm --filter infra synth` runs it, and so does CI. `knip.json`'s infra workspace lists it as an entry,
+  the narrowest addition: it is run by that script and imported by nothing, and knip would otherwise
+  report the file unused.
+- **A CDK prop set to `false` is not the same as one left unset.** `enableDataApi: false` adds
+  `EnableHttpEndpoint: false` to a cluster that previously had no such property. That is a no-op update on
+  every existing stack, and a diff for reviewers to puzzle over. Spread the property in only when it is
+  true.

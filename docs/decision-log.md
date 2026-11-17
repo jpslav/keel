@@ -1869,8 +1869,10 @@ worth keeping.
 
 ## The Data API network shape in the infra draft (2026-11-16, `feat/rds-data-api-infra`)
 
-- **The stack reads `params.database.transport`.** It does not read its own CDK context. One value
-  decides both what the app's runtime does and what network it gets, so the two cannot disagree.
+- **The stack takes `params.database.transport`, passed in by `infra/app.ts`.** It does not read its own
+  CDK context. One value decides both what the app's runtime does and what network it gets, so the two
+  cannot disagree. It is a prop rather than an import inside the stack so that `infra/check-shapes.ts`
+  can build both shapes.
 - **On `data-api`, the VPC still exists, but holds only the database.** The subnets are isolated, with
   no NAT gateway and no internet gateway. A cluster has to live in a VPC. Nothing else in the stack needs
   a route out of one once the Lambdas run outside it.
@@ -1878,5 +1880,11 @@ worth keeping.
   its cutover row closes, and a socket is faster per statement. Its limits (45 seconds per call, 1 MiB
   per response, an hour per transaction) are the app's limits on that shape.
 - **CDK's `grantDataApiAccess`, not a hand-written policy.** It grants exactly the five `rds-data`
-  actions on the cluster's ARN, plus read on its secret, as both synthesized shapes show. The
-  `data-api-access` cutover row checks the deployed policy, and that a role without it is refused.
+  actions on the cluster's ARN, plus read on its secret, as the synthesized `data-api` shape shows.
+  `BatchExecuteStatement` is among them although the dialect never sends it; it allows nothing that
+  `ExecuteStatement` does not. The `data-api-access` cutover row checks the deployed policy, and that a
+  role without it is refused.
+- **Both shapes are checked by a gate.** `pnpm --filter infra synth`, which CI runs, now also runs
+  `infra/check-shapes.ts`. It found what review found missing: nothing built the `data-api` shape, and
+  nothing tied its environment to `DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`.
+  knip's infra entry gains that one file.

@@ -2,7 +2,6 @@ import path from 'node:path'
 import * as cdk from 'aws-cdk-lib'
 import type { Construct } from 'constructs'
 import { APP_SLUG } from '../apps/showcase/config/app'
-import { params } from '../apps/showcase/config/params'
 import { addTags, TAGS } from './lib/tags'
 
 const { aws_budgets, aws_cloudfront, aws_cloudfront_origins, aws_ec2, aws_lambda, aws_lambda_nodejs, aws_rds, aws_s3 } =
@@ -20,17 +19,29 @@ type Environment = (typeof ENVIRONMENTS)[number]
  * Gates before any deploy (docs/cutover-checklist.md): `cloud-accounts` (fills config/params.ts) and
  * `recurring-cost` (Aurora, NAT gateway, CloudFront must be approved).
  *
- * TWO NETWORK SHAPES, chosen by the app's `params.database.transport` (ADR-0001 and ADR-0002, addenda
- * 2026-11-16) — decide before the first deploy, because switching later replaces the VPC and the cluster:
+ * Not a checklist row, but do it before the first deploy: if your organisation ships its own CDK construct
+ * library, replace lib/tags.ts and the IAM/secrets/monitoring drafts with it. Deploys run through your own
+ * pipeline, not GitHub Actions — see infra/README.md.
+ *
+ * TWO NETWORK SHAPES, chosen by the app's `params.database.transport`, which app.ts passes in as
+ * `databaseTransport` (ADR-0001 and ADR-0002, addenda 2026-11-16). Decide before the first deploy: on an
+ * existing stack a switch does not replace anything, it FAILS (the new subnets' CIDRs overlap the old ones)
+ * and rolls back, so changing shape means a new stack and a restore from a snapshot.
  * - `pg` (default): both Lambdas run inside the VPC and reach Aurora over a socket; one NAT gateway
  *   carries their egress to the hosted auth/email/LLM services.
  * - `data-api` (opt-in): only the database lives in the VPC, in isolated subnets with no NAT. Both
- *   Lambdas run outside it and reach Aurora through the RDS Data API, authorised by IAM alone. Not a checklist row, but do it
- * before the first deploy: if your organisation ships its own CDK construct library, replace
- * lib/tags.ts and the IAM/secrets/monitoring drafts with it. Deploys run through your own pipeline, not GitHub Actions — see infra/README.md.
+ *   Lambdas run outside it and reach Aurora through the RDS Data API, authorised by IAM alone.
+ *
+ * ./check-shapes.ts synthesizes both shapes and checks them against the runtime's contract; `pnpm synth`
+ * runs it after `cdk synth`.
  */
+export interface AppStackProps extends cdk.StackProps {
+    /** The app's `params.database.transport` (packages/keel/src/adapters/real/database-transport.ts). */
+    databaseTransport: 'pg' | 'data-api'
+}
+
 export class AppStack extends cdk.Stack {
-    constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    constructor(scope: Construct, id: string, props: AppStackProps) {
         super(scope, id, props)
 
         const environment = this.node.tryGetContext('environment') as Environment | undefined
@@ -40,16 +51,18 @@ export class AppStack extends cdk.Stack {
         const isProd = environment === 'Production'
         addTags(this, { ...TAGS, Environment: environment })
 
-        const transport = params.database.transport
+        const transport = props.databaseTransport
         if (transport !== 'pg' && transport !== 'data-api') {
-            throw new Error(`params.database.transport must be 'pg' or 'data-api' (got "${String(transport)}")`)
+            throw new Error(`databaseTransport must be 'pg' or 'data-api' (got "${String(transport)}")`)
         }
         const dataApi = transport === 'data-api'
 
         // ---- networking -------------------------------------------------------------------
         // pg: one NAT gateway so the in-VPC Lambdas can reach the hosted auth/email/LLM services —
         // recurring cost, gated by cutover row `recurring-cost`. data-api: nothing but the database is in
-        // the VPC, so it needs no route out at all — isolated subnets, no NAT, no public subnets.
+        // the VPC, so it needs no route out at all — isolated subnets, no NAT, no public subnets. (Should the
+        // secret later get rotation, its rotation Lambda lands in these subnets and needs a Secrets
+        // Manager interface endpoint, having no other way to reach the service.)
         const vpc = new aws_ec2.Vpc(
             this,
             'Vpc',
@@ -77,8 +90,9 @@ export class AppStack extends cdk.Stack {
             serverlessV2MaxCapacity: 2,
             vpc,
             vpcSubnets: { subnetType: dbSubnetType },
-            // The HTTPS endpoint the data-api transport calls; off for pg, which needs no second way in.
-            enableDataApi: dataApi,
+            // The HTTPS endpoint the data-api transport calls. Left unset for pg, which needs no second way
+            // in — unset rather than `false`, so the pg cluster synthesizes exactly as it did before.
+            ...(dataApi && { enableDataApi: true }),
             defaultDatabaseName: APP_SLUG,
             storageEncrypted: true,
             removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
@@ -186,7 +200,7 @@ export class AppStack extends cdk.Stack {
             ...lambdaNetwork,
             // pg: the handler builds its own connection string from the secret. data-api: the same
             // variables as the server (the handler follows DATABASE_TRANSPORT too).
-            environment: dataApi ? databaseEnv : { DB_SECRET_ARN: db.secret!.secretArn },
+            environment: dataApi ? databaseEnv : { DATABASE_TRANSPORT: 'pg', DB_SECRET_ARN: db.secret!.secretArn },
             bundling: {
                 tsconfig: path.join(__dirname, '../tsconfig.json'),
                 format: aws_lambda_nodejs.OutputFormat.ESM,

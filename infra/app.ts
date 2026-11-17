@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib'
 // Infra deploys ONE app; it names the one this repo ships (ADR-0007 — the apps/ tree). An adopter
 // with a different app repoints these imports at their own `apps/<app>/config/app`.
 import { APP_SLUG } from '../apps/showcase/config/app'
+import { params } from '../apps/showcase/config/params'
 import { AppStack } from './stack'
 
 /**
@@ -14,6 +15,7 @@ const app = new cdk.App()
 const stackId = `${APP_SLUG.charAt(0).toUpperCase()}${APP_SLUG.slice(1)}AppStack`
 
 new AppStack(app, stackId, {
+    databaseTransport: params.database.transport,
     description: `${APP_SLUG} application stack (Next standalone on Lambda via Web Adapter, ADR-0001)`,
 })
 

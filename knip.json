@@ -28,7 +28,7 @@
             "ignore": ["src/db/migrations/0*.ts", "test-fixture/api/**", "test-fixture/app-config/db/migrations/*.ts"]
         },
         "infra": {
-            "entry": ["app.ts"]
+            "entry": ["app.ts", "check-shapes.ts"]
         }
     },
     "ignore": ["spikes/**"]
