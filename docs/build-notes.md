@@ -1449,6 +1449,39 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   is the dev overlay's "is this next outdated" check, which next 16.2.12 on `main` already made, so
   `pnpm dev` was not hermetic before this either. It has no switch and is still there.
 
+## Lint fence gaps (2026-11-16, `fix/lint-fence-gaps`)
+
+- **The merge trap struck again, and re-listing was the mechanism that failed.** Every
+  `no-restricted-syntax` block for routes, pages and components re-listed the getDb selectors by hand, and
+  the last of them, the one that added the a11y-attribute ban, listed two of the three. ESLint keeps only the
+  last block's list for a file, so `db['getDb']()` passed lint in a route handler while
+  `getDbComputedSelector` sat unused in the blocks above. Re-listing works until one block lists PART of
+  a set. Selectors that implement one rule now travel as one array (`getDbSelectors`,
+  `runModeEnvSelectors`), so a block can drop the whole rule but not one form of it.
+- **Reading the config does not find these; printing it does.** The a11y block's list looked complete. A
+  script that calls `ESLint#calculateConfigForFile` for every zone × extension and prints the effective
+  `no-restricted-syntax` and `no-restricted-imports` entries found this gap and the others in one pass:
+  keel/core's block had dropped the font ban (its own `next/*` group still caught the import, under the wrong
+  message), and a story beside an app's fake had dropped the dynamic `real/` ban along with the a11y one.
+- **A fence that names a directory must name every extension ESLint lints there.** Every fence glob said
+  `*.{ts,tsx}`, so a `.mjs` file in `apps/*/src` or `packages/keel/src` could import a vendor SDK, read
+  `process.env` or take the raw db handle with a green `pnpm lint`. ESLint lints eight extensions here,
+  not six: typescript-eslint's recommended config names `.mts` and `.cts` beside `.ts` and `.tsx`, and
+  `keel/public-surface` had missed those two as well. The globs now take their extensions from one constant (`SRC_EXT`). Carve-outs do NOT: a test
+  carve-out names what vitest runs (`*.test.{ts,tsx}`), a story carve-out what Ladle loads, and
+  `next.config.*` the four names Next reads, so a `.test.mjs` or a `next.config.cjs` stays fenced.
+- **`react/jsx-no-literals` can only be configured for a file that the block registering the react plugin
+  also matches.** Widening one fence's glob can therefore mean widening a plugin block's too. When it
+  doesn't, the lint gate fails with a config error (`Could not find plugin "react"`), not a pass.
+- **typescript-eslint's parser accepts `import` in a `.cjs` file**, even though the config sets
+  `sourceType: 'commonjs'` for them and Node rejects the syntax. A lint case for a `.cjs` file should use
+  `require()`, the way a real one is written, or it tests a file that could never run.
+- **A selector that aims at a name has to accept the name in each spelling a key can take**: an
+  identifier, a string, or a template literal with no expressions (`anyKey` in `eslint.config.mjs`). On
+  main the computed getDb selector matched `db['getDb']` but not ``db[`getDb`]``, and `process['env']`
+  passed the `process.env` ban outright. A key wrapped in a TypeScript assertion (`['getDb' as const]`) is still out
+  of reach.
+
 ## Actors that are not sessions, in `authorize()` (2026-11-16, `feat/authorize-non-session-actors`)
 
 - **An exemption justified "by construction" names a check that isn't there.** The scan's `service/`
