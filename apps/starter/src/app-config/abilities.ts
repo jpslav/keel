@@ -1,4 +1,4 @@
-import type { AbilityAction, AbilityActor, AbilitySubject } from 'keel/core/abilities'
+import type { AbilityAction, AbilityActor, AbilitySubject, NonSessionAdministration } from 'keel/core/abilities'
 
 /**
  * The APP's authorization extension (the seam side of keel/core/abilities.ts, ADR-0012). The framework
@@ -22,6 +22,15 @@ export type AppSubjectType = 'Item'
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AppSubjectFields {}
+
+/**
+ * The credential kinds, beyond keel's own, by which a PERSON or a MACHINE can reach this app (composed
+ * into keel/core/abilities' `PersonCredentialKind` / `MachineCredentialKind`; keel's are `session`,
+ * `inbound-email` and `service-key`). This app adds none. An app with personal API tokens registers its
+ * token kind as a person credential; one with a CI identity, that as a machine credential.
+ */
+export type AppPersonCredentialKind = never
+export type AppMachineCredentialKind = never
 
 /**
  * The designated staff/operator org slug. ACTIVE membership in this org grants the `manageAll`
@@ -65,3 +74,20 @@ export function appAbilityRules(
             return false
     }
 }
+
+/**
+ * The app's rules for MACHINE actors (keel/core/abilities `MachineActor` — a caller that is not a
+ * person: a CI identity, an integration). This app grants machines nothing, so every machine is denied
+ * every app subject; this function is the off switch. To let one in, switch on `subject.type` and the
+ * machine's `actor.credential.kind` here, the way `appAbilityRules` does for people.
+ */
+export function appMachineAbilityRules(): boolean {
+    return false
+}
+
+/**
+ * The framework's session-only subjects (inviting members, changing the org, managing webhook endpoints,
+ * accepting terms) take a browser SESSION. Here an app may widen one of them to a non-session person
+ * credential (a personal API token, say; never an inbound email). This app widens none.
+ */
+export const nonSessionAdministration: NonSessionAdministration = {}

@@ -1967,3 +1967,225 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   `apps/showcase/next.config.ts` imports it on every `next dev` and build, but calls it only when a DSN is
   set (cutover row `errors`), so no run here prints the warning. Moving it belongs with the Sentry 11
   upgrade.
+
+## `authorize()` judges actors that are not sessions (2026-11-16, `feat/authorize-non-session-actors`)
+
+The design is in the ADR-0012 addendum of the same date. The port method is in ADR-0003's. These are
+the calls the work made that no plan anticipated.
+
+- **The requester's evidence.** The sharing site's console (`safeinsights/pages`) names its callers in
+  `apps/console/src/domain/pages/callers.ts`: a session, a CLI's API token, and later CI's GitHub OIDC
+  token. On its `main`, read before the requester's shape arrived, `sessionUser(ctx)` throws
+  `AuthRequiredError` for anything but a session. The worker on its token branch then reported the
+  design of record, relayed by the keel manager; that branch was not read here. The token is PERSONAL: it acts as the publisher who approved it, its console role is
+  resolved afresh on every call, removing the publisher stops it at once, and it never wields
+  `manageAll`. Its stand-in actor is an `AuthUser` with placeholder role and locale. Its audit rows read
+  exactly like browser ones. CI is a principal of its own.
+- **The machine design was built first, and the person kind came after.** The first cut gave keel
+  machine actors only, for keel's own service keys and for CI. The requester's answer showed that the
+  caller it has NOW is a person holding a token, which a roleless machine cannot express. Both kinds
+  shipped in one PR. They share the `Actor` union, the `Credential` vocabulary, the `authorize`
+  overload, the audit columns and one addendum, so a split would have landed the overload with half its
+  union and rewritten the same functions in the second PR. The commits are separate: machine actors,
+  then the person kind.
+- **The person's standing is read by keel, through the auth port, on every call.**
+  `abilityActorFromCredential` takes no role at all, so "never cache a role in the token" is a property
+  of the function's signature rather than a convention. `listMembers` could not supply it, because
+  `restricted` is not on `Membership`, so the port gained `getMember` (ADR-0003 addendum). Inbound email
+  had guessed `restricted` from the role; it now uses the same rule a session does (`isRestricted`).
+- **`manageAll` is a STATED session's alone, enforced in `defineAbilitiesFor`.** It is not left to
+  whoever builds the actor. A token's owner acting in the operator org is an ordinary member there. The
+  first version read a missing credential as a session, so a hand-built actor that left the field out
+  and set `manageAll` from the org would still have wielded it. The pre-PR review caught that, and a
+  missing credential now means "not stated".
+- **Credential kinds are composed, not closed.** `PersonCredentialKind` and `MachineCredentialKind`
+  each add the app's kinds from the abilities seam, as subjects and audit verbs already do. The
+  console's one-time `cli-login` kind is app vocabulary; keel never edits a base union for it.
+- **Narrowing by kind, not per-credential scopes.** The console's narrowing ("publisher administration
+  takes a browser session") is by credential KIND, and the app's rules can see the kind. That makes
+  per-credential scopes (option b of the fork sent to JP) unnecessary for now. The place where a
+  per-credential cap would intersect `can()` is marked in `defineAbilitiesFor`, and nothing is built
+  there.
+- **Machines get a separate rule function, not a role.** Giving a machine a role and passing it to
+  `appAbilityRules` fails open: both apps' person rules let any member who is not restricted author the app's own subjects (the showcase's tickets and attachments, the starter's items). `appMachineAbilityRules` with a `return false` default fails closed. It is also one new
+  export for an adopter, not a changed signature.
+- **The framework's one machine grant names a credential kind.** Job `read`/`update` in the caller's
+  own org goes to `service-key` only. `machineActor` refuses that kind, keel's person kinds and
+  `system`, so an app's machine cannot pass for any of them.
+- **The audit columns are nullable, and NULL means "not recorded".** Rows before 0014, `system:*`
+  writers, and session routes that don't yet pass a credential all record NULL. A NOT NULL default
+  would have had to claim a kind for rows nobody can vouch for. The session routes are left as they were.
+  Making them record `session` would touch every audited route in the showcase, in a PR about callers
+  that are not sessions.
+- **An overload, not a migration.** `authorize(actor, action, subject)` sits beside the four-argument
+  session form. Changing the 19 existing calls (16 in the showcase, one in the starter, two fixture
+  routes) and their tests would have been mechanical here, but every adopter's routes would have
+  changed too (the console has nine calls), and the four-argument form is still the right shorthand
+  for a session.
+- **`kind` and `credential` are optional on the person actor.** Requiring them would have broken every
+  `AbilityActor` literal: the preset checks, both static demos and every adopter's tests. A literal with
+  no credential keeps the person rules but neither wields `manageAll` nor records a credential. The
+  three literals in this repo that stand for a session (both static shells and the ticket-assign
+  preset check) now say so.
+- **The seam's machine rules are bound at call time.** `defineAbilitiesFor` assigns
+  `appMachineAbilityRules` to `MachineAbilityRules` inside the function, not at module load. That lets
+  the empty registration take no parameters, and a seam module that later value-imports
+  `keel/core/abilities` cannot hit the binding before it is initialized.
+- **The `service/` exemption is retired, and the scan says what to do instead.** Once a service route
+  can authorize, an exemption that says it need not is a second way through the gate. The scan's
+  failure message names the three non-session constructors, so an adopter whose old service route goes
+  red learns the fix from the failure itself.
+- **Token storage stays in the app.** keel owns what `authorize()` needs, and the token itself is the
+  app's for now: `.claude/future-tasks/personal-api-tokens.md` records the console's shape for when keel
+  takes it.
+- **The migrator runs unordered, so a framework migration can reach an existing database.** The first
+  run of the full gate after 0014 failed the starter's e2e. Its local world had run `1001_items`, and
+  Kysely's strict ordering refused a new migration that sorts before it. The alternatives were worse.
+  Wiping `.data` fixes a laptop, not a deployment. Numbering framework migrations above the app's range
+  breaks the "framework first" order for a fresh database. `allowUnorderedMigrations: true` keeps
+  name order for pending migrations and keeps the missing-migration check.
+- **Unordered migration needed a rule and a gate.** Strict ordering had also been what refused an app
+  migration numbered into 0001–0999, and an unordered framework migration that sweeps the catalog
+  (`GRANT … ON ALL TABLES`) would leave an upgraded database different from a fresh one. Both are now
+  `packages/keel/src/db/migrate.test.ts`, a seam-conformance test run against the fixture and each app.
+  It checks the numbering, and it compares an upgraded schema with a fresh one. Both checks were seen
+  failing.
+- **Kept as built, after review:**
+    - `abilityActorFromCredential` takes `org: { id, slug }` rather than resolving one from the other.
+      The auth port names orgs by slug, as Clerk does, and resolving inside would couple `authz` to the
+      database. The docstring now requires both from one organizations row.
+    - `machineActor` is kept although only keel's own tests call it. Its consumer is the first adopter's
+      planned CI identity, and its run-time checks are what a hand-written `MachineActor` would lack.
+- **What three review rounds changed** (a pre-PR review and two code rounds, all on Opus):
+    - `service/` routes still need their verifying wrapper (`REQUIRED_ALONGSIDE`). Without it,
+      retiring the exemption had let a request-built machine literal pass the scan.
+    - Restriction has one rule, `isRestricted(flag, role)`, in both adapters. This changes real-mode
+      sessions.
+    - The credential-kind check runs in both directions and refuses `string`.
+    - The migrator refuses an out-of-order migration within its own sequence and keeps Kysely's "is
+      missing" error. `schemaOf` now covers RLS flags, constraints, triggers, functions and column grants.
+    - The intake's system rows record no credential.
+    - The real `getMember` matches the membership by user and returns null for an unknown org.
+- **Declined after review, with reasons:**
+    - A lint ban on hand-built `kind: 'machine'` literals: keel never guarded against a route building
+      an `AuthUser` either, and the fixture builds actors by hand on purpose.
+    - Requiring `authorize(ctx.actor…)` by name under `service/`: brittle, and bypassable by renaming.
+    - An advisory lock around the migration preflight: two releases migrating one database at the same
+      moment is outside keel's deploy model.
+- **JP decided the fork (2026-11-16, via the keel manager).** A machine's powers come from the app's
+  abilities seam, through a deny-by-default `appMachineAbilityRules`, and per-token scopes are not built.
+  The place for a later per-credential cap stays marked in `defineAbilitiesFor`, and retiring the
+  `service/` exemption stands.
+- **An independent review, decided by the keel manager.** A cold review by a different model, at
+  `833638a`, found three MEDIUMs:
+    - The upgrade test's "old" database could not hold an app migration that builds on the newest framework
+      one. Fixed by building it one migration at a time.
+    - A banned user kept their standing. They now have none, and `locked` deliberately still does.
+    - A possibly-true `manageAll` without a session failed closed silently. It is now a type error.
+- **The administrative subjects are a manager decision, the conservative one, and JP was told.** They are
+  Membership, Org and WebhookEndpoint, and non-read actions on them take a stated session. An app widens
+  one subject at a time through `nonSessionAdministration`.
+- **Also from that review:**
+    - the inbound handler now reports its credential instead of the intake inferring it;
+    - `isRestricted` is used at every remaining literal;
+    - malformed actors are denied;
+    - an org's id and slug come from one row (`orgIdentityForSlug`);
+    - the numbering test no longer requires an app migration, and the four-digit rule is in
+      `docs/adopting.md`;
+    - one ADR sentence about un-forced RLS was corrected in place, since the addendum is today's.
+- **The independent re-check found one regression of this PR's own (N1), and the manager made three more
+  calls.** N1: the validated actor was read through its prototype, but the judged one was `{ ...actor }`,
+  so a restricted admin built as a class with getters, or with `Object.create`, could author. The person
+  is now copied field by field by name, that copy is validated, and only it is judged. Seen failing
+  first. The three calls below are the MANAGER's, recorded as such and open to JP:
+    - Accepting terms (AgreementAcceptance `create`) takes a stated session. It is a legal act a person makes
+      in a browser, so it joins the session-only subjects, and the app hook may widen it.
+    - `nonSessionAdministration` may not widen to `inbound-email`, by type (`WidenableCredentialKind`) or
+      at run time. An email's From line is the weakest credential keel has.
+    - `OrgIdentity` is branded: `orgIdentityForSlug` is its only producer, and tests cast deliberately. The
+      inbound intake now gets `ctx.org` through it, at the cost of one more indexed read per email.
+
+## Nothing an upstream merge brings should need the adopter to edit keel's files (2026-11-16, `fix/adopter-merge-friction`)
+
+Two reports from the first adopter's second upstream merge, one bug class: keel depending on, or telling an
+adopter to edit, something a later merge (ADR-0013) will change. `init-app` runs once; a merge happens every
+update.
+
+- **A doc citing the reference apps no longer turns an adopter's path gate red.** Reproduced first: a tree
+  adopted from the commit before the app-owned-adapters work, then given that work's new docs verbatim as a
+  merge would, failed `doc-paths.test.ts` on `docs/recipes/app-owned-adapter.md:167`
+  (`apps/starter/src/app/[locale]/signin/page.tsx`). `resolves` in `tests/docs/doc-set.ts` now treats a
+  citation under `apps/showcase/` or `apps/starter/` as keel's whenever that app is not in the tree, and checks
+  it like any other wherever the app exists. "In the tree" is the app's `package.json`, not its directory: review
+  found that a merge brings back any new file upstream adds under `apps/showcase/` even after the adopter
+  deleted the app, and a directory holding one stray file had switched the rule off. The template stays strict (a broken one fails, watched
+  failing), a rename-only tree is strict about the showcase it kept, and the adopter's own app and
+  `packages/keel` are strict everywhere. Rejected: asking every doc to cite `apps/<app>/…` (it depends on
+  each future author, and the live docs hold 159 citations of the showcase in 46 files and 46 of the
+  starter in 17 (counted 2026-11-17), most of them pointing at keel's worked examples and not at the reader's own app), and a rule in the
+  test alone (`init-app` asks `resolves` which citations are gone before it generalizes them, so the rule
+  lives where both read it). The list is closed at two names: `init-app` reserves `showcase`, and an adopter
+  who keeps the name `starter` has the directory, so their own citations of it are still checked.
+- **keel's demo size script holds no number and no history.** Its header told an adopter to record every
+  budget change in it, and its default was the showcase's number, so changing either meant editing a file
+  upstream also edits. The budget is now a required argument from each app's `package.json` (the showcase
+  passes `840000` explicitly). The starter's history moved, split per app and lightly reworded (every number
+  checked), into `apps/starter/DEMO-SIZE.md` beside its number, and the script's header is generic. That file
+  keeps the adopter's "Changes" section above keel's history, so a later upstream addition to the history and
+  an adopter's own entries sit in different regions. The showcase's history is in this log, below, and NOT in a
+  file in `apps/showcase/`: an adopter deletes that app, and review showed a file keel adds there afterwards
+  comes back on the next merge (and two same-named new files in both app directories make git refuse to map
+  them for an adopter who ejected and renamed). Rejected: a comment in `package.json` (JSON has none), and a
+  `DEMO-SIZE.md` for the showcase. `init-app`'s bullet from the previous change lost its no-number branch and
+  its "the header still describes the showcase" sentence, since neither is true any more, and points at
+  `DEMO-SIZE.md` only when the app has one.
+- **The sweep for other instructions of this kind** fixed the one that was plainly wrong (`docs/adopting.md`
+  told adopters to promote a keel module "by adding one line" to `packages/keel/package.json`, which ADR-0013
+  says never to carry in a fork). The rest each need a decision and are in
+  `.claude/future-tasks/adopter-instructions-edit-keel-owned-files.md`, including the largest: `init-app`'s
+  day-one rewrite of about 60 docs, which is a conflict waiting at every later upstream edit.
+
+## The showcase's demo size budget history, moved out of `scripts/check-demo-size.mjs` (2026-11-16, `fix/adopter-merge-friction`)
+
+This was the HISTORY section of that script's header, and the showcase has no `DEMO-SIZE.md` of its own: an
+adopter deletes the showcase, and a file keel adds under `apps/showcase/` after that comes back on the next
+merge. The starter's history is in `apps/starter/DEMO-SIZE.md`, where an adopter inherits it. Moved, split per
+app, lightly reworded; every number was checked against the original.
+
+What the number is for: the showcase's budget is the framework's pace-setter: about 3% over what it measures, deliberately thin, so that
+growth is a decision someone makes on purpose. Every framework screen and twin is in the showcase, so a
+framework change that costs bytes costs them here first.
+
+**Re-based 2026-11-16, 950000 → 840000**
+
+Since the first commit (925623 bytes) the demo had grown 18787 bytes, to 99.4% of its budget. Per merge: demo
+presets (#26) +16924, the Simulator's people-and-orgs work (#15) +810, actors that start with the page (#16)
++855, the mechanical bundle (#19) +198. Two things were removed:
+
+- 493 bytes were incidental: keel's four preset operation definitions were module-level constants, so valibot
+  and four schemas rode in every app's bundle although the demo never validates a preset. They are built by
+  function now, and `tests/tooling/static-demo-bundle.test.ts` holds it. (An app's OWN definition is not
+  covered: the showcase's `ticket.assign` still carries about 2.8 KB, its definition and valibot's schema
+  functions.)
+- 129257 bytes were Mantine's stylesheet. The apps import `@mantine/core/styles.css` whole, 273 KB for ~100
+  components, of which the demo's bundle reaches 33. The static demo's build now drops every rule whose hashed
+  class is in no shipped file (`scripts/vite-prune-mantine-css.ts`, wired in each app's `vite.demo.config.ts`):
+  14-15% of the file.
+
+What stays is the presets themselves: net of the trim about 16.4 KB on the showcase, real code (the static
+twin's replay, the operation registry, the seam module with `extends`) plus its copy and its tour.
+
+`pnpm build:demo-static`, bytes: 925623 at the first commit, 944410 before the re-base, 814660 after it. The
+budget is 840000, which leaves 25340 bytes (3.0%).
+
+The budget went DOWN, so the bytes saved are not slack: they are the margin above, on purpose. If the pruning
+or the lazy definitions regress, the number turns red, which is the point of it.
+
+**Raised 2026-07-31, 920000 → 950000, for tours**
+
+The tour engine (ghost cursor driver, engine hook, narration bar, Tours tab) plus the showcase's 16-step
+walkthrough and its narration in both locales cost 25244 bytes, 2.8% of the artifact: 10932 of that is the
+engine (measured against the starter, which registers no tours and still passed its own unchanged budget) and
+about 14300 is the tour itself, most of it narration in two locales. That is the one feature whose whole point
+IS that file: a stakeholder who is emailed `dist-demo/index.html` can now press Start instead of reading a
+runbook and clicking fifteen things in the right order.

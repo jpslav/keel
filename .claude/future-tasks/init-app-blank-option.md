@@ -36,8 +36,8 @@ Delete:
 
 Rewrite to the empty registration:
 
-- `apps/starter/src/app-config/abilities.ts` — `AppSubjectType = never`, and `appAbilityRules`
-  reduced to its `default: return false`
+- `apps/starter/src/app-config/abilities.ts` — `AppSubjectType = never`, `appAbilityRules`
+  reduced to its `default: return false`, and `appMachineAbilityRules` kept as it is (`return false`)
 - `apps/starter/src/app-config/db/schema.ts` — an empty `AppTables`
 - `apps/starter/src/app-config/db/migrations/index.ts` — `appMigrations = {}`
 - `apps/starter/src/app-config/db/rls-proofs.ts` — an empty async body

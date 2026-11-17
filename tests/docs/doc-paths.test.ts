@@ -25,6 +25,16 @@ describe('doctrine docs cite paths that exist', () => {
             .filter(({ path }) => !resolves(path))
             .map(({ path, line }) => `${file}:${line} cites \`${path}\``)
 
-        expect(broken).toEqual([])
+        // A citation of a reference app is only checked while that app's package.json is in the tree. If you
+        // deleted the app and a merge left upstream's package.json behind (git reports it as a modify/delete
+        // conflict), delete it again: ADR-0013 says to keep the showcase deleted on every merge.
+        const mentionsReferenceApp = broken.some((line) => /cites `apps\/(showcase|starter)(\/|`)/.test(line))
+        expect(
+            broken,
+            mentionsReferenceApp
+                ? "apps/showcase and apps/starter citations are checked only while that app's package.json exists. If you " +
+                      "deleted the app, a merge may have left upstream's apps/<app>/package.json behind: remove it."
+                : undefined,
+        ).toEqual([])
     })
 })

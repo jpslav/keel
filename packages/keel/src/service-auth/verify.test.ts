@@ -31,8 +31,9 @@ async function makeOrg(slug: string): Promise<OrgRef> {
     return { tenantId: tenant.id, tenantSlug: tenant.slug, orgId: org.id, orgSlug: slug }
 }
 
-async function insertKey(org: OrgRef, publicKeyPem: string, revoked = false): Promise<void> {
-    await fakeDb
+/** Insert a key row and return its id — the id an identity names as the key that verified it. */
+async function insertKey(org: OrgRef, publicKeyPem: string, revoked = false): Promise<string> {
+    const row = await fakeDb
         .getDb()
         .insertInto('service_keys')
         .values({
@@ -41,7 +42,9 @@ async function insertKey(org: OrgRef, publicKeyPem: string, revoked = false): Pr
             public_key_pem: publicKeyPem,
             revoked_at: revoked ? new Date().toISOString() : null,
         })
-        .execute()
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    return row.id
 }
 
 async function genKeypair() {
@@ -70,6 +73,9 @@ interface Fixture {
     unknownOrgToken: string
     revokedKeyToken: string
     rotationToken: string
+    validKeyId: string
+    rotationOldKeyId: string
+    rotationNewKeyId: string
 }
 
 let fx: Fixture
@@ -82,7 +88,7 @@ beforeAll(async () => {
 
     const orgValid = await makeOrg('svc-valid')
     const kpValid = await genKeypair()
-    await insertKey(orgValid, kpValid.publicKeyPem)
+    const validKeyId = await insertKey(orgValid, kpValid.publicKeyPem)
 
     const validToken = await new SignJWT({})
         .setProtectedHeader({ alg: 'RS256' })
@@ -178,8 +184,8 @@ beforeAll(async () => {
     const orgRotate = await makeOrg('svc-rotate')
     const kpOld = await genKeypair()
     const kpNew = await genKeypair()
-    await insertKey(orgRotate, kpOld.publicKeyPem)
-    await insertKey(orgRotate, kpNew.publicKeyPem)
+    const rotationOldKeyId = await insertKey(orgRotate, kpOld.publicKeyPem)
+    const rotationNewKeyId = await insertKey(orgRotate, kpNew.publicKeyPem)
     const rotationToken = await new SignJWT({})
         .setProtectedHeader({ alg: 'RS256' })
         .setIssuer(orgRotate.orgSlug)
@@ -202,6 +208,9 @@ beforeAll(async () => {
         unknownOrgToken,
         revokedKeyToken,
         rotationToken,
+        validKeyId,
+        rotationOldKeyId,
+        rotationNewKeyId,
     }
 }, 30_000)
 
@@ -214,6 +223,7 @@ describe('verifyServiceCaller', () => {
         const identity = await verifyServiceCaller(fakeDb, req(fx.validToken))
         expect(identity).toEqual({
             kind: 'org-service',
+            keyId: fx.validKeyId,
             tenantId: fx.orgValid.tenantId,
             tenantSlug: 'harbor',
             orgId: fx.orgValid.orgId,
@@ -224,6 +234,9 @@ describe('verifyServiceCaller', () => {
     test('a rotation second active key still verifies', async () => {
         const identity = await verifyServiceCaller(fakeDb, req(fx.rotationToken))
         expect(identity.orgSlug).toBe('svc-rotate')
+        // ...and names the key that actually verified it, not merely one of the org's keys.
+        expect(identity.keyId).toBe(fx.rotationNewKeyId)
+        expect(identity.keyId).not.toBe(fx.rotationOldKeyId)
         expect(identity.orgId).toBe(fx.orgRotate.orgId)
         expect(identity.tenantId).toBe(fx.orgRotate.tenantId)
     })

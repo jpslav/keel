@@ -1,4 +1,5 @@
 import { db } from 'keel/adapters/index'
+import { authorize } from 'keel/authz/authorize'
 import { exportKeyPrefix, isJobStatus } from 'keel/core/jobs'
 import { jobForOrg, recordJobStatus } from 'keel/db/jobs'
 import { withServiceCaller } from '../../../respond'
@@ -9,10 +10,12 @@ const isOptionalString = (value: unknown): value is string | undefined =>
 /**
  * Service caller reports a status change for one of ITS OWN jobs. `queued` is rejected (a caller
  * never re-queues) as is any non-status string. The job must belong to the caller's org — a foreign
- * org's job is indistinguishable from a missing one (404), so ids can't be probed. The transition is
- * validated by recordJobStatus's state machine; an illegal hop surfaces as 409 via withServiceCaller.
+ * org's job is indistinguishable from a missing one (404), so ids can't be probed. The caller is then
+ * authorized as the MACHINE it is (`update Job`, which, among machines, the framework grants only a
+ * service-key caller in its own org). The transition is validated by recordJobStatus's state machine; an illegal
+ * hop surfaces as 409 via withServiceCaller.
  */
-export const POST = withServiceCaller<{ id: string }>(async ({ identity, request, params }) => {
+export const POST = withServiceCaller<{ id: string }>(async ({ identity, actor, request, params }) => {
     const { id } = params
     const body = (await request.json()) as Record<string, unknown> | null
     if (typeof body !== 'object' || body === null) return Response.json({ error: 'invalid-payload' }, { status: 400 })
@@ -34,6 +37,8 @@ export const POST = withServiceCaller<{ id: string }>(async ({ identity, request
 
     const found = await jobForOrg(db, identity.tenantId, identity.orgId, id)
     if (!found) return Response.json({ error: 'not found' }, { status: 404 })
+    // jobForOrg matched the job ONLY within the caller's org, so that org is the subject's.
+    authorize(actor, 'update', { type: 'Job', orgId: identity.orgId })
 
     await recordJobStatus(db, identity.tenantId, id, status, { resultKey, error, message })
     return Response.json({ ok: true })

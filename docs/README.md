@@ -11,7 +11,9 @@ Three kinds of document live in this repo, and the difference matters because it
 
 A guard enforces the first distinction: `tests/docs/doc-paths.test.ts` fails the build if a doctrine doc
 cites a repo path that does not exist. Records are exempt — rewriting a dated entry to match today's tree
-would be revisionist — so their paths are corrected opportunistically, never gated.
+would be revisionist — so their paths are corrected opportunistically, never gated. Citations of keel's two
+reference apps (`apps/showcase`, `apps/starter`) are checked while the app exists and pass in a tree that has
+ejected or renamed it, so a doc merged in from upstream cannot turn an adopter's gate red.
 
 ## Doctrine
 

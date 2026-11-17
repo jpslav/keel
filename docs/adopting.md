@@ -192,14 +192,16 @@ It prints this list when it finishes, because these are the parts that take judg
 - **The cutover checklist** — [cutover-checklist.md](cutover-checklist.md) is yours: owners, dates, and
   the proof each row owes.
 - **The demo size budget** — `apps/<app>/package.json`'s `check:demo-size` passes the static demo's byte
-  budget. It is yours now: the starter ships it roomy on purpose, sized for an app's own screens and not as
-  a pacing gate (it still fails on gross bloat). Re-set it when you want a tighter gate, to what your app
-  measures plus the headroom you want, in its own commit. If you renamed the showcase instead
-  (`--app showcase`), its script passes no number: `DEFAULT_BUDGET_BYTES` in `scripts/check-demo-size.mjs`
-  is your budget, and it is thin on purpose. After an eject, the header and
-  `DEFAULT_BUDGET_BYTES` of `scripts/check-demo-size.mjs` still describe the showcase and are left as
-  they are, since rewriting a history risks false sentences; only the number you pass counts. When it
-  goes red, that script's header says what to look at first.
+  budget. It is yours now. The starter ships it roomy on purpose, sized for an app's own screens and not as
+  a pacing gate (it still fails on gross bloat); re-set it when you want a tighter gate, to what your app
+  measures plus the headroom you want, in its own commit. `apps/<app>/DEMO-SIZE.md` beside it says what the
+  number was set for and how it got there, and is where you record each change and why; it still calls the
+  app by its template name, and that history is keel's and stays as written.
+  `scripts/check-demo-size.mjs` is keel's and holds no number, so an upstream merge may change it and you
+  never edit it: re-set the number in `package.json`, never in the script. If you renamed the showcase
+  instead (`--app showcase`), its number is its own pace-setting one, thin on purpose, and it has no
+  `DEMO-SIZE.md`: keel keeps the showcase's history in `docs/decision-log.md`. When it goes red,
+  that script's header says what to look at first.
 - **The licence** — this template is MIT, which means the product you build on it is yours with no
   copyleft obligation. Your own product's licence is still a decision you make; nothing here makes it
   for you.
@@ -322,11 +324,13 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 `packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 42 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 43 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
-really is part of the contract and merely has no importer yet, promote it by adding one line to the map.
+really is part of the contract and merely has no importer yet, that is a keel change: add the line upstream
+(ADR-0013, "Sending a keel fix back upstream") and take it back by merge, because in your fork the map is a
+conflict on every later update.
 
 Two call sites reach keel by file path instead of by subpath, because their tools need a file rather
 than a module specifier, and they are the two to remember if you move things: each app's
@@ -342,8 +346,8 @@ a lint fence enforces the direction. Each module there is the app-side half of o
 
 | Seam module                                   | You register                                                                                       | Empty looks like                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `abilities.ts`                                | your subject types + authorization rules + staff org                                               | (starter registers one)                    |
-| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations numbered ≥ 1001                                             | (starter registers one)                    |
+| `abilities.ts`                                | subject types + staff org + credential kinds + person and machine (`appMachineAbilityRules`) rules | (starter registers one)                    |
+| `db/schema.ts`, `db/migrations/`              | your tables (`AppTables`) + migrations named `NNNN_name`, four digits, numbered ≥ 1001             | (starter registers one)                    |
 | `db/rls-proofs.ts`                            | tenant-isolation proofs for those tables                                                           | an empty async body                        |
 | `jobs.ts`                                     | your background job kinds + handlers                                                               | `[] as const`, `{}`                        |
 | `digest.ts`                                   | the rows the framework's scheduled digest summarizes                                               | `async () => []`                           |
@@ -385,8 +389,9 @@ simulates (people, mail, jobs, schedules, webhooks, notifications, agreements, a
 table that is 74 lines; the showcase's, with three entities plus actors and the assistant, is 669.
 Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget). The starter's is
 the number you inherit, sized for YOUR growth (room to grow to the showcase's size), and it is yours to
-re-set in `apps/<app>/package.json`; the header of `scripts/check-demo-size.mjs` says what it guards and
-what to do when it goes red. The demo's build also drops every Mantine style rule no shipped component can
+re-set in `apps/<app>/package.json`, with the reason recorded in `apps/<app>/DEMO-SIZE.md` beside it; the
+header of `scripts/check-demo-size.mjs` (keel's, never yours to edit) says what it guards and what to do when
+it goes red. The demo's build also drops every Mantine style rule no shipped component can
 match (`scripts/vite-prune-mantine-css.ts`), so a Mantine component you add needs no CSS import. The same file is
 the ONLY door for your shell, too: the `nav`, `welcome` and `dashboard` it passes `DemoShell` are what
 the demo shows, so a navigation you build for the real app is absent from the twin until you pass it
@@ -424,11 +429,29 @@ upstream improvements reach you through `git merge`, not `pnpm update`.
 `git remote add upstream` workflow — including which directories reliably conflict and what would make
 publishing to a registry worth the versioning cost.
 
+### When an update changes what your seam must say
+
+A merge from keel can make your app stop compiling, or fail the authorize scan, until you add a line. These come from the change that
+let non-session callers reach `authorize()` (ADR-0012, 2026-11-16 addendum):
+
+- `apps/<app>/src/app-config/abilities.ts` must export `AppPersonCredentialKind` and
+  `AppMachineCredentialKind` (types), plus `appMachineAbilityRules` and `nonSessionAdministration`
+  (values). `never`, `return false` and `{}` opt out.
+- An `AbilityActor` literal whose `manageAll` may be true must state its session:
+  `credential: { kind: 'session', id: null }`. Without it the literal no longer compiles, because only a
+  stated session wields `manageAll`. A literal with `manageAll: false` needs nothing, but without a
+  session credential it can no longer take a session-only action (inviting a member, changing the org,
+  managing a webhook endpoint, accepting terms).
+- `abilityActorFromCredential` takes an `OrgIdentity`, and only `orgIdentityForSlug` (`keel/db/org-lookup`)
+  makes one: a hand-paired `{ id, slug }` no longer compiles.
+- A mutating route under `api/service/` must call `authorize(...)` with the actor `withServiceCaller`
+  passes. The scan's message says how.
+
 ## Keeping the docs honest
 
 The doc set is mapped in [docs/README.md](README.md), which splits it three ways: doctrine (binding, and
 **gated** — `tests/docs/doc-paths.test.ts` fails the build if a doctrine doc cites a path that does not
-exist), dated records, and future tasks. Two consequences for you on day one:
+exist), dated records, and future tasks. Three consequences for you:
 
 - **The records (`docs/decision-log.md`, `docs/build-notes.md`) are the template's, not yours.** They are
   append-only, so nothing rewrites them; keep appending your own entries below the inherited ones, or
@@ -436,6 +459,9 @@ exist), dated records, and future tasks. Two consequences for you on day one:
   the first time something behaves strangely.
 - **`.claude/future-tasks/`** carries designed-but-unbuilt work with the design written down. Keep the
   ones you want, delete the rest.
+- **Docs that arrive by `git merge upstream/main`** may cite `apps/showcase` or `apps/starter`, which you
+  no longer have. The gate passes those, since they name keel's reference apps, and still checks every citation
+  of your own app and of keel. (It used to fail on them.)
 
 The habits that keep the rest truthful, which you inherit: record unplanned decisions in
 `decision-log.md` and hard-won lessons in `build-notes.md` as they happen; amend an ADR by appending a
