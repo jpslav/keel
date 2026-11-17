@@ -83,6 +83,9 @@ export class RdsDataEmulator implements RdsDataClientLike {
             this.#transactions.delete(transactionId)
             try {
                 await client.query(commit ? 'COMMIT' : 'ROLLBACK')
+            } catch (error) {
+                // A commit can fail (a deferred constraint); it comes back like any statement's error.
+                throw awsError('DatabaseErrorException', `ERROR: ${(error as Error).message}`, error)
             } finally {
                 await this.#release(client)
             }

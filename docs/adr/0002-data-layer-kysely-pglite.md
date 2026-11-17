@@ -132,21 +132,33 @@ shape once per process and reads Postgres's own inference from `pg_prepared_stat
 It then sends every value as a string inside an explicit `CAST(:name AS <type>)`. That reproduces
 node-postgres's semantics rather than approximating them. It is also how arrays get through at all: the
 Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. A warm process pays
-nothing extra, and a new SQL shape costs one PREPARE round trip.
+nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
+and five outside one, which also needs its own short transaction.
 
 **What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
 
 - transaction control written in SQL;
 - session state outside a transaction (`SET`, `SET ROLE`, `PREPARE`, temporary tables,
-  `set_config(…, false)`);
+  `set_config(…, false)`, session-level advisory locks);
 - streaming.
+
+**The migration lock is transaction-scoped.** Kysely's own migration lock is a session-level
+`pg_advisory_lock` on a separate connection, and it creates its bookkeeping tables before locking at all.
+On the Data API that lock would be released by the connection reset before the migrations ran. So the
+Data API port runs the Migrator inside one transaction that opens with `pg_advisory_xact_lock`. It uses
+Kysely's own lock id, so a `pg` migrator and a Data API migrator also exclude each other. A second
+migrator waits for at most the 45-second call timeout and then fails loudly.
+
+**A failed commit keeps its own error.** A deferred constraint's `23505` comes back with its `code` and
+`constraint`, not as a complaint from the rollback Kysely sends after a failed commit.
 
 AWS's own limits surface as errors, never as truncation:
 
 - a 1 MiB response cap;
 - a 45-second call timeout;
 - a transaction that ends after three idle minutes or one hour;
-- SQL of at most 65,536 characters.
+- SQL of at most 65,536 characters;
+- a paused cluster that takes more than about 15 seconds to resume, which the dialect stops retrying.
 
 The Data API returns database errors as a message, sometimes ending `; SQLState: 23505` and sometimes
 not. So the dialect sets `code` and `constraint` the way node-postgres does. It reads them from the
@@ -164,8 +176,11 @@ and it is deliberately strict:
 - connections are reset with `DISCARD ALL`;
 - errors carry no SQLSTATE.
 
-Two negative controls prove that strictness, so the dialect's casts are what make the proofs pass. A
-battery reads every column type keel uses through both transports and requires identical rows. Nothing in
+Four negative controls prove that strictness: varchar binding, array refusal, the connection reset, and
+SQLSTATE-less errors. So the dialect's casts and its error handling are what make the proofs pass. A
+battery writes and reads every column type keel uses through both transports. It requires identical rows
+both ways: what each reads, and what each wrote. Two migrators racing on an empty database prove the
+lock. Nothing in
 `pnpm dev` changes: dev, the e2e suite and the static demo still run on pglite fakes. The emulator is a
 contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
 emulators".

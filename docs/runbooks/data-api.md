@@ -64,6 +64,15 @@ rds rollback-transaction --transaction-id "$TX"
 
 Pass when the second call returns the array `uuid`, `text`.
 
+Then check that a `:` inside a string literal or a comment is not read as a parameter. Keel's own SQL
+has none today, but the emulator assumes AWS's parser skips them, and nothing else has checked:
+
+```bash
+rds execute-statement --database "$DB" --sql "SELECT ':not_a_parameter' AS literal -- :nor_this"
+```
+
+Pass when the call succeeds and returns the literal unchanged.
+
 ## 3. The wire format matches the emulator's
 
 ```bash
@@ -89,14 +98,17 @@ rds execute-statement --database "$DB" --sql "INSERT INTO tenants (slug, name) S
 ```
 
 This fails with a unique violation. Record the exception's name and its whole message, including whether
-it ends `; SQLState: 23505`. The dialect handles both forms (`normalizeDatabaseError` in
+it ends `; SQLState: 23505`. Also roll back a transaction id that has already ended, and record that
+exception's name and message: the dialect treats `TransactionNotFoundException`, or a message saying the
+transaction is not found, as already rolled back. The dialect handles both forms (`normalizeDatabaseError` in
 `packages/keel/src/adapters/real/rds-data-codec.ts`), but the row should say which one AWS sends.
 
 ## 5. The app on the transport
 
 - Deploy staging with `params.database.transport` set to `'data-api'` (so `DATABASE_TRANSPORT=data-api`), and
   run the migrator Lambda with the same variables.
-  It must return `{ ok: true }`.
+  It must return `{ ok: true }`. Invoke it twice at once as well. Both must return `{ ok: true }`: the
+  second waits on the transaction-scoped migration lock and then finds nothing pending.
 - Sign in and use a tenant-scoped screen. Then sign in as a member of the second tenant and confirm none
   of the first tenant's rows appear.
 - Let a Serverless v2 cluster with minimum capacity 0 pause. The next request must still succeed, after

@@ -1,9 +1,10 @@
 import { RDSDataClient } from '@aws-sdk/client-rds-data'
 import { Kysely } from 'kysely'
+import { migrateToLatest } from '../../db/migrate'
 import type { DB } from '../../db/schema'
 import type { DbPort } from '../../ports/db'
 import { dbPortFor } from './db'
-import { RdsDataDialect, type RdsDataClientLike } from './rds-data-dialect'
+import { lockMigrations, RdsDataDialect, type RdsDataClientLike } from './rds-data-dialect'
 
 export interface DataApiDbConfig {
     /** The Aurora cluster's ARN; the cluster must have the Data API enabled. */
@@ -37,5 +38,19 @@ export function createRealDataApiDb(config: DataApiDbConfig): DbPort {
         secretArn: config.secretArn,
         database: config.database,
     })
-    return dbPortFor(new Kysely<DB>({ dialect }))
+    const db = new Kysely<DB>({ dialect })
+    return {
+        ...dbPortFor(db),
+        // ONE explicit transaction for the whole run, opened with a transaction-scoped lock and handed to the
+        // Migrator. Left to itself the Migrator locks on db.connection() — a separate Data API call whose
+        // session-level lock the connection reset drops at once — and creates its bookkeeping tables before
+        // locking at all (ADR-0002, addendum 2026-11-16). A second migrator waits on the lock, for at most
+        // the Data API's 45-second call timeout, then fails loudly.
+        async migrateToLatest() {
+            await db.transaction().execute(async (trx) => {
+                await lockMigrations(trx)
+                await migrateToLatest(trx)
+            })
+        },
+    }
 }

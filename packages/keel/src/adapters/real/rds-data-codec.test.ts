@@ -60,6 +60,10 @@ describe('unsupportedStatement: what the Data API cannot do is refused up front'
         expect(unsupportedStatement('PREPARE p AS select 1', false)).toMatch(/lost/)
         expect(unsupportedStatement('create temporary table t (x int)', false)).toMatch(/temporary table/)
         expect(unsupportedStatement("select set_config('a.b', 'x', false)", false)).toMatch(/set_config/)
+        expect(unsupportedStatement('select pg_advisory_lock(42)', false)).toMatch(/advisory lock/)
+        expect(unsupportedStatement('select pg_try_advisory_lock_shared(42)', false)).toMatch(/advisory lock/)
+        // the transaction-scoped form is fine anywhere: it ends with the call's own transaction
+        expect(unsupportedStatement('select pg_advisory_xact_lock(42)', false)).toBeNull()
     })
 
     it('allows the same inside a transaction, where it lasts until Commit', () => {
@@ -147,7 +151,29 @@ describe('decodeField: what node-postgres would have returned through keel’s p
         expect(decodeField({ stringValue: '2026-11-17 01:04:05+02' }, 'timestamptz')).toEqual(
             new Date('2026-11-16T23:04:05Z'),
         )
-        expect(decodeField({ stringValue: 'infinity' }, 'timestamptz')).toBe('infinity')
+        expect(decodeField({ stringValue: 'not a time' }, 'timestamptz')).toBe('not a time')
+    })
+
+    it('timestamptz edge cases come back as node-postgres returns them', () => {
+        expect(decodeField({ stringValue: 'infinity' }, 'timestamptz')).toBe(Infinity)
+        expect(decodeField({ stringValue: '-infinity' }, 'timestamptz')).toBe(-Infinity)
+        // a year below 100 is itself, not 19xx (Date.UTC's trap)
+        expect((decodeField({ stringValue: '0050-01-01 00:00:00' }, 'timestamptz') as Date).toISOString()).toBe(
+            '0050-01-01T00:00:00.000Z',
+        )
+        // BC is a negative year: 44 BC is astronomical year -43
+        expect((decodeField({ stringValue: '0044-03-15 12:00:00 BC' }, 'timestamptz') as Date).getUTCFullYear()).toBe(
+            -43,
+        )
+    })
+
+    it('PgJDBC names auto-increment columns serial/bigserial; they decode as int4/int8 do', () => {
+        expect(decodeField({ stringValue: '7' }, 'serial')).toBe(7)
+        expect(decodeField({ stringValue: '9007199254740993' }, 'bigserial')).toBe('9007199254740993')
+    })
+
+    it('numeric[] elements are numbers, as node-postgres parses them, though a bare numeric stays a string', () => {
+        expect(decodeField({ arrayValue: { stringValues: ['1.5', '2.25'] } }, '_numeric')).toEqual([1.5, 2.25])
     })
 
     it('bytea becomes a Buffer', () => {

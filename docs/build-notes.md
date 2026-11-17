@@ -1425,11 +1425,20 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   for each `$n`,** without running the statement. It needs one connection for both steps, which over the
   Data API means one transaction. Cast the result to `text[]` before reading it: `regtype[]` is not
   among the result types the Data API documents, and `text[]` is.
-- **Kysely's `Driver` can be built on a stateless transport.** A "connection" can be a handle holding an
-  optional transaction id. Everything Kysely needs maps onto BeginTransaction, ExecuteStatement with
-  `transactionId`, and Commit/Rollback, savepoints included, as plain SQL inside the transaction. What
-  cannot map is session state outside a transaction, so refuse it before the call rather than let it
-  vanish.
+- **Kysely's `Driver` can be built on a stateless transport, with one exception.** A "connection" can
+  be a handle holding an optional transaction id. Queries and transactions map onto BeginTransaction,
+  ExecuteStatement with `transactionId`, and Commit/Rollback, savepoints included, as plain SQL inside the
+  transaction. What cannot map is session state outside a transaction, so refuse it before the call
+  rather than let it vanish.
+
+    The exception is Kysely's own Migrator. It takes a session-level advisory lock on `db.connection()`,
+    outside its transaction, and creates its bookkeeping tables before locking. Hand it a `Transaction`
+    that opens with `pg_advisory_xact_lock`. Two migrators that race into `CREATE TABLE IF NOT EXISTS` in
+    two open transactions do not tolerate each other the way autocommit does: the loser's transaction
+    aborts, and the next statement reports "current transaction is aborted", not the real cause.
+
+- **When Kysely's commit fails, it calls rollback.** A driver that clears the transaction handle before
+  committing turns that rollback into a "no transaction" error that replaces the commit's own error.
 - **A rollback that finds its transaction gone has already happened.** The Data API rolls back on its
   own after three idle minutes. Treating `TransactionNotFoundException` on rollback as success keeps the
   error that caused the rollback from being replaced by one about the rollback.

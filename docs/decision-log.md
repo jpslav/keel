@@ -1762,6 +1762,13 @@ worth keeping.
   `packages/keel/src/adapters/real/rds-data-emulator.ts`. The live check is `docs/runbooks/data-api.md`,
   for the `data-api` cutover row. The community `local-data-api` emulator was rejected: it binds untyped
   strings as `unknown`, so it passes exactly the queries Aurora rejects.
-- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. A single
-  statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs on the
-  `pg` transport from inside the VPC.
+- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. That
+  transaction opens with `pg_advisory_xact_lock` on Kysely's lock id. Kysely's own session-level lock
+  would be dropped by the connection reset, and Kysely creates its tables before locking at all. A
+  single statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs
+  on the `pg` transport from inside the VPC. The pre-PR review found the lock gap. A race test of two
+  migrators on an empty database, which first failed on Kysely's create-before-lock, proves the fix.
+- **The emulator lives in `packages/keel/src/adapters/real/`, not in `test-fixture/`.** It needs `pg` and
+  the RDS Data SDK, which only an adapters directory may import. Test-only modules in `src/` have
+  precedent in `rls-proof-runner.ts`. Nothing in an app or a deployment imports it, and knip would report
+  it if nothing did.
