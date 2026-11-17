@@ -361,7 +361,7 @@ describe('recordAuditEvent detail', () => {
         expect(await attempt(unserializable)).toContain('detail cannot be serialized as JSON')
     })
 
-    test('bounds the serialized detail before any pattern reads it', async () => {
+    test('bounds the serialized detail before any pattern reads a value', async () => {
         const { AUDIT_DETAIL_MAX_BYTES } = await import('./audit')
         // An address up front: had the patterns run first, this would be refused as an email address.
         const spread = { note: `jo.doe@example.test ${'x'.repeat(AUDIT_DETAIL_MAX_BYTES)}` }
