@@ -38,4 +38,4 @@ authoritative.
 | [0011](0011-email-mailgun.md)                       | Email: Mailgun, react-email, the port as the catch-point         |
 | [0012](0012-framework-app-line-and-registration.md) | The framework/app line: registration through the app-config seam |
 | [0013](0013-upstream-updates-fork-and-merge.md)     | Upstream updates: publishable-shaped, distributed by fork/merge  |
-| [0014](0014-distribution-as-versioned-packages.md)  | Distribution: versioned packages, renamed strake (Proposed)      |
+| [0014](0014-distribution-as-versioned-packages.md)  | Distribution: versioned packages, renamed SSSB (Proposed)        |

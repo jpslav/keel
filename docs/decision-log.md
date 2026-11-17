@@ -2654,33 +2654,41 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
 
 - **D1, registry: public npm.** GitHub Packages was the alternative. It needs a classic personal access token to
   install even a public package, on every adopter's machine and in their CI.
-- **D2, name: keel is renamed strake.** `keel` on npm is another project's active backend framework, and a
-  rename is cheapest before anything is published and before Pages switches. The naming rule was left to the
-  ADR. The framework is the unscoped `strake`, so apps import `strake/…` with no alias. Everything else,
-  including the never-published seam `@strake/app-config`, is under the `@strake` npm organization. The
-  alternative, unscoped tooling (`create-strake-app`, `eslint-plugin-strake`), was rejected because each
-  unscoped name is one more that someone else could publish first. ADRs 0001–0013, this log and
-  `docs/build-notes.md` keep saying keel, because they were true when written. Renaming the GitHub repository is
-  JP's action, after the rename step and before the first release candidate.
+- **D2, name: keel is renamed.** `keel` on npm is another project's active backend framework, and a rename is
+  cheapest before anything is published and before Pages switches. The first choice, strake, was dropped the same
+  day (below), and the name is SSSB (below). The naming rule was left to the ADR. The framework and its
+  generator are unscoped, because imports and `npm create` name them exactly; everything else, including the
+  never-published seam, is under the project's npm organization. The alternative, unscoped tooling
+  (`eslint-plugin-<name>` and the like), was rejected because each unscoped name is one more that someone else
+  could publish first. ADRs 0001–0013, this log and `docs/build-notes.md` keep saying keel, because they were
+  true when written.
 - **D3, licence: unchanged**, MIT and "Copyright (c) 2026 JP Slavinsky".
 - **D4–D7, as the ADR recommended:** the showcase stays as the never-published reference app; Pages switches at
-  the first release candidate; strake's own packages are exempt from `minimumReleaseAge`; no backports during 0.x.
+  the first release candidate; SSSB's own packages are exempt from `minimumReleaseAge`; no backports during 0.x.
 - **D8, added by JP the same day: per-app infra.** The root `infra/` was the showcase's deployment and nothing
   else, and `init-app` rewrote its paths on every rename or eject. Each app's deployment now lives in the app
-  (`apps/<app>/infra/`), the reusable code in `@strake/cdk`, and nothing at the root names an app. The starter
+  (`apps/<app>/infra/`), the reusable code in `@sssb/cdk`, and nothing at the root names an app. The starter
   gets one too. An adopter whose infrastructure spans several apps, as Pages' does, keeps its own root `infra/`.
 - **D2 reopened, the same day.** The independent design review found that an npm organization `strake` already
   exists and is not JP's (the registry answers `/-/org/strake/package`, though every package name under it is a
   404), and that Strake is an existing project. JP is choosing another name. It is reserved on npm first (step
   zero in ADR-0014's plan: organization ownership confirmed, placeholders published, trusted publishing set up),
   and only then written into the repository.
+- **D2 settled, the same day: SSSB**, written `sssb` in code. **The name is deliberately left undefined**: JP asked
+  that it not be overly defined, so the letters have no official expansion, in the docs or anywhere else. The
+  names: `sssb` (the framework), `create-sssb`, `@sssb/tools` (its CLI is `sssb`), `@sssb/eslint-plugin`,
+  `@sssb/cdk` (the `SssbApp` construct), the seam `@sssb/app-config` (a local link only, never published), and
+  the repository `safeinsights/sssb`. Checked on 2026-11-17: those names are unpublished, the registry has no
+  `sssb` organization, and npm's search finds nothing similar. On GitHub a few small, unrelated repositories use
+  the letters, some of them watchers for SSSB, the Stockholm student-housing foundation: a different field, and
+  a low risk.
 - **D3 revised, the same day: copyright assigned to Rice University.** JP transfers keel's copyright to SafeInsights,
   that is Rice University. The `LICENSE` line becomes "Copyright (c) 2026 Rice University", MIT unchanged. The line
   records an assignment JP makes, and changes only once JP has executed it, before the first release candidate.
 - **D9, stewardship: maintained by SafeInsights, not SafeInsights-specific.** The universality test
   (`docs/development-approach.md`, "What the template ships") is the guard. The rename PR says so in `README.md`,
   `CONTRIBUTING.md` and `docs/README.md`.
-- **D10, a new home.** `jpslav/keel` is archived after a commit pointing its README at `safeinsights/<name>`, which
+- **D10, a new home.** `jpslav/keel` is archived after a commit pointing its README at `safeinsights/sssb`, which
   starts as a copy of the full git history, so every commit and author is kept. The rename is its first PR. PR
   numbers restart there, so the doctrine docs qualify old references (`jpslav/keel#54`), and each dated record
   gets an appended entry saying which repository its earlier numbers refer to. Rewriting the records' numbers
