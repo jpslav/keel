@@ -44,8 +44,8 @@ async function signInAs(page: Page, personId: string) {
  * People restores where that person last was, and this file navigates Dana to /en/profile mid-test —
  * so switching away and back legitimately lands on profile, not dashboard. The helper therefore cannot
  * wait on a URL: pinning one made it depend on whether the continuity write had landed before the
- * switch, a race the test has no reason to run, and the page being left is on a protected route that
- * most URL patterns match. What it needs to know is that the switch completed, which only a NEW
+ * switch, a race the test has no reason to run, and a wait for any protected route is satisfied at once
+ * by the page being left. What it needs to know is that the switch completed, which only a NEW
  * document proves (`untilNewDocument`); `reachDashboard` then gets it to the dashboard from wherever
  * it landed.
  */
