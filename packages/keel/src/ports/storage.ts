@@ -64,7 +64,7 @@ export interface StoragePort {
      * fake renames it into place).
      *
      * A missing `from` throws `NotFoundError` (`keel/ports/errors`), on both adapters. `from === to` throws
-     * a plain `Error` on both: a copy onto itself changes nothing, and is nearly always a caller that built
+     * a plain `Error` on both, whether or not the key exists: a copy onto itself changes nothing, and is nearly always a caller that built
      * its two keys the same way. The real adapter has one limit the fake does not: a single `CopyObject`
      * copies at most 5 GB (AWS's CopyObject reference), and a larger object throws an `Error` saying so.
      * Multipart copy is not implemented. `UploadConstraints.maxBytes` is the app's own, so an app that

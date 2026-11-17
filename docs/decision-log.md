@@ -1745,8 +1745,8 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   its store directory and refuses an escape in either.
 - **A missing source throws `NotFoundError`, where `get` returns `null`.** `get` has a natural "nothing"
   to return; `copy` has none, and a silent no-op would let a finalize step carry on and report success for
-  a file that was never put in place. Both adapters throw it; the real one maps S3's `NoSuchKey` and nothing
-  else (a missing bucket is a misconfiguration and is not reported as a missing object).
+  a file that was never put in place. Both adapters throw it; the real one maps only S3's `NoSuchKey` to it (a
+  missing bucket is a misconfiguration and is not reported as a missing object).
 - **An existing destination is overwritten**, as `put` does and as S3's `CopyObject` does, so a retried
   finalize converges. `copy` does not delete the source; "move" is `copy` then `delete`, and there is no
   `move` method because S3 has no atomic move and a method of that name would hide the gap between the two.

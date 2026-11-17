@@ -234,6 +234,10 @@ describe('fake storage', () => {
             await expect(fakeStorage.copy(sub('same/k'), sub('same/x/../k'))).rejects.toThrow(/same key/)
 
             expect(text((await fakeStorage.get(sub('same/k')))!.body)).toBe('kept')
+            // The same refusal for a key that does not exist, as the real adapter gives without asking S3.
+            const missing = fakeStorage.copy(sub('same/never'), sub('same/never'))
+            await expect(missing).rejects.toThrow(/same key/)
+            await expect(missing).rejects.not.toBeInstanceOf(NotFoundError)
         })
     })
 

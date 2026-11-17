@@ -25,7 +25,10 @@ function copySourceFor(bucket: string, key: string): string {
     return `${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
-/** AUTHORED — CUTOVER (`cloud-accounts`): typechecked, never run against a real bucket. */
+/**
+ * AUTHORED — CUTOVER (`cloud-accounts`; `list` and `delete` also `storage-list-delete`, `copy` also
+ * `storage-copy`): typechecked, never run against a real bucket.
+ */
 export function createRealStorage(bucket: string, region: string): StoragePort {
     const client = new S3Client({ region })
 

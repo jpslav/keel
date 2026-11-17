@@ -1420,7 +1420,7 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   `grantReadWrite` includes `s3:List*` (aws-cdk-lib `BUCKET_READ_ACTIONS`: `s3:GetObject*`, `s3:GetBucket*`,
   `s3:List*`), and the cutover row asks to confirm it on the deployed policy.
 - **A 200 from `CopyObject` can carry an error in its body**; the SDK handles it. `CopyObjectCommand` is built
-  with the `getThrow200ExceptionsPlugin` middleware (`@aws-sdk/client-s3` 3.1096.0, `dist-cjs/index.js:992`), so a
+  with the `getThrow200ExceptionsPlugin` middleware (the `_mw1` list in `@aws-sdk/client-s3` 3.1096.0's `dist-cjs/index.js`), so a
   failed copy throws and the adapter never reports a false success.
 - **A mocked builtin did not reach the adapter.** The first test of the fake's mechanism used
   `vi.mock('node:fs/promises')` to record the order of `copyFile` and `rename`. The test file saw the mock

@@ -164,10 +164,11 @@ export const fakeStorage: StoragePort = {
         if (isReserved(to)) throw new Error(`invalid storage key: ${to} (reserved by the fake store)`)
         const source = resolveKey(from)
         const target = resolveKey(to)
-        if (isReserved(from) || !existsSync(source)) throw new NotFoundError(`storage object not found: ${from}`)
         // Compared as resolved paths: `a/../a` and `a` are one file here (S3 would see two keys, which is a
-        // quirk of every method of this fake, not of copy).
+        // quirk of every method of this fake, not of copy). Before the existence check, because the real
+        // adapter refuses it before any request and so cannot know whether the key exists.
         if (source === target) throw new Error(`storage copy: source and destination are the same key: ${from}`)
+        if (isReserved(from) || !existsSync(source)) throw new NotFoundError(`storage object not found: ${from}`)
         await mkdir(path.dirname(target), { recursive: true })
         // The sidecar first and the body LAST. The body is what makes a key exist (`get` and `list` both look
         // for it), so `to` appears only once it is complete, with its content type already in place. The other
