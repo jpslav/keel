@@ -77,6 +77,11 @@ export const GET_DB_STRING: Fence = { rule: 'keel/no-raw-db-handle', fragment: '
 // A path into apps/ reports with its own sentence, through the same two rules as the app's aliases.
 export const APP_PATH_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a path into apps/' }
 export const APP_PATH_DYNAMIC: Fence = { rule: 'keel/no-dynamic-app-import', fragment: 'a path into apps/' }
+export const SEAM_TRAVERSAL_STATIC: Fence = { rule: 'no-restricted-imports', fragment: 'a `..` out of @app-config/' }
+export const SEAM_TRAVERSAL_DYNAMIC: Fence = {
+    rule: 'keel/no-dynamic-app-import',
+    fragment: 'a `..` out of @app-config/',
+}
 export const JSX_IN_CORE: Fence = {
     rule: 'keel/no-jsx-in-core',
     fragment: 'JSX compiles to an import of react/jsx-runtime',

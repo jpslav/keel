@@ -163,13 +163,29 @@ describe('getDb: what the selectors match', () => {
         ['a quoted key in a type literal', "export type P = { 'getDb': () => unknown }\n"],
         ['a quoted key in an object literal', "export const fake = { 'getDb': () => null }\n"],
         ['a quoted method in a class', "export class Fake {\n    'getDb'() {\n        return null\n    }\n}\n"],
+        ['a quoted abstract member', "export abstract class Port {\n    abstract 'getDb'(): unknown\n}\n"],
+        ['a quoted accessor', "export class Fake {\n    accessor 'getDb' = null\n}\n"],
     ])('%s is not the name as a string', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_STRING)).toBe(0)
     })
 
     // A route test that keeps the ban can still assert the handle is never taken.
-    it('a test may spy on it to prove the code under test never takes it', async () => {
-        const code = "import { vi } from 'vitest'\nexport const spy = (db: object) => vi.spyOn(db as never, 'getDb')\n"
+    it.each([
+        [
+            'a string',
+            "import { vi } from 'vitest'\nexport const spy = (db: object) => vi.spyOn(db as never, 'getDb')\n",
+        ],
+        [
+            'a template',
+            "import { vi } from 'vitest'\nexport const spy = (db: object) => vi.spyOn(db as never, `getDb`)\n",
+        ],
+    ])('a test may spy on it, named as %s, to prove the code under test never takes it', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/app/api/kv/route.test.ts`, code), GET_DB_STRING)).toBe(0)
+    })
+
+    // A spy calls through to the original, so outside a test it IS the raw handle.
+    it('a spy in production code is reported', async () => {
+        const code = "import { vi } from 'vitest'\nexport const raw = (db: object) => vi.spyOn(db as never, 'getDb')\n"
+        expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_STRING)).toBe(1)
     })
 })

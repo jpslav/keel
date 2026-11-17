@@ -128,18 +128,28 @@ const appCodePattern = {
 }
 // The same app code by PATH: `../../../apps/showcase/src/domain/tickets` from keel's fixture names the file the
 // app's `@/*` alias would, and passed both halves of the fence until this pattern existed. It matches an
-// `apps` path segment followed by a separator, anywhere in the specifier (relative, absolute or bare). A
-// separator is `/` or `\`: TypeScript resolves `../apps//showcase/…` and `..\apps\showcase\…` into apps/ as
-// well. No keel directory and no package keel imports is called `apps`, so a match is always a path into
-// the repo's apps/.
+// `apps` path segment followed by a separator, in a specifier that does not start with `@` (relative,
+// absolute or bare). A separator is `/` or `\`: TypeScript resolves `../apps//showcase/…` and
+// `..\apps\showcase\…` into apps/ as well. No keel directory and no package keel imports is called `apps`.
+// An `@` specifier is a scope or an alias, and is left alone: `@app-config/apps/registry` is the seam and
+// must stay open, and `@/…` and `@app/seed/…` are appCodePattern's (one finding, not two).
 const appPathPattern = {
-    regex: String.raw`(^|[\\/])apps[\\/]`,
+    regex: String.raw`^(?!@)(.*[\\/])?apps[\\/]`,
     message:
         'Framework code (packages/keel) must reach app content only through the seam — a path into apps/ is the ' +
         "app's code under another name. Import from the @app-config/* alias instead (ADR-0012).",
 }
-// Together, as the merge-trap rule for selectors asks: every block that fences app content lists both.
-const appCodePatterns = [appCodePattern, appPathPattern]
+// The seam itself is a door, not a base path: `@app-config/../seed` resolves to the app's seed (and, in keel's
+// own program, the fixture's), which is what the `@app/seed` ban keeps out. Any `..` segment after the alias
+// is banned, whatever it climbs to.
+const appSeamTraversalPattern = {
+    regex: String.raw`^@app-config[\\/](.*[\\/])?\.\.([\\/]|$)`,
+    message:
+        'Framework code (packages/keel) must reach app content only through the seam — a `..` out of ' +
+        '@app-config/ reaches app code the seam does not register. Import the seam module itself (ADR-0012).',
+}
+// Together, as the merge-trap rule for selectors asks: every block that fences app content lists all three.
+const appCodePatterns = [appCodePattern, appPathPattern, appSeamTraversalPattern]
 // keel/core is pure TypeScript (ADR-0006). Named once: the core block bans it in declarations and
 // `keel/no-dynamic-framework-import-in-core` everywhere else, from this one list.
 const coreFrameworkPattern = {
@@ -200,19 +210,20 @@ const getDbDestructureSelector = {
 // string, so the string is the finding. What is left out:
 //  - a computed member's key: the computed selector above reports it (no double report). A destructured key
 //    is reported by the destructure selector, and is left out with the rest of the keys below.
-//  - a key that DEFINES a member rather than reading one: a quoted key in an object literal, a class, or a
-//    type (`{ 'getDb': … }`, `'getDb'() {}`, `interface P { 'getDb'(): unknown }`), as the unquoted key is.
+//  - a key that DEFINES a member rather than reading one: a quoted key in an object literal, a class (abstract
+//    and accessor members included), or a type (`{ 'getDb': … }`, `'getDb'() {}`,
+//    `interface P { 'getDb'(): unknown }`), as the unquoted key is.
 //  - a TypeScript type position (`Pick<DbPort, 'getDb'>`), which loads nothing.
-//  - a test spying on it (`vi.spyOn(db, 'getDb')`), which is how a route test asserts the raw handle is never
-//    taken. The spy reads the property, but only in a test that keeps the ban, to prove the code under test
-//    does not.
+//  - in a TEST FILE only, a spy's key (`vi.spyOn(db, 'getDb')`), which is how a route test asserts the raw
+//    handle is never taken. A spy calls through to the original, so anywhere else it IS the raw handle; the
+//    rule checks the file name for this one (keelNoRawDbHandleRule).
 const getDbStringSelector = {
     selector:
         ':matches(Literal[value="getDb"], TemplateLiteral[expressions.length=0][quasis.0.value.cooked="getDb"])' +
         ':not(MemberExpression[computed=true] > .property)' +
-        ':not(:matches(Property, MethodDefinition, PropertyDefinition, TSPropertySignature, TSMethodSignature) > .key)' +
-        ':not(TSLiteralType > .literal)' +
-        ':not(CallExpression[callee.object.name=/^(vi|jest)$/][callee.property.name="spyOn"] > Literal)',
+        ':not(:matches(Property, MethodDefinition, PropertyDefinition, AccessorProperty, TSAbstractMethodDefinition, ' +
+        'TSAbstractPropertyDefinition, TSAbstractAccessorProperty, TSPropertySignature, TSMethodSignature) > .key)' +
+        ':not(TSLiteralType > .literal)',
     message:
         "Naming getDb as a string (Reflect.get(db, 'getDb'), a key held in a variable) reaches the same raw handle — use " +
         'db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
@@ -542,7 +553,7 @@ const keelNoDynamicFrameworkImportInCoreRule = declarationlessImportBan({
 })
 // JSX in keel/core is a framework import nobody writes: with `"jsx": "react-jsx"` (tsconfig.json) every
 // element compiles to an import of `react/jsx-runtime`. Neither half of core's ban can see an import that is
-// not in the source, so the JSX itself is the finding, once per file (the file should hold none).
+// not in the source, so the JSX itself is the finding: each outermost element or fragment.
 /** @type {import('eslint').Rule.RuleModule} */
 const keelNoJsxInCoreRule = {
     meta: {
@@ -554,10 +565,12 @@ const keelNoJsxInCoreRule = {
         },
     },
     create(context) {
-        let reported = false
+        // Each OUTERMOST element or fragment, so nested JSX is one finding and a disable comment on one
+        // element does not hide another.
         const report = (node) => {
-            if (reported) return
-            reported = true
+            for (let up = node.parent; up; up = up.parent) {
+                if (up.type === 'JSXElement' || up.type === 'JSXFragment') return
+            }
             context.report({ node, messageId: 'jsx' })
         }
         return { JSXElement: report, JSXFragment: report }
@@ -581,11 +594,22 @@ const keelNoRawDbHandleRule = {
     },
     create(context) {
         const report = (messageId) => (node) => context.report({ node, messageId })
+        // A spy's key in a test file is the one string left alone outside the selector (see getDbStringSelector).
+        const inTestFile = /\.test\.tsx?$/.test(context.filename)
+        const isSpyKey = (node) =>
+            node.parent?.type === 'CallExpression' &&
+            node.parent.arguments.includes(node) &&
+            node.parent.callee.type === 'MemberExpression' &&
+            /^(vi|jest)$/.test(node.parent.callee.object.name ?? '') &&
+            node.parent.callee.property.name === 'spyOn'
         return {
             [getDbSelector.selector]: report('member'),
             [getDbComputedSelector.selector]: report('computed'),
             [getDbDestructureSelector.selector]: report('destructure'),
-            [getDbStringSelector.selector]: report('string'),
+            [getDbStringSelector.selector]: (node) => {
+                if (inTestFile && isSpyKey(node)) return
+                report('string')(node)
+            },
         }
     },
 }

@@ -5,6 +5,8 @@ import {
     APP_CODE_STATIC,
     APP_PATH_DYNAMIC,
     APP_PATH_STATIC,
+    SEAM_TRAVERSAL_DYNAMIC,
+    SEAM_TRAVERSAL_STATIC,
     CORE_DYNAMIC,
     CORE_STATIC,
     type Fence,
@@ -58,6 +60,8 @@ describe('the framework/app fence holds outside declarations', () => {
     it('the seam stays open: @app-config/* by import() or in a type', async () => {
         const code = [
             "export const load = () => import('@app-config/jobs')",
+            // a seam module whose path happens to contain an apps/ segment is still the seam
+            "export const registry = () => import('@app-config/apps/registry')",
             "export type Jobs = import('@app-config/jobs').AppJobs",
             "export const local = () => import('./local')",
         ].join('\n')
@@ -134,6 +138,15 @@ describe('the two halves of each fence read the group the same way', () => {
         '..\\..\\..\\apps\\showcase\\src\\domain\\tickets',
         '../../mapps/x',
         '../apps-config/x',
+        // an @ specifier is a scope or an alias: the seam stays open, a scope is not a path, and @/ is
+        // appCodePattern's alone (one finding in each half, not two in one)
+        '@app-config/apps/registry',
+        '@scope/apps/x',
+        '@/apps/x',
+        // a `..` out of the seam is a path into app code too
+        '@app-config/../seed',
+        '@app-config/..\\proxy',
+        '@app-config/x/../y',
     ]
     const halves: [string, string, Fence, Fence][] = [
         ['keel/core', 'packages/keel/src/core/kv.ts', CORE_STATIC, CORE_DYNAMIC],
@@ -184,6 +197,21 @@ describe('a relative path into apps/ crosses the framework/app fence too', () =>
         })
     })
 
+    // `@app-config/../seed` resolves to the app's seed (keel's fixture's, in keel's own program): the module the
+    // @app/seed ban keeps out, through the one door the fence leaves open.
+    describe.each([...KEEL, FIXTURE])('%s', (file) => {
+        it.each(['@app-config/../seed', '@app-config/../domain/tickets', '@app-config/x/../../seed'])(
+            'may not climb out of the seam with %s, in either half',
+            async (specifier) => {
+                const at = JSON.stringify(specifier)
+                const declared = `import { seed } from ${at}\nexport { seed }\n`
+                expect(fired(await lint(file, declared), SEAM_TRAVERSAL_STATIC)).toBe(1)
+                const loaded = `export const load = () => import(${at})\n`
+                expect(fired(await lint(file, loaded), SEAM_TRAVERSAL_DYNAMIC)).toBe(1)
+            },
+        )
+    })
+
     it('a directory merely named like it is not apps/', async () => {
         const code = "import { a } from '../mapps/x'\nimport { b } from './apps-config/y'\nexport { a, b }\n"
         const findings = await lint('packages/keel/src/server-lib/kv.ts', code)
@@ -209,6 +237,16 @@ describe('keel/core holds no JSX', () => {
         ['a fragment', 'export const C = () => <>{1}</>\n'],
     ])('%s', async (_form, code) => {
         expect(fired(await lint('packages/keel/src/core/view.tsx', code), JSX_IN_CORE)).toBe(1)
+    })
+
+    // Each outermost element is a finding, so a disable comment on one does not hide the next.
+    it('two elements are two findings, and disabling one leaves the other', async () => {
+        const two = 'export const A = () => <div>{1}</div>\nexport const B = () => <span>{2}</span>\n'
+        expect(fired(await lint('packages/keel/src/core/view.tsx', two), JSX_IN_CORE)).toBe(2)
+        const disabled =
+            '// eslint-disable-next-line keel/no-jsx-in-core\nexport const A = () => <div>{1}</div>\n' +
+            'export const B = () => <span>{2}</span>\n'
+        expect(fired(await lint('packages/keel/src/core/view.tsx', disabled), JSX_IN_CORE)).toBe(1)
     })
 
     it('a .jsx file in core too', async () => {
