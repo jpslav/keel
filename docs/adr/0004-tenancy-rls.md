@@ -186,6 +186,14 @@ role owns every table, so `app_user`'s privileges add nothing it needs, and inhe
 hand it every future grant to `app_user`. If the role already holds a membership it granted itself (an operator set
 `createrole_self_grant`), SET is added to that membership and its INHERIT is left alone.
 
+**Two databases on one cluster are the same problem twice.** Take staging and production on one Aurora
+cluster, migrated by different owners. `app_user` is cluster-wide, so only the owner that migrated first
+created it and holds ADMIN on it. The second owner has no membership at all: 0001 finds `app_user` and moves
+on, and 0015 cannot grant it the switch. 0015 then fails with the statement to run, and Kysely rolls back
+the whole run. A role holding ADMIN on `app_user` runs that statement, after which the second owner's
+re-run finds the switch already effective and migrates. The contract suite runs exactly this, executing the
+statement copied out of the error.
+
 **A separate application role is a different case.** The `db-role-not-superuser` cutover row asks for one.
 It also reads the RLS-free infra tables (`tenants`, `organizations`, `service_keys`) before any tenant is
 set, and only `app_user` holds SELECT on them. So it needs

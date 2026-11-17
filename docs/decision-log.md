@@ -2169,8 +2169,10 @@ The design is in ADR-0004's addendum of the same date.
   still switches on `db` keeps passing, just less strictly.
 - **The shared-server problem is measured, not assumed.** `app_user` is cluster-wide, and CI's suites
   share one Postgres. The pass measures what this server gives a role's creator, then gives the owner
-  exactly that where `app_user` already exists. A scratch run on a fresh cluster checked the genuine path
-  too: the owner created `app_user`, failed without 0015, and passed with it.
+  exactly that where `app_user` already exists. The pass runs twice in its file, so the genuine path (the
+  owner's own 0001 creates `app_user`) and that one both run every time. Before that, a scratch run on a
+  fresh cluster had checked the genuine path: the owner created `app_user`, failed without 0015, and passed
+  with it.
 - **`down` is a no-op.** Revoking the switch would take every tenant query down with it, and keel never
   runs `down` migrations.
 - **A self-granted membership keeps its INHERIT.** If an operator set `createrole_self_grant`, the
@@ -2181,3 +2183,8 @@ The design is in ADR-0004's addendum of the same date.
   migrate cleanly. Now it stops with the one statement to run. The alternative, migrating anyway, would
   leave a role that might be the app's unable to serve a single tenant query, discovered at the first
   request instead of at deploy.
+- **A second owner on one cluster fails at 0015 rather than migrating, and the failure carries its
+  remedy.** Staging and production on one Aurora cluster, migrated by different owners, is a real setup.
+  A reviewer proved that the second owner's grant fails. Skipping 0015 there would have migrated a database
+  whose owner cannot serve a tenant query. So it stops, rolls back, and prints the GRANT. The contract
+  suite runs the case end to end, executing the printed statement as written.
