@@ -7,5 +7,5 @@ browser, run `pnpm exec playwright install chromium` once, then retry. Report wh
 changed.
 
 `pnpm verify` does NOT run `test:contract` (the real-Postgres RLS proofs). **If you touched a migration or
-any `packages/keel/src/db`/`apps/showcase/src/app-config/db` change, also run `pnpm test:contract`** — and after renumbering/renaming a
+any `packages/keel/src/db`/`apps/*/src/app-config/db` change, also run `pnpm test:contract`** — and after renumbering/renaming a
 migration, wipe local `.data` first (`rm -rf .data`).

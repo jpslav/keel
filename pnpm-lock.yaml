@@ -69,6 +69,9 @@ importers:
       concurrently:
         specifier: ^10.0.6
         version: 10.0.7
+      embedded-postgres:
+        specifier: 18.4.0-beta.17
+        version: 18.4.0-beta.17
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -99,9 +102,15 @@ importers:
       knip:
         specifier: ^6.42.1
         version: 6.45.1
+      kysely:
+        specifier: ^0.29.7
+        version: 0.29.9
       lint-staged:
         specifier: ^17.6.0
         version: 17.6.0
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
       postcss:
         specifier: ^8.5.31
         version: 8.5.33
@@ -175,12 +184,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.2
         version: 6.3.0(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.15)(yaml@2.9.1))
-      embedded-postgres:
-        specifier: 18.4.0-beta.17
-        version: 18.4.0-beta.17
-      pg:
-        specifier: ^8.23.1
-        version: 8.23.1
       postcss:
         specifier: ^8.5.31
         version: 8.5.33
@@ -319,9 +322,6 @@ importers:
         specifier: ^1.5.0
         version: 1.5.0(typescript@6.0.3)
     devDependencies:
-      embedded-postgres:
-        specifier: 18.4.0-beta.17
-        version: 18.4.0-beta.17
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

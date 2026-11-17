@@ -1,8 +1,6 @@
-import EmbeddedPostgres from 'embedded-postgres'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
-import { portFor } from '../../../../../scripts/ports.mjs'
-import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { startContractServer, type ContractServer } from '../../../../../tests/support/contract-postgres'
 import { randomUUID } from 'node:crypto'
 import { migrateToLatest } from '../../db/migrate'
 import { up as grantAppUser } from '../../db/migrations/0015_app_user_grant'
@@ -26,36 +24,17 @@ import { createRealDb } from './db'
 
 const DATABASE = 'keel_contract'
 
-let embedded: InstanceType<typeof EmbeddedPostgres> | null = null
+let server: ContractServer
 let realDb: DbPort
 /** The server's superuser URL (to its `postgres` database), kept for the non-superuser pass. */
 let serverUrl: string
 
 beforeAll(async () => {
-    serverUrl = process.env.CONTRACT_DATABASE_URL ?? ''
-    if (!serverUrl) {
-        const port = portFor('contractPg')
-        embedded = new EmbeddedPostgres({
-            databaseDir: makeTestTmpDir('keel-contract-pg-'),
-            user: 'postgres',
-            password: 'postgres',
-            port,
-            persistent: false,
-        })
-        await embedded.initialise()
-        await embedded.start()
-        serverUrl = `postgres://postgres:postgres@localhost:${port}/postgres`
-    }
-
-    const server = createRealDb(serverUrl).getDb()
-    try {
-        await sql`CREATE DATABASE ${sql.id(DATABASE)}`.execute(server)
-    } catch (error) {
-        // A reused live server already has it; the proofs stamp their own rows, so that is fine.
-        if (!/already exists/.test(String(error))) throw error
-    } finally {
-        await server.destroy()
-    }
+    // The server, and `keel_contract` on it: CONTRACT_DATABASE_URL's in CI, otherwise an embedded-postgres of its own
+    // (tests/support/contract-postgres.ts, which every contract suite shares).
+    server = await startContractServer('keel-contract')
+    serverUrl = server.url
+    await server.createDatabase(DATABASE)
 
     const url = new URL(serverUrl)
     url.pathname = `/${DATABASE}`
@@ -67,7 +46,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
     await realDb?.getDb().destroy()
-    await embedded?.stop()
+    await server?.stop()
 })
 
 /** A connection for a login on this server, through the REAL adapter (its pool, its `date` parser). */

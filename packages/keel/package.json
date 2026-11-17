@@ -90,6 +90,7 @@
         "./db/migrate": "./src/db/migrate.ts",
         "./db/notifications": "./src/db/notifications.ts",
         "./db/org-lookup": "./src/db/org-lookup.ts",
+        "./db/owner-pass": "./src/db/owner-pass.ts",
         "./db/rls-proof-runner": "./src/db/rls-proof-runner.ts",
         "./db/rls-proofs": "./src/db/rls-proofs.ts",
         "./db/schedules": "./src/db/schedules.ts",
@@ -168,7 +169,6 @@
         "react": "~19.2.8"
     },
     "devDependencies": {
-        "embedded-postgres": "18.4.0-beta.17",
         "typescript": "~6.0.3",
         "vitest": "^4.1.12"
     }
