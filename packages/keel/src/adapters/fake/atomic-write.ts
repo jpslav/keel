@@ -1,5 +1,5 @@
 import { renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { rename, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, rename, unlink, writeFile } from 'node:fs/promises'
 
 /**
  * Atomic file writes for the fake adapters (packages/keel/src/adapters/fake/*.ts). Internal helper —
@@ -104,6 +104,43 @@ export async function writeFileAtomic(
     } catch (err) {
         await cleanupTemp(tmp)
         throw err
+    }
+}
+
+/** A copy that has been made beside its target but not yet put there. */
+export interface StagedCopy {
+    /** Puts the copy at the target with one rename. On failure the temp file is removed and the error thrown. */
+    publish(): Promise<void>
+    /** Removes the temp file. Safe after `publish` (it has nothing left to remove) and safe to call twice. */
+    discard(): Promise<void>
+}
+
+/**
+ * The first half of an atomic file COPY: the bytes go to a temp file colocated with `to`, and nothing is
+ * visible at `to` until `publish` renames it into place. Two phases because a caller copying SEVERAL files
+ * that belong together (an object and its sidecar) can stage them all, and publish only once every one of
+ * them exists whole: a failure or a vanished source while staging then leaves nothing behind. A failed
+ * stage removes its own temp file and throws. Not `copyFile(from, to)` directly: that writes into `to`
+ * in place, so a reader sees it half-written.
+ */
+export async function stageCopy(from: string, to: string): Promise<StagedCopy> {
+    const tmp = tempFileFor(to)
+    try {
+        await copyFile(from, tmp)
+    } catch (err) {
+        await cleanupTemp(tmp)
+        throw err
+    }
+    return {
+        async publish() {
+            try {
+                await rename(tmp, to)
+            } catch (err) {
+                await cleanupTemp(tmp)
+                throw err
+            }
+        },
+        discard: () => cleanupTemp(tmp),
     }
 }
 
