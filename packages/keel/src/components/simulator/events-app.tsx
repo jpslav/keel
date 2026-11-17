@@ -27,6 +27,11 @@ export interface AuditEntry {
     actorUserId: string
     tenantSlug?: string
     orgSlug?: string | null
+    /**
+     * Why, as codes and counts (audit_events.detail, migration 0016), or null. Shown only inside the
+     * expanded row's JSON, as a React text child: escaped, never parsed as HTML.
+     */
+    detail?: Readonly<Record<string, unknown>> | null
 }
 
 /** A dark-skin expandable row shared by both sections (analytics events + audit). */
@@ -192,6 +197,7 @@ export function EventsApp({ events, audit = [] }: { events: AnalyticsEvent[]; au
                                     actorUserId: entry.actorUserId,
                                     tenant: entry.tenantSlug ?? null,
                                     org: entry.orgSlug ?? null,
+                                    detail: entry.detail ?? null,
                                 }}
                                 glyph={t('toggleGlyph')}
                             />

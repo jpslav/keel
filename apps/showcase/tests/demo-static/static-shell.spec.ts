@@ -209,6 +209,42 @@ test('simulator panel resets the static shell back to its initial state', async 
     await expect(page.getByTestId('mail-list').locator('[data-testid^="mail-item-"]')).toHaveCount(1)
 })
 
+test('static shell: an audit event recorded after the world clock advanced is dated in world time (twin of DbPort.now)', async ({
+    page,
+}) => {
+    await page.goto(indexUrl)
+    await page.getByTestId('dashboard-link').click()
+    await page.getByTestId('person-person-admin').click()
+    await expect(page.getByTestId('signed-in-as')).toContainText('Dana Okoye')
+
+    // Advance the demo's world clock a week (the Jobs tab's time control).
+    await page.getByTestId('simulator-pill').click()
+    await page.getByTestId('simulator-tab-jobs').click()
+    await page.getByTestId('simulator-clock-advance-week').click()
+    await expect(page.getByTestId('simulator-clock-offset')).toContainText('+168h')
+
+    // Then make the world write an audit event: inbound mail to frontline+support, as the sibling test does.
+    await page.getByTestId('simulator-tab-mail').click()
+    await page.getByTestId('inbound-compose-from').selectOption('dana.okoye@example.test')
+    await page.getByTestId('inbound-compose-org').selectOption('frontline')
+    await page.getByTestId('inbound-compose-handler').fill('support')
+    await page.getByTestId('inbound-compose-subject').fill(`world-clock-${Date.now()}`)
+    await page.getByTestId('inbound-compose-body').fill('body')
+    await page.getByTestId('inbound-compose-send').click()
+
+    // The event's full time, on its expanded row, is a week from today (to the day), not today.
+    await page.getByTestId('simulator-tab-events').click()
+    const row = page.getByTestId('audit-list').locator('[data-testid^="audit-toggle-"]').filter({
+        hasText: 'inbound-email.received',
+    })
+    await row.first().click()
+    const day = (offsetDays: number) =>
+        new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(Date.now() + offsetDays * 86_400_000)
+    const auditList = page.getByTestId('audit-list')
+    await expect(auditList).toContainText(day(7))
+    await expect(auditList).not.toContainText(day(0))
+})
+
 test('static shell: composing an inbound email to frontline+support opens a ticket + audit (twin parity)', async ({
     page,
 }) => {
@@ -242,6 +278,15 @@ test('static shell: composing an inbound email to frontline+support opens a tick
     await page.getByTestId('simulator-tab-events').click()
     await expect(page.getByTestId('audit-list')).toContainText('inbound-email.received')
     await expect(page.getByTestId('audit-list')).toContainText('ticket.created')
+
+    // ...and the intake row's detail says why, in the same closed vocabulary the server records.
+    await page
+        .getByTestId('audit-list')
+        .locator('[data-testid^="audit-toggle-"]')
+        .filter({ hasText: 'inbound-email.received' })
+        .first()
+        .click()
+    await expect(page.getByTestId('audit-list').locator('pre')).toContainText('"outcome": "handled"')
 })
 
 test('static shell: a restricted member (Riley) gets a read-only TicketsCard (ability parity)', async ({ page }) => {

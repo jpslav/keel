@@ -14,9 +14,10 @@ import { dataDir } from './data-dir'
  * so a Snapshots RESET wipes this file back to zero and save/restore snapshot it with the rest of the
  * world — the "Snapshots reset clears the offset" requirement is satisfied structurally, no extra wiring.
  *
- * REAL MODE NEVER TOUCHES THIS. worldNow() is only ever called behind an `isSimulated` guard (the cron
- * webhook route and the simulated-mode-gated Simulator routes), so the offset is structurally unreachable
- * in a real build — real time is always real time. Same containment shape as the fake-only webhook
+ * REAL MODE NEVER TOUCHES THIS. worldNow() is only reached behind simulated mode: `runScheduledTick` calls it
+ * behind an `isSimulated` guard, the Simulator routes are simulated-mode-gated, and `fakeDb.now` (which dates
+ * audit rows) is a member of the FAKE database, which a real build never selects. So the offset is structurally
+ * unreachable in a real build — real time is always real time. Same containment shape as the fake-only webhook
  * secret helper pulled into shared glue behind isSimulated (packages/keel/src/service-auth/webhook.ts).
  */
 function clockFile(): string {

@@ -1,5 +1,10 @@
 import type { Credential } from '../core/abilities'
-import { normalizeEmailAddress, normalizeInboundBody, parseInboundRecipient } from '../core/inbound-email'
+import {
+    type InboundReceivedDetail,
+    normalizeEmailAddress,
+    normalizeInboundBody,
+    parseInboundRecipient,
+} from '../core/inbound-email'
 import { recordAuditEvent } from '../db/audit'
 import { orgIdentityForSlug } from '../db/org-lookup'
 import {
@@ -35,7 +40,10 @@ import { inboundHandlers } from './handlers'
  *
  * AUDIT. Every STORED row records an `inbound-email.received` event (subject 'InboundEmail'); an app's
  * handler additionally records its own domain verb, so what it produced appears in the audit trail exactly as
- * a UI-created one would.
+ * a UI-created one would. The event's `detail` says why the email was filed as it was
+ * (`InboundReceivedDetail`, keel/core/inbound-email): handled, no handler, declined by its handler, the
+ * handler threw, or intake's own recording threw after the handler returned. Never the handler's
+ * free-text reason, which names the sender.
  */
 
 const SYSTEM_ACTOR = 'system:inbound-email'
@@ -63,6 +71,7 @@ async function auditReceived(
     org: ResolvedInboundOrg,
     emailId: string,
     actorUserId: string,
+    detail: InboundReceivedDetail,
     credential: Credential | null = null,
 ): Promise<void> {
     await recordAuditEvent(db, {
@@ -77,6 +86,7 @@ async function auditReceived(
         action: 'inbound-email.received',
         subjectType: 'InboundEmail',
         subjectId: emailId,
+        detail,
     })
 }
 
@@ -115,17 +125,22 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         bodyHtml: input.bodyHtml ?? null,
     })
 
-    const handler = inboundHandlers[parsed.handler] ?? null
+    // An own entry only: `<org>+constructor@…` must not find Object.prototype's `constructor`.
+    const handler = Object.hasOwn(inboundHandlers, parsed.handler) ? (inboundHandlers[parsed.handler] ?? null) : null
     if (!handler) {
         await setInboundStatus(db, org.tenantId, id, {
             status: 'unmatched',
             handler: null,
             error: `no handler: ${parsed.handler}`,
         })
-        await auditReceived(db, org, id, SYSTEM_ACTOR)
+        await auditReceived(db, org, id, SYSTEM_ACTOR, { outcome: 'unmatched', cause: 'no-handler' })
         return { stored: true, id, status: 'unmatched', handler: null, reason: `no handler: ${parsed.handler}` }
     }
 
+    // The catch below keeps a poison message from becoming a 5xx (and a retry that would run the handler
+    // again). It also catches keel's own recording after the handler returned, which the audit row must
+    // not blame on the handler.
+    let handlerReturned = false
     try {
         const result = await handler({
             db,
@@ -139,9 +154,10 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
             bodyText,
             emailId: id,
         })
+        handlerReturned = true
         if (result.status === 'handled') {
             await setInboundStatus(db, org.tenantId, id, { status: 'handled', handler: parsed.handler, error: null })
-            await auditReceived(db, org, id, result.actorUserId, result.credential ?? null)
+            await auditReceived(db, org, id, result.actorUserId, { outcome: 'handled' }, result.credential ?? null)
             return { stored: true, id, status: 'handled', handler: parsed.handler, subjectId: result.subjectId ?? null }
         }
         await setInboundStatus(db, org.tenantId, id, {
@@ -149,13 +165,16 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
             handler: parsed.handler,
             error: result.reason,
         })
-        await auditReceived(db, org, id, SYSTEM_ACTOR)
+        await auditReceived(db, org, id, SYSTEM_ACTOR, { outcome: 'unmatched', cause: 'declined' })
         return { stored: true, id, status: 'unmatched', handler: parsed.handler, reason: result.reason }
     } catch (error) {
         // Poison-message isolation: record 'failed', keep the row, do NOT re-raise (the caller 200s).
         const message = error instanceof Error ? error.message : String(error)
         await setInboundStatus(db, org.tenantId, id, { status: 'failed', handler: parsed.handler, error: message })
-        await auditReceived(db, org, id, SYSTEM_ACTOR)
+        await auditReceived(db, org, id, SYSTEM_ACTOR, {
+            outcome: 'failed',
+            cause: handlerReturned ? 'intake-threw' : 'handler-threw',
+        })
         return { stored: true, id, status: 'failed', handler: parsed.handler, reason: message }
     }
 }

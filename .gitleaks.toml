@@ -13,6 +13,19 @@ paths = ['''packages/keel/src/service-auth/webhook\.test\.ts''']
 regexes = ['''env-secret-abcdef0123456789''']
 regexTarget = "line"
 
+# Test fixtures in audit.test.ts's detail-refusal cases, not credentials: a Stripe-shaped `sk_live_…`
+# string the detail check must refuse as a Bearer credential, and a shorter one under a `sessionToken`
+# key. The test now BUILDS its secret-shaped values (as the keyset note below asks); this entry exists
+# only because both literals are in the branch's history, and gitleaks scans every commit.
+# `condition = "AND"`: gitleaks's default is OR, under which an entry naming a path exempts that whole
+# file. Here a finding is skipped only when it is in that file AND its line holds that string.
+[[allowlists]]
+description = "audit.test.ts detail-refusal fixtures, in history only"
+condition = "AND"
+paths = ['''packages/keel/src/db/audit\.test\.ts''']
+regexes = ['''sk_live_51HxYz''']
+regexTarget = "line"
+
 # Not a credential: a base64url cursor carrying a SQL-injection payload, used by the keyset proofs to
 # show a crafted cursor cannot widen a scope. Kept OUT of this allowlist on purpose — the proofs now
 # BUILD the envelope from its readable payload instead of pasting the blob, because a high-entropy
