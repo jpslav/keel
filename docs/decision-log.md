@@ -1770,3 +1770,9 @@ worth keeping.
   second, generated one in each app is not wanted. The Next docs the block pointed to still ship with the
   installed version, under `node_modules/next/dist/docs/` (resolved from an app directory). The manager
   session that ran this catch-up decided this on JP's behalf; JP can overrule it when approving the PR.
+- **Next's upgrade advisor is switched off (`experimental.agentUpgrade: false` in both apps).** next 16.4
+  added it with the default `'security'`: every `next dev` and `next build` outside CI queries npm's
+  advisory feed, and an agent's run stops when an advisory matches. The CLAUDE.md hard rule that
+  `pnpm dev` makes no network calls decides this, so it is not a new choice. Advisories reach keel through
+  Dependabot and review instead. Note that Dependabot security updates are currently off in the repository
+  settings.

@@ -19,6 +19,13 @@ const nextConfig: NextConfig = {
     // (decision-log, 2026-11-16). Option defined in
     // node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/agentRules.md
     agentRules: false,
+    experimental: {
+        // Off because `pnpm dev` must make no network calls (CLAUDE.md). By default `next dev` and
+        // `next build` outside CI query npm's advisory feed for the installed next, and stop an agent's
+        // run when an advisory matches (build-notes, 2026-11-16). Option defined in
+        // node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/agentUpgrade.md
+        agentUpgrade: false,
+    },
 }
 
 // Sentry wraps the build ONLY when a DSN exists (cutover row `errors`) — hermetic builds make
