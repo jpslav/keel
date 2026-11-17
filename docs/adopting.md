@@ -195,7 +195,8 @@ It prints this list when it finishes, because these are the parts that take judg
   budget. It is yours now. The starter ships it roomy on purpose, sized for an app's own screens and not as
   a pacing gate (it still fails on gross bloat); re-set it when you want a tighter gate, to what your app
   measures plus the headroom you want, in its own commit. `apps/<app>/DEMO-SIZE.md` beside it says what the
-  number was set for and how it got there, and is where you record each change and why.
+  number was set for and how it got there, and is where you record each change and why; it still calls the
+  app by its template name, and that history is keel's and stays as written.
   `scripts/check-demo-size.mjs` is keel's and holds no number, so an upstream merge may change it and you
   never edit it: re-set the number in `package.json`, never in the script. If you renamed the showcase
   instead (`--app showcase`), its number is its own pace-setting one, thin on purpose. When it goes red,
@@ -431,7 +432,7 @@ publishing to a registry worth the versioning cost.
 
 The doc set is mapped in [docs/README.md](README.md), which splits it three ways: doctrine (binding, and
 **gated** — `tests/docs/doc-paths.test.ts` fails the build if a doctrine doc cites a path that does not
-exist), dated records, and future tasks. Two consequences for you on day one:
+exist), dated records, and future tasks. Three consequences for you:
 
 - **The records (`docs/decision-log.md`, `docs/build-notes.md`) are the template's, not yours.** They are
   append-only, so nothing rewrites them; keep appending your own entries below the inherited ones, or

@@ -13,11 +13,15 @@ framework change that costs bytes costs them here first.
 
 ## How to change it
 
-Re-set the number in `package.json` and add an entry to the history below in the same commit: what grew, by how
+Re-set the number in `package.json` and add an entry under "Changes" below in the same commit: what grew, by how
 much, and how much headroom you left on purpose. Newest first. Do not record it in
 `scripts/check-demo-size.mjs`: that file is keel's, and an upstream merge will change it.
 
-## History
+## Changes
+
+None yet.
+
+## How it started (keel's history for the showcase)
 
 ### Re-based 2026-11-16, 950000 → 840000
 

@@ -1779,7 +1779,7 @@ update.
 - **keel's demo size script holds no number and no history.** Its header told an adopter to record every
   budget change in it, and its default was the showcase's number, so changing either meant editing a file
   upstream also edits. The budget is now a required argument from each app's `package.json` (the showcase
-  passes `840000` explicitly), the history moved verbatim (every number checked) into `apps/<app>/DEMO-SIZE.md`
+  passes `840000` explicitly), the history moved, split per app and lightly reworded (every number checked) into `apps/<app>/DEMO-SIZE.md`
   beside it, and the script's header is generic. Each `DEMO-SIZE.md` keeps the adopter's "Changes" section
   above keel's history, so a later upstream addition to the history and an adopter's own entries sit in
   different regions of the file. Rejected: a comment in `package.json` (JSON has none), and leaving the history
