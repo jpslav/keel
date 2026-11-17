@@ -31,11 +31,15 @@ export async function up(db: Kysely<any>): Promise<void> {
         DO $$
         BEGIN
             IF NOT pg_has_role(current_user, 'app_user', 'SET') THEN
+                -- The role is looked up by its exact name, never cast with ::regrole: that cast parses its
+                -- input as an unquoted identifier and folds it to lower case, so a role named with capitals
+                -- would not be found.
                 IF EXISTS (
-                    SELECT 1 FROM pg_auth_members
-                    WHERE roleid = 'app_user'::regrole
-                      AND member = current_user::regrole
-                      AND grantor = current_user::regrole
+                    SELECT 1 FROM pg_auth_members m, pg_roles me
+                    WHERE me.rolname = current_user
+                      AND m.roleid = 'app_user'::regrole
+                      AND m.member = me.oid
+                      AND m.grantor = me.oid
                 ) THEN
                     -- A membership this role already granted itself (createrole_self_grant set by the
                     -- operator): add SET, and leave the INHERIT they chose alone.
@@ -45,7 +49,8 @@ export async function up(db: Kysely<any>): Promise<void> {
                 END IF;
             END IF;
         EXCEPTION WHEN insufficient_privilege THEN
-            RAISE EXCEPTION 'keel: role % cannot switch to app_user, and cannot grant itself that (it holds no ADMIN on app_user). As a role that does, run: GRANT app_user TO % WITH SET TRUE, INHERIT FALSE', current_user, current_user;
+            -- The statement is printed with the role QUOTED, so copying it runs as-is for any role name.
+            RAISE EXCEPTION 'keel: role % cannot switch to app_user, and cannot grant itself that (it holds no ADMIN on app_user). As a role that does, run: GRANT app_user TO % WITH SET TRUE, INHERIT FALSE', current_user, quote_ident(current_user);
         END $$
     `.execute(db)
 }

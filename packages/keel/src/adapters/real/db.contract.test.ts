@@ -152,15 +152,23 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
         const maintenance = server.pathname.slice(1) || 'postgres'
         const admin = connect({ ...superuser, database: maintenance })
         const stamp = Date.now()
-        const second = `keel_second_${stamp}`
+        // Mixed case on purpose: the printed remedy must quote the name, or running it would name another role.
+        const second = `Keel_Second_${stamp}`
+        const creator = `keel_creator_${stamp}`
         const database = `keel_second_db_${stamp}`
         const login = { user: second, password: randomUUID() }
+        const creatorLogin = { user: creator, password: randomUUID() }
         let ownerDb: ReturnType<typeof connect> | undefined
         try {
-            // Someone else made app_user (here the superuser); this owner holds no membership in it at all.
+            // Someone else made app_user; this owner holds no membership in it at all. The role that runs
+            // the remedy below holds what a creator holds (ADMIN only), not superuser.
             await sql`DO $$ BEGIN CREATE ROLE app_user NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`.execute(
                 admin,
             )
+            await sql`CREATE ROLE ${sql.id(creator)} LOGIN NOSUPERUSER PASSWORD ${sql.lit(creatorLogin.password)}`.execute(
+                admin,
+            )
+            await sql`GRANT app_user TO ${sql.id(creator)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`.execute(admin)
             await sql`CREATE ROLE ${sql.id(second)} LOGIN CREATEROLE CREATEDB NOSUPERUSER PASSWORD ${sql.lit(login.password)}`.execute(
                 admin,
             )
@@ -177,14 +185,24 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
                 (error: unknown) => String(error),
             )
             expect(failure).toMatch(new RegExp(`keel: role ${second} cannot switch to app_user`))
-            // Kysely runs every pending migration in one transaction, so nothing of the run survives.
+            // Kysely runs every pending migration in one transaction, so nothing of the run survives: no
+            // migration recorded, and no table the earlier migrations created.
             const executed = await sql<{ n: number }>`SELECT count(*)::int AS n FROM kysely_migration`.execute(ownerDb)
             expect(executed.rows[0]!.n).toBe(0)
+            const tenants = await sql<{ t: string | null }>`SELECT to_regclass('public.tenants')::text AS t`.execute(
+                ownerDb,
+            )
+            expect(tenants.rows[0]!.t).toBeNull()
 
-            // The remedy, exactly as the error states it, run by a role holding ADMIN on app_user.
+            // The remedy, exactly as the error states it, run by the ADMIN-only creator.
             const remedy = /run: (GRANT app_user TO \S+ WITH SET TRUE, INHERIT FALSE)/.exec(failure ?? '')?.[1]
-            expect(remedy).toBe(`GRANT app_user TO ${second} WITH SET TRUE, INHERIT FALSE`)
-            await sql.raw(remedy!).execute(admin)
+            expect(remedy).toBe(`GRANT app_user TO "${second}" WITH SET TRUE, INHERIT FALSE`)
+            const creatorDb = connect({ ...creatorLogin, database: maintenance })
+            try {
+                await sql.raw(remedy!).execute(creatorDb)
+            } finally {
+                await creatorDb.destroy()
+            }
 
             // Now 0015 finds the switch already effective and grants nothing; everything migrates.
             await migrateToLatest(ownerDb)
@@ -196,6 +214,7 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
             await ownerDb?.destroy()
             await sql`DROP DATABASE IF EXISTS ${sql.id(database)} WITH (FORCE)`.execute(admin).catch(() => undefined)
             await sql`DROP ROLE IF EXISTS ${sql.id(second)}`.execute(admin).catch(() => undefined)
+            await sql`DROP ROLE IF EXISTS ${sql.id(creator)}`.execute(admin).catch(() => undefined)
             await admin.destroy()
         }
     })

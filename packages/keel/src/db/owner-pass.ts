@@ -69,8 +69,10 @@ export async function runOwnerPass(
             // with `createrole_self_grant` unset, that is ADMIN, and neither INHERIT nor SET.
             await sql`CREATE ROLE ${sql.id(probe)} NOLOGIN`.execute(bootstrap)
             const creator = await sql<{ admin_option: boolean; inherit_option: boolean; set_option: boolean }>`
-                SELECT m.admin_option, m.inherit_option, m.set_option FROM pg_auth_members m
-                WHERE m.roleid = ${probe}::regrole AND m.member = current_user::regrole`.execute(bootstrap)
+                SELECT m.admin_option, m.inherit_option, m.set_option
+                FROM pg_auth_members m
+                JOIN pg_roles r ON r.oid = m.roleid AND r.rolname = ${probe}
+                JOIN pg_roles me ON me.oid = m.member AND me.rolname = current_user`.execute(bootstrap)
             expect(creator.rows.length).toBe(1)
             expect(creator.rows[0]!.admin_option).toBe(true)
             expect(creator.rows[0]!.inherit_option).toBe(false)
