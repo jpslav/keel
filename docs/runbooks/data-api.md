@@ -52,7 +52,9 @@ Pass when:
   string, so nothing outlived the transaction;
 - `commit-transaction` answered `"transactionStatus": "Transaction Committed"`, the only answer the dialect
   takes for a commit (`commitOutcome` in `packages/keel/src/adapters/real/rds-data-codec.ts`). Record it
-  exactly.
+  exactly, and do this before any traffic reaches the transport. The dialect reads the answer after the
+  commit has happened, so if AWS words it differently, every commit is saved and then reported to the app
+  as a failure. Fix `commitOutcome` first.
 
 Then send a statement on a transaction id that has ended: the one just committed, and a second left idle
 past the three-minute limit.
@@ -69,9 +71,12 @@ rds execute-statement --database "$DB" --transaction-id "$TX" \
 ```
 
 Pass when the first and the last call both FAIL, with no row returned. If AWS ran either outside a
-transaction instead, the tail of a `withTenant` that outlived the idle limit would run as the secret's
-user with no tenant, and that user is not bound by RLS: stop, and treat the transport as unsafe. Record
-each exception's name and message.
+transaction instead, the tail of a `withTenant` that outlived the idle limit would run outside the
+transaction it belonged to, as the secret's user, with no tenant set. Every RLS table in keel and its
+apps also forces RLS (ADR-0004), so a non-superuser owner is still bound by it: its reads return nothing
+and its inserts are refused. Only a superuser or a role with `BYPASSRLS` escapes, and the
+`db-role-not-superuser` cutover row forbids those. Either way the statement has left its transaction:
+stop, and treat the transport as unsafe. Record each exception's name and message.
 
 ## 2. Postgres's parameter inference works through the Data API
 
