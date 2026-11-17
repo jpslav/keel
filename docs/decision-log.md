@@ -1730,6 +1730,100 @@ worth keeping.
   Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
   (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).
 
+## `init-app` says the demo size budget is the adopter's (2026-11-16, `fix/init-app-demo-budget`)
+
+- **"WHAT THIS DID NOT TOUCH" gains a bullet, after the cutover checklist.** It is the line the demo-size
+  headroom work proposed (`.claude/future-tasks/resolved/demo-size-budget-headroom-thin.md`), built from the
+  survivor's own `check:demo-size` script instead of fixed text, because what is true depends on it. The
+  starter passes a number, which is stated back as read from `package.json`; a survivor that passes none
+  (a renamed showcase) is told `DEFAULT_BUDGET_BYTES` is its budget and that it is thin on purpose; an app
+  without the script, or whose script is neither of those two shapes (a number then more shell, a quoted or
+  underscored number the script would reject), gets no bullet rather than a wrong one. `<slug>` is the survivor's directory name, as everywhere else in that
+  list. The "roomy on purpose" wording is only used where a number is passed, since that is the starter's.
+  The proposal's "room to grow to the showcase's size" is dropped: after an eject there is no showcase to
+  measure against.
+- **A note, not a rewrite, for `scripts/check-demo-size.mjs` after an eject.** Its header is two apps'
+  history plus a measurements table, and `DEFAULT_BUDGET_BYTES` (the showcase's) goes unused by a survivor
+  that passes its own number. `ejectShowcase` used to rewrite one phrase there ("the showcase's size" to "the reference
+  app's size"), which left line 2 saying the reference app measures 814660 bytes, a number nothing in an
+  ejected tree has. That rewrite is removed and the script is left exactly as the template has it. Rewriting
+  any of it is the false-sentence trap `.claude/future-tasks/eject-rewrites-prose-into-false-sentences.md`
+  describes, so the bullet says the header and the default describe the showcase you removed and only the
+  number you pass counts. The sentence appears only when the showcase is gone.
+- **Pinned in `tests/docs/adopter-identity.test.ts`.** The number is read back from the probe's own
+  `package.json`, so a change to the starter's script fails the test rather than leaving the output wrong; the
+  removal sentence is checked present after an eject and absent after a rename; the script must still carry
+  `DEFAULT_BUDGET_BYTES` and `WHEN IT GOES RED`; the no-number branch is reached by a `--dry-run` rename
+  of the showcase; a script that is neither shape gets no bullet; and a renamed showcase counts as still
+  there on a dry run and a real one alike. Each was watched failing against a deliberate break.
+
+## Catching up October's minor-and-patch group (2026-11-16, `deps/catch-up-2026-11`)
+
+- **keel's peer floors move with the apps' floors.** Dependabot's group PR (#30) raised `next`,
+  `next-intl`, `react` and `@mantine/core` in the root and both apps but left `packages/keel`'s
+  `peerDependencies` at the old floors. Before it, each of the four peer floors was the floor the apps
+  named. Leaving keel's lower is what kept the old `next-intl` and `@mantine/core` in keel's part of the
+  lockfile (build-notes, same date, has the mechanism). keel's peer ranges now match the apps' again:
+  `^16.4.6`, `^4.14.9` and `^9.7.3`, and `react` at `~19.2.8` for the hold below. A lower floor would
+  mean something only to a consumer installing keel from a registry with an older host, and nobody does:
+  `packages/keel` is `private` and ships by fork and merge (ADR-0013).
+- **next 16.4.6, not the group's 16.4.2.** GHSA-mfr8-8qww-v76h (medium, published 2026-11-16) covers next
+  16.3.0 through 16.4.4 and is fixed in 16.4.5. keel calls neither `'use cache'` nor `unstable_cache`, so
+  its code was not exposed, but 16.4.2 is the version `next dev` stopped on (build-notes). 16.4.6 is the
+  newest 16.4 patch and was published on 2026-11-09, past the two-day `minimumReleaseAge`.
+  `@next/eslint-plugin-next` moves with it.
+- **`@axe-core/playwright` is held at `~4.12.1`.** The group took it to 4.14.0, whose `axe-core` turns
+  on `label-content-name-mismatch` by default. Twelve showcase e2e tests then failed on that one rule,
+  on four framework controls whose `aria-label` replaces their visible text. The finding is real (WCAG
+  2.5.3, Level A), but fixing it means choosing new accessible names in two locales, which is a11y design
+  work rather than part of a dependency catch-up. The tilde keeps the hold through a lockfile
+  regeneration: with 4.14.0 already in the lockfile, `^4.12.1` resolved to 4.14.0. The fix and the way to
+  lift the hold are in `.claude/future-tasks/label-in-name-axe-4-14.md`.
+- **`react`, `react-dom` and their types are held at 19.2 (`~19.2.8`, `~19.2.17`, `~19.2.3`).** The group
+  took React to 19.3.1, which put the showcase's static demo at 845,719 bytes, over the 840,000 budget
+  re-based the same day (starter 755,326 of 820,000). With only `react` and `react-dom` pinned back to
+  19.2.8, the showcase built at 816,387 and the starter at 725,995: React was about 29 KB of the
+  showcase's ~31 KB growth. It is React's own code, not something keel can trim: react-dom's
+  `cjs/react-dom-client.production.js` is 536,016 bytes in 19.2.8 and 625,168 in 19.3.1. Taking it means
+  raising the showcase budget, which the budget's own rule reserves for a feature
+  (`scripts/check-demo-size.mjs`, "WHEN IT GOES RED"), so that is JP's call.
+  Until then the tildes keep 19.2 through a lockfile regeneration. keel's `react` peer is `~19.2.8` too,
+  the same range the apps name. Holding React back took one more lockfile regeneration (build-notes,
+  same date).
+- **Next's generated `AGENTS.md` is switched off (`agentRules: false` in both apps' `next.config.ts`).**
+  With next 16.4, `next dev` writes `apps/<app>/AGENTS.md` whenever it detects an AI coding agent, and
+  the block it writes tells the agent to commit the file. CI is not an agent and never sees it, but every
+  agent's `pnpm verify` starts `next dev` for e2e, so the file appeared untracked in agent worktrees, one
+  add-everything commit away from landing in a PR. keel's agent guide is the root `CLAUDE.md`, so a
+  second, generated one in each app is not wanted. The Next docs the block pointed to still ship with the
+  installed version, under `node_modules/next/dist/docs/` (resolved from an app directory). The manager
+  session that ran this catch-up decided this on JP's behalf; JP can overrule it when approving the PR.
+- **Next's upgrade advisor is switched off (`experimental.agentUpgrade: false` in both apps).** next 16.4
+  added it with the default `'security'`: every `next dev` outside CI queries npm's advisory feed, as does
+  `next build` when an agent runs it or the CLI can prompt at a terminal, and an agent's run stops when an
+  advisory matches (build-notes, same date). The CLAUDE.md hard rule that `pnpm dev` makes no network calls
+  decides this, so it is not a new choice. It does not make `pnpm dev` offline: the dev overlay's version
+  check, which next 16.2 already had, still fetches `next`'s dist-tags. Advisories now have to reach keel
+  another way, through Dependabot security updates (currently off in the repository settings) or review.
+
+## Lint fences cover every extension; carve-outs name what their runner loads (2026-11-16, `fix/lint-fence-gaps`)
+
+- **Fence globs take their extensions from one constant, `SRC_EXT`.** They named `{ts,tsx}`, so a `.mjs`
+  file in `apps/*/src`, `packages/keel/src` or keel's test fixture got past the vendor, `process.env` and
+  `getDb` bans. `SRC_EXT` lists all eight extensions ESLint lints here, `.mts` and `.cts` included.
+- **Carve-outs do NOT use `SRC_EXT`.** A test carve-out names what vitest runs (`*.test.{ts,tsx}`), the story
+  carve-out what Ladle loads, the `next.config` carve-out the four names Next reads, the instrumentation one
+  Next's default `pageExtensions`. Widening each to every extension was the alternative. It was rejected
+  because a `.test.mjs` that vitest never runs is an ordinary module a route can import.
+- **The app's registry stays `adapters/index.ts` by name.** An `index.mjs` beside it is one more module
+  that may not load `real/`. Widening the registry exemption across extensions was the alternative. It was
+  rejected because the recipe names one file, and a second registry-shaped file is the thing to catch.
+- **Selectors that implement one rule travel as one array** (`getDbSelectors`, `runModeEnvSelectors`),
+  replacing re-listing them one by one. Re-listing is what let the a11y block drop the computed `getDb` form.
+- **Tests under an app's adapters directory stay exempt from the dynamic `real/` ban**, as they are from
+  the other syntax bans there. A story beside a fake was given it back, since the static form was already
+  banned in stories.
+
 ## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
 
 - **JP decided, 2026-11-16: it lives in keel, as an opt-in.** Tenant isolation through any transport is
@@ -1762,6 +1856,13 @@ worth keeping.
   `packages/keel/src/adapters/real/rds-data-emulator.ts`. The live check is `docs/runbooks/data-api.md`,
   for the `data-api` cutover row. The community `local-data-api` emulator was rejected: it binds untyped
   strings as `unknown`, so it passes exactly the queries Aurora rejects.
-- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. A single
-  statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs on the
-  `pg` transport from inside the VPC.
+- **The migrator runs all pending migrations in one Data API transaction**, as it does on `pg`. That
+  transaction opens with `pg_advisory_xact_lock` on Kysely's lock id. Kysely's own session-level lock
+  would be dropped by the connection reset, and Kysely creates its tables before locking at all. A
+  single statement over 45 seconds, or a run over an hour, fails loudly. A migration that cannot fit runs
+  on the `pg` transport from inside the VPC. The pre-PR review found the lock gap. A race test of two
+  migrators on an empty database, which first failed on Kysely's create-before-lock, proves the fix.
+- **The emulator lives in `packages/keel/src/adapters/real/`, not in `test-fixture/`.** It needs `pg` and
+  the RDS Data SDK, which only an adapters directory may import. Test-only modules in `src/` have
+  precedent in `rls-proof-runner.ts`. Nothing in an app or a deployment imports it, and knip would report
+  it if nothing did.

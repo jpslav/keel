@@ -8,6 +8,22 @@ import reactPlugin from 'eslint-plugin-react'
 import reactHooksPlugin from 'eslint-plugin-react-hooks'
 import typescriptEslint from 'typescript-eslint'
 
+// EVERY extension a fence below names. ESLint lints all eight in this repo (its own defaults are .js,
+// .mjs and .cjs, typescript-eslint's recommended config adds .ts, .tsx, .mts and .cts, and the react
+// block below adds .jsx), so a fence that names a DIRECTORY has to hold for each of them. The fences
+// used to say `*.{ts,tsx}`, which let a `.mjs` file in apps/*/src or packages/keel/src import a vendor
+// SDK, read process.env or take the raw db handle with a green `pnpm lint`; nothing in the tree did, and
+// nothing would have said so if something had. Every fence glob takes its extensions from here. The
+// runner-shaped carve-outs do NOT (TEST_FILES and STORY_FILES below, the next.config and instrumentation
+// ones further down): each names what its runner actually picks up, and a file the runner does not pick up
+// keeps every ban.
+const SRC_EXT = '{ts,tsx,mts,cts,js,jsx,mjs,cjs}'
+// vitest's include globs (vitest.config.ts) name `*.test.{ts,tsx}` and nothing else, so a `.test.mjs`
+// under src/ is an ordinary module that a route can import, and it stays fenced.
+const TEST_FILES = '**/*.test.{ts,tsx}'
+// Ladle's stories glob (apps/showcase/.ladle/config.mjs), extension for extension.
+const STORY_FILES = '**/*.stories.{js,jsx,ts,tsx}'
+
 // Shared by the boundary blocks below. NOTE: eslint rule config merges by OBJECT KEY — a later
 // block's 'no-restricted-imports' REPLACES an earlier one for matching files. Any block that
 // re-declares the rule must include these vendor patterns again, or the boundary silently
@@ -51,8 +67,10 @@ const APP_ADAPTERS_GLOB = 'apps/*/src/adapters/**'
 const APP_REAL_ADAPTERS_GLOB = 'apps/*/src/adapters/real/**'
 // The files both halves of the vendor ban cover, and the two carve-outs both leave out (the ports-boundary
 // block below says why each carve-out exists). Named once for the same reason as the zones above.
-const VENDOR_FENCE_FILES = ['apps/*/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}']
-const VENDOR_CARVE_OUTS = ['apps/*/next.config.ts', 'apps/*/tests/contract/**']
+// `next.config.*` is the four names Next loads its config from (CONFIG_FILES in next's
+// shared/lib/constants), and no other file at the app root.
+const VENDOR_FENCE_FILES = [`apps/*/**/*.${SRC_EXT}`, `packages/*/src/**/*.${SRC_EXT}`]
+const VENDOR_CARVE_OUTS = ['apps/*/next.config.{ts,mts,js,mjs}', 'apps/*/tests/contract/**']
 
 // An app's real adapter is reached through the app's adapter registry (apps/<app>/src/adapters/index.ts),
 // the module that picks the fake in simulated mode — the role keel's exports map plays for keel's own
@@ -119,31 +137,54 @@ const appCodePattern = {
 // and adding a destructuring selector still left `db.getDb.bind(db)`, `db['getDb']()` and
 // destructuring in a function PARAMETER. So the MemberExpression form subsumes the original call
 // form, and the ObjectPattern form deliberately carries no `VariableDeclarator >` ancestor, which is
-// what makes a destructured parameter count.
+// what makes a destructured parameter count. A key spelled as a template literal with no expressions
+// (``db[`getDb`]``) or quoted (`const { 'getDb': g } = db`) names it just the same, so both match too.
+//
+// They travel TOGETHER, as getDbSelectors, and no block lists them one by one. A block that listed them
+// one by one dropped the computed form for every route, page and component (the a11y block below, which
+// is the last no-restricted-syntax block for those files, so its list was the one that counted), and
+// `db['getDb']()` passed lint in a route handler although the two blocks before it listed the selector.
+//
+// A KEY can name something three ways: an identifier (`.name`, `{ name }`), a string (`['name']`,
+// `{ 'name': x }`), or a template literal with no expressions. Every name these selectors aim at (getDb,
+// `env` on `process` or imported from it, a run-mode variable) is matched in all three: through anyKey, or,
+// for getDb's member access, the dot selector for the identifier and quotedKey for the other two. `path`
+// is the esquery path to the key; `name` is a quoted string or a regex. quotedKey leaves out the
+// identifier because in a computed access an identifier is a VARIABLE (`db[k]`), not the name. The anyKey
+// selectors on `process` keep it, as main's `[property.name="env"]` did, so `process[env]` with `env` a
+// variable is reported too. A key wrapped in a TypeScript assertion (`db['getDb' as const]`) is out of
+// reach, as an alias is.
+const quotedKey = (path, name) =>
+    `:matches([${path}.value=${name}], [${path}.expressions.length=0][${path}.quasis.0.value.cooked=${name}])`
+const anyKey = (path, name) =>
+    `:matches([${path}.name=${name}], [${path}.value=${name}], ` +
+    `[${path}.expressions.length=0][${path}.quasis.0.value.cooked=${name}])`
 const getDbSelector = {
     selector: 'MemberExpression[property.name="getDb"]',
     message:
         'Route/UI code must not use the raw db handle — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
 const getDbComputedSelector = {
-    selector: 'MemberExpression[computed=true][property.value="getDb"]',
+    selector: `MemberExpression[computed=true]${quotedKey('property', '"getDb"')}`,
     message:
         "Reaching the raw db handle as db['getDb'] bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).",
 }
 const getDbDestructureSelector = {
-    selector: 'ObjectPattern > Property[key.name="getDb"]',
+    selector: `ObjectPattern > Property${anyKey('key', '"getDb"')}`,
     message:
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
+const getDbSelectors = [getDbSelector, getDbComputedSelector, getDbDestructureSelector]
 // Also the import form — `import { env }`, or a default or namespace import, from `process`/`node:process`
 // — which reads the same object under another name (a type-only import, or `import { cwd }`, does not).
 // Nothing in the tree uses it. It closes that one form: re-exporting `env` from `node:process`, or
-// `const { env } = process`, still gets past, as any alias does.
+// `const { env } = process`, still gets past, as any alias does (`globalThis.process.env` included).
+// `process['env']` is not an alias, it is the same name spelled as a key (anyKey).
 const processEnvSelector = {
     selector:
-        ':matches(MemberExpression[object.name="process"][property.name="env"], ' +
+        `:matches(MemberExpression[object.name="process"]${anyKey('property', '"env"')}, ` +
         'ImportDeclaration[importKind!="type"][source.value=/^(node:)?process$/] > ' +
-        ':matches(ImportSpecifier[imported.name="env"], ImportDefaultSpecifier, ImportNamespaceSpecifier))',
+        `:matches(ImportSpecifier${anyKey('imported', '"env"')}, ImportDefaultSpecifier, ImportNamespaceSpecifier))`,
     message:
         "process.env is read ONLY inside an adapters directory — packages/keel/src/adapters, or an app's own " +
         'apps/<app>/src/adapters/real (CLAUDE.md) — deployment/service params come from the app ' +
@@ -153,10 +194,11 @@ const processEnvSelector = {
 // An app's real adapter may read its OWN configuration from process.env, but never the run mode. That is
 // keel's: `appMode`/`isSimulated`/`isDemoMode` from keel/adapters/index, whose import also runs the
 // fail-closed production guard. A second reader of APP_MODE can disagree with it (keel treats a legacy
-// `APP_MODE=fake` as simulated) and never runs the guard. Matched: `process.env.X`, `process.env['X']`,
-// ``process.env[`X`]``, and destructuring in a declaration, an assignment or a parameter default (quoted
-// keys included). As with the getDb selectors above, no lint rule chases an alias
-// (`const env = process.env; env.APP_MODE`, or `env` imported from `node:process`).
+// `APP_MODE=fake` as simulated) and never runs the guard. Matched: the variable read as a key of `process.env`
+// in any of anyKey's three spellings, with `env` itself in any of them too (`process['env'].APP_MODE`), and
+// destructuring in a declaration, an assignment or a parameter default. As with the getDb selectors above,
+// no lint rule chases an alias (`const env = process.env; env.APP_MODE`, or `env` imported from
+// `node:process`).
 const RUN_MODE_ENV = '/^(APP_MODE|DEMO_MODE|E2E_BUILD)$/'
 const runModeEnvMessage =
     "Run mode is keel's — import isSimulated/isDemoMode/appMode from keel/adapters/index. An app adapter " +
@@ -164,21 +206,22 @@ const runModeEnvMessage =
     'fail-closed production guard (docs/recipes/app-owned-adapter.md).'
 const runModeEnvSelector = {
     selector:
-        'MemberExpression[object.object.name="process"][object.property.name="env"]' +
-        `:matches([property.name=${RUN_MODE_ENV}], [property.value=${RUN_MODE_ENV}], ` +
-        `[property.quasis.0.value.cooked=${RUN_MODE_ENV}])`,
+        `MemberExpression[object.object.name="process"]${anyKey('object.property', '"env"')}` +
+        anyKey('property', RUN_MODE_ENV),
     message: runModeEnvMessage,
 }
 // Destructuring in a declaration, an assignment, or a parameter default — each puts `process.env` on the
 // right of the pattern under a different parent node.
 const runModeEnvDestructureSelector = {
     selector:
-        ':matches(VariableDeclarator[init.object.name="process"][init.property.name="env"], ' +
-        'AssignmentExpression[right.object.name="process"][right.property.name="env"], ' +
-        'AssignmentPattern[right.object.name="process"][right.property.name="env"]) > ObjectPattern > ' +
-        `Property:matches([key.name=${RUN_MODE_ENV}], [key.value=${RUN_MODE_ENV}])`,
+        `:matches(VariableDeclarator[init.object.name="process"]${anyKey('init.property', '"env"')}, ` +
+        `AssignmentExpression[right.object.name="process"]${anyKey('right.property', '"env"')}, ` +
+        `AssignmentPattern[right.object.name="process"]${anyKey('right.property', '"env"')}) > ObjectPattern > ` +
+        `Property${anyKey('key', RUN_MODE_ENV)}`,
     message: runModeEnvMessage,
 }
+// Together, for the reason getDbSelectors are.
+const runModeEnvSelectors = [runModeEnvSelector, runModeEnvDestructureSelector]
 // Inside an app's adapters directory, only the registry loads real/. A fake, or a second module, doing
 // `await import('../real/kv')` would put the vendor SDK behind code that never asks the run mode. The
 // static form is appRealAdapterStaticPattern (no-restricted-imports); this is the dynamic one.
@@ -211,9 +254,9 @@ const a11yLiteralSelector = {
 // instead of a per-directory list. UI_GLOBS is every screen/route file, on BOTH sides of the line: the
 // app's routes and cards plus the framework's screens, which the same UI rules (getDb, process.env,
 // i18n literals, a11y attributes) must keep covering now that they live in the package.
-const FRAMEWORK_FILES_GLOB = 'packages/keel/src/**/*.{ts,tsx}'
-const FRAMEWORK_COMPONENTS_GLOB = 'packages/keel/src/components/**/*.{ts,tsx}'
-const UI_GLOBS = ['apps/*/src/app/**/*.{ts,tsx}', 'apps/*/src/components/**/*.{ts,tsx}', FRAMEWORK_COMPONENTS_GLOB]
+const FRAMEWORK_FILES_GLOB = `packages/keel/src/**/*.${SRC_EXT}`
+const FRAMEWORK_COMPONENTS_GLOB = `packages/keel/src/components/**/*.${SRC_EXT}`
+const UI_GLOBS = [`apps/*/src/app/**/*.${SRC_EXT}`, `apps/*/src/components/**/*.${SRC_EXT}`, FRAMEWORK_COMPONENTS_GLOB]
 
 // keel's OWN app seam (ADR-0012): packages/keel/test-fixture is app-SHAPED code that lives
 // inside the framework package, and it is the seam the root program resolves `@app-config/*` through.
@@ -224,7 +267,7 @@ const UI_GLOBS = ['apps/*/src/app/**/*.{ts,tsx}', 'apps/*/src/components/**/*.{t
 // `pnpm init-app --eject-showcase` — the exact failure the fixture exists to remove. It is therefore
 // named explicitly wherever a rule is about a FRAMEWORK invariant. See the fixture blocks below for
 // which rules apply and which deliberately do not.
-const FIXTURE_FILES_GLOB = 'packages/keel/test-fixture/**/*.{ts,tsx}'
+const FIXTURE_FILES_GLOB = `packages/keel/test-fixture/**/*.${SRC_EXT}`
 
 // ---------------------------------------------------------------------------------------------
 // keel's PUBLIC SURFACE (ADR-0012).
@@ -417,7 +460,10 @@ const eslintConfig = [
             '!.ladle',
             '!.ladle/**',
             '**/.ladle/dist/**',
-            'apps/*/src/styles/generated/**',
+            // What Panda's codegen writes there (`.mjs` and `.d.ts`): a hand-written `.ts` or `.js` in that
+            // directory is fenced like any other module. A hand-written `.mjs` is not, since it has the
+            // extension of Panda's own output.
+            'apps/*/src/styles/generated/**/*.{mjs,d.ts}',
             '**/test-results/**',
             '**/playwright-report/**',
             '**/coverage/**',
@@ -447,8 +493,11 @@ const eslintConfig = [
         files: ['**/migrations/**/*.ts', 'spikes/**/*.ts'],
         rules: { '@typescript-eslint/no-explicit-any': 'off' },
     },
+    // Every extension, not the four this block used to name: the i18n block below bans literals in `.mjs`
+    // screens too, and `react/jsx-no-literals` cannot be configured for a file this block, which registers
+    // the plugin, does not match (ESLint throws "Could not find plugin").
     {
-        files: ['**/*.{js,jsx,ts,tsx}'],
+        files: [`**/*.${SRC_EXT}`],
         plugins: {
             react: reactPlugin,
             'react-hooks': reactHooksPlugin,
@@ -468,7 +517,7 @@ const eslintConfig = [
         },
     },
     {
-        files: ['apps/*/src/**/*.{ts,tsx}', 'packages/keel/src/**/*.{ts,tsx}'],
+        files: [`apps/*/src/**/*.${SRC_EXT}`, FRAMEWORK_FILES_GLOB],
         plugins: { '@next/next': nextPlugin },
         rules: {
             ...nextPlugin.configs.recommended.rules,
@@ -480,7 +529,7 @@ const eslintConfig = [
     {
         files: UI_GLOBS,
         rules: {
-            'no-restricted-syntax': ['error', getDbSelector, getDbComputedSelector, getDbDestructureSelector],
+            'no-restricted-syntax': ['error', ...getDbSelectors],
         },
     },
     // params centralization (CLAUDE.md): process.env is read ONLY inside keel's adapters and an app's own real
@@ -488,18 +537,12 @@ const eslintConfig = [
     // imports the resolved value (the app's config/params.ts for deployment params; isSimulated/isDemoMode
     // from keel/adapters for run mode). Exempt: adapters, instrumentation (NEXT_PUBLIC needs literal inlining),
     // the two secret readers, and test files (which set APP_DATA_DIR for isolation). App/component
-    // non-test files also get the ban — re-listing getDbSelector so their getDb ban survives the merge.
+    // non-test files also get the ban — re-listing getDbSelectors so their getDb ban survives the merge.
     {
         files: UI_GLOBS,
-        ignores: ['**/*.test.{ts,tsx}'],
+        ignores: [TEST_FILES],
         rules: {
-            'no-restricted-syntax': [
-                'error',
-                getDbSelector,
-                getDbComputedSelector,
-                getDbDestructureSelector,
-                processEnvSelector,
-            ],
+            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector],
         },
     },
     // Targeted a11y-attribute literal ban (ADR-0008): non-test, non-story app/component code. Re-lists the
@@ -507,32 +550,29 @@ const eslintConfig = [
     // still enforces them. Stories render fixtures, not shipped UI, so they are carved out.
     {
         files: UI_GLOBS,
-        ignores: ['**/*.test.{ts,tsx}', '**/*.stories.tsx'],
+        ignores: [TEST_FILES, STORY_FILES],
         rules: {
-            'no-restricted-syntax': [
-                'error',
-                getDbSelector,
-                getDbDestructureSelector,
-                processEnvSelector,
-                a11yLiteralSelector,
-            ],
+            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector, a11yLiteralSelector],
         },
     },
     {
         // apps/*/config too: params.ts records names and placeholders and never reads the environment, and
         // without it the directory beside src/ was the obvious place for a helper that hands an app's registry
         // its own reading of APP_MODE.
-        files: ['apps/*/src/**/*.{ts,tsx}', 'apps/*/config/**/*.{ts,tsx}', 'packages/keel/src/**/*.{ts,tsx}'],
+        files: [`apps/*/src/**/*.${SRC_EXT}`, `apps/*/config/**/*.${SRC_EXT}`, FRAMEWORK_FILES_GLOB],
         ignores: [
             'apps/*/src/app/**',
             'apps/*/src/components/**',
             'packages/keel/src/components/**',
             KEEL_ADAPTERS_GLOB,
             APP_REAL_ADAPTERS_GLOB,
-            'apps/*/src/instrumentation*.ts',
+            // Next's two instrumentation hooks, under the default pageExtensions Next looks for them with
+            // (neither app sets its own), and no other name: `instrumentation-helpers.ts` is an ordinary
+            // module, as the `*` this used to carry let it pretend not to be.
+            'apps/*/src/instrumentation{,-client}.{ts,tsx,js,jsx}',
             'packages/keel/src/service-auth/webhook.ts',
             'packages/keel/src/service-auth/mailgun.ts',
-            '**/*.test.{ts,tsx}',
+            TEST_FILES,
         ],
         rules: {
             'no-restricted-syntax': ['error', processEnvSelector],
@@ -547,37 +587,49 @@ const eslintConfig = [
     // component (a vendor widget) lives here and renders copy; keel's own adapters get it from the
     // `packages/keel/src/adapters` block further down.
     {
-        files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
-        ignores: ['**/*.test.{ts,tsx}'],
+        files: [`apps/*/src/adapters/real/**/*.${SRC_EXT}`],
+        ignores: [TEST_FILES],
         rules: {
-            'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector, a11yLiteralSelector],
+            'no-restricted-syntax': ['error', ...runModeEnvSelectors, a11yLiteralSelector],
         },
     },
     // A story beside a real-mode component renders fixtures, not shipped copy, so it drops the a11y ban as
     // stories do everywhere else, and keeps the run-mode ban (this block replaces the one above for it).
     {
-        files: ['apps/*/src/adapters/real/**/*.stories.tsx'],
+        files: [`apps/*/src/adapters/real/${STORY_FILES}`],
         rules: {
-            'no-restricted-syntax': ['error', runModeEnvSelector, runModeEnvDestructureSelector],
+            'no-restricted-syntax': ['error', ...runModeEnvSelectors],
         },
     },
     // The rest of an app's adapters directory except the registry — its fakes, and any module beside them.
     // Re-lists processEnvSelector (merge trap: this block replaces the process.env block above for these
     // files), adds the dynamic half of "only the registry loads real/", and the a11y-attribute literal ban
-    // for a fake that renders copy. Tests and stories fall back to the process.env block above, which
-    // exempts tests and bans process.env in stories, as it does everywhere.
+    // for a fake that renders copy. Tests fall back to the process.env block above, which exempts them.
+    // The registry is `index.ts` and nothing else, as the recipe names it: an `index.mjs` beside it is one
+    // more module that may not load real/.
     {
-        files: ['apps/*/src/adapters/**/*.{ts,tsx}'],
-        ignores: [APP_REAL_ADAPTERS_GLOB, 'apps/*/src/adapters/index.ts', '**/*.test.{ts,tsx}', '**/*.stories.tsx'],
+        files: [`apps/*/src/adapters/**/*.${SRC_EXT}`],
+        ignores: [APP_REAL_ADAPTERS_GLOB, 'apps/*/src/adapters/index.ts', TEST_FILES, STORY_FILES],
         rules: {
             'no-restricted-syntax': ['error', processEnvSelector, appRealAdapterDynamicSelector, a11yLiteralSelector],
+        },
+    },
+    // A story beside a fake drops the a11y ban as stories do everywhere, and keeps the other two. It used to
+    // fall back to the process.env block alone, which dropped the dynamic real/ ban with the a11y one: a
+    // fake's story could `import('../real/kv')` and put the vendor SDK in the workshop, though a STATIC
+    // import of the same path was banned there (the no-restricted-imports block below ignores no stories).
+    {
+        files: [`apps/*/src/adapters/${STORY_FILES}`],
+        ignores: [APP_REAL_ADAPTERS_GLOB],
+        rules: {
+            'no-restricted-syntax': ['error', processEnvSelector, appRealAdapterDynamicSelector],
         },
     },
     // keel's adapters render copy too (the real sign-in and accept-invite forms), and no other
     // no-restricted-syntax block matches them. Labels arrive as props today; this keeps it that way.
     {
-        files: ['packages/keel/src/adapters/**/*.tsx'],
-        ignores: ['**/*.test.tsx', '**/*.stories.tsx'],
+        files: [`${KEEL_ADAPTERS_GLOB}/*.${SRC_EXT}`],
+        ignores: [TEST_FILES, STORY_FILES],
         rules: {
             'no-restricted-syntax': ['error', a11yLiteralSelector],
         },
@@ -585,8 +637,8 @@ const eslintConfig = [
     // Same tenancy ban as UI_GLOBS, wider net — and it MUST come after the process.env block above,
     // which matches `apps/*/src/**` and so replaced an earlier getDb block for these files outright.
     // That is the merge trap this file documents at the top, walked into once while adding this rule:
-    // the ban silently did nothing, and only `--print-config` showed why. It re-lists BOTH selectors
-    // for the same reason every other block here does.
+    // the ban silently did nothing, and only `--print-config` showed why. It re-lists getDbSelectors
+    // AND processEnvSelector for the same reason every other block here does.
     //
     // WHY these directories: an app's domain/ and jobs/ are request-path code. The module a route calls
     // to run the query is likelier to reach for the raw handle than the route itself, and CLAUDE.md
@@ -599,16 +651,10 @@ const eslintConfig = [
     // not a request path, and `fakeDb.getDb()` inside an `ids()` helper is the pattern keel's own
     // suites already use. The ban is about production code that serves a request.
     {
-        files: ['apps/*/src/domain/**/*.{ts,tsx}', 'apps/*/src/jobs/**/*.{ts,tsx}'],
-        ignores: ['**/*.test.{ts,tsx}'],
+        files: [`apps/*/src/domain/**/*.${SRC_EXT}`, `apps/*/src/jobs/**/*.${SRC_EXT}`],
+        ignores: [TEST_FILES],
         rules: {
-            'no-restricted-syntax': [
-                'error',
-                getDbSelector,
-                getDbComputedSelector,
-                getDbDestructureSelector,
-                processEnvSelector,
-            ],
+            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector],
         },
     },
     // i18n: UI code may not contain hard-coded strings — everything goes through next-intl (ADR-0008).
@@ -617,17 +663,20 @@ const eslintConfig = [
     // they render from the same merged catalog as the server screens. They sat outside this fence until
     // the framework extraction gave keel 640 lines of its own demo UI; both sides already comply, so
     // covering them costs nothing today and stops the next edit hard-coding a string.
+    //
+    // Every extension (SRC_EXT), not `.tsx` alone: a `.jsx` or `.js` screen renders copy as well, and the
+    // rule only ever fires on JSX, so on a `.ts` file it costs nothing.
     {
         files: [
-            'apps/*/src/app/**/*.tsx',
-            'apps/*/src/components/**/*.tsx',
-            'apps/*/src/demo-static/**/*.tsx',
-            'packages/keel/src/components/**/*.tsx',
-            'packages/keel/src/demo-static/**/*.tsx',
+            `apps/*/src/app/**/*.${SRC_EXT}`,
+            `apps/*/src/components/**/*.${SRC_EXT}`,
+            `apps/*/src/demo-static/**/*.${SRC_EXT}`,
+            `packages/keel/src/components/**/*.${SRC_EXT}`,
+            `packages/keel/src/demo-static/**/*.${SRC_EXT}`,
             // Real-mode-only components live in adapter directories, on both sides of the line, and render
             // copy. keel's already complied when they were added here.
-            'packages/keel/src/adapters/**/*.tsx',
-            'apps/*/src/adapters/**/*.tsx',
+            `${KEEL_ADAPTERS_GLOB}/*.${SRC_EXT}`,
+            `${APP_ADAPTERS_GLOB}/*.${SRC_EXT}`,
         ],
         rules: {
             'react/jsx-no-literals': ['error', { noStrings: true, ignoreProps: true, allowedStrings: [] }],
@@ -647,7 +696,9 @@ const eslintConfig = [
     // outside the request path:
     //  - `next.config.ts` composes the Sentry BUILD plugin (`withSentryConfig`), which is a bundler
     //    wrapper, not an SDK call the product makes. ADR-0010 records Sentry as instrumentation
-    //    rather than a port for exactly this reason.
+    //    rather than a port for exactly this reason. The carve-out names all four spellings Next
+    //    loads (VENDOR_CARVE_OUTS); any other root config (playwright, vite, panda, postcss, ladle) is
+    //    fenced like the rest of the app.
     //  - `tests/contract/**` drives real Postgres through `pg`/`embedded-postgres` on purpose — that
     //    IS the anti-drift proof, and routing it through a port would prove nothing about the port.
     //
@@ -676,7 +727,7 @@ const eslintConfig = [
     // appRealAdapterStaticPattern instead of appRealAdapterPattern: no static import of real/ at all, so the
     // registry's import() is the only way in.
     {
-        files: ['apps/*/src/adapters/**/*.{ts,tsx}'],
+        files: [`${APP_ADAPTERS_GLOB}/*.${SRC_EXT}`],
         ignores: [APP_REAL_ADAPTERS_GLOB],
         rules: {
             'no-restricted-imports': [
@@ -686,7 +737,7 @@ const eslintConfig = [
         },
     },
     {
-        files: ['apps/*/src/adapters/real/**/*.{ts,tsx}'],
+        files: [`${APP_REAL_ADAPTERS_GLOB}/*.${SRC_EXT}`],
         rules: {
             'no-restricted-imports': ['error', { patterns: [nextFontPattern] }],
         },
@@ -725,28 +776,24 @@ const eslintConfig = [
     {
         files: [FIXTURE_FILES_GLOB],
         rules: {
-            'no-restricted-syntax': [
-                'error',
-                getDbSelector,
-                getDbComputedSelector,
-                getDbDestructureSelector,
-                processEnvSelector,
-            ],
+            'no-restricted-syntax': ['error', ...getDbSelectors, processEnvSelector],
         },
     },
     // Adapters are fenced against app content too, but MAY import vendor SDKs (that is their job) — so
-    // this block carries appCodePattern only (no vendorSdkPattern). It is the ONLY no-restricted-imports
-    // block matching packages/keel/src/adapters (the ports-boundary block above ignores it).
+    // this block carries appCodePattern only (no vendorSdkPattern). The ports-boundary block above ignores
+    // packages/keel/src/adapters, and the framework fence above matches it but comes earlier, so this
+    // block's list is the one that counts there.
     {
-        files: ['packages/keel/src/adapters/**/*.{ts,tsx}'],
+        files: [`${KEEL_ADAPTERS_GLOB}/*.${SRC_EXT}`],
         rules: {
             'no-restricted-imports': ['error', { patterns: [appCodePattern, nextFontPattern] }],
         },
     },
-    // keel/core stays framework-free (ADR-0006) AND fenced from app content (ADR-0012) — vendor + app
-    // patterns repeated on purpose (merge trap), see the notes above.
+    // keel/core stays framework-free (ADR-0006) AND fenced from app content (ADR-0012) — vendor, app and
+    // font patterns repeated on purpose (merge trap), see the notes above. The font ban was the one this
+    // block forgot; `next/*` below happened to cover it, with core's message rather than the font one.
     {
-        files: ['packages/keel/src/core/**/*.{ts,tsx}'],
+        files: [`packages/keel/src/core/**/*.${SRC_EXT}`],
         rules: {
             'no-restricted-imports': [
                 'error',
@@ -754,6 +801,7 @@ const eslintConfig = [
                     patterns: [
                         vendorSdkPattern,
                         appCodePattern,
+                        nextFontPattern,
                         {
                             group: ['react', 'react-*', 'next', 'next/*', 'next-intl', 'next-intl/*', '@mantine/*'],
                             message: 'keel/core is pure TypeScript — no framework imports (ADR-0006).',
@@ -768,7 +816,7 @@ const eslintConfig = [
     // of them are consumers the map has to hold for. Inside packages/keel the specifier never
     // appears (imports there are relative), so this also catches a self-import through the alias.
     {
-        files: ['**/*.{js,jsx,mjs,cjs,ts,tsx}'],
+        files: [`**/*.${SRC_EXT}`],
         plugins: { keel: keelPlugin },
         rules: { 'keel/public-surface': 'error' },
     },
@@ -778,9 +826,10 @@ const eslintConfig = [
     // fixture glob is named anyway (FIXTURE_FILES_GLOB, as every framework-invariant gate here does) so
     // a future non-`.test` helper added there is covered too. tests/support/tmp-dir.ts is the one place the raw call is
     // meant to live — it matches neither glob, and is ignored explicitly so that stays true if either
-    // glob is ever widened.
+    // glob is ever widened. `apps/*/tests/**` takes every extension because Playwright's default
+    // testMatch picks up a `.spec.mjs` or `.test.js` there too, and neither app's config narrows it.
     {
-        files: ['**/*.test.{ts,tsx}', 'apps/*/tests/**/*.{ts,tsx}', FIXTURE_FILES_GLOB],
+        files: [TEST_FILES, `apps/*/tests/**/*.${SRC_EXT}`, FIXTURE_FILES_GLOB],
         ignores: ['tests/support/tmp-dir.ts'],
         plugins: { keel: keelPlugin },
         rules: { 'keel/no-direct-mkdtemp': 'error' },

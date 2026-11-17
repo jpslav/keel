@@ -10,6 +10,7 @@ import {
 import {
     CompiledQuery,
     PostgresAdapter,
+    sql,
     PostgresIntrospector,
     PostgresQueryCompiler,
     type DatabaseConnection,
@@ -58,8 +59,10 @@ export interface RdsDataDialectConfig {
  * Statements outside a transaction are independent HTTPS calls, each autocommitted, and the Data API
  * resets the session (`DISCARD ALL`) between them — so session state exists only inside a transaction,
  * which is the one place keel ever sets it (`runWithTenant`'s one statement setting `role` and
- * `app.current_tenant`, both with `set_config(…, true)`). What it cannot do fails loudly (./rds-data-codec.ts, `unsupportedStatement`):
- * streaming, transaction control in SQL, session state outside a transaction.
+ * `app.current_tenant`, both with `set_config(…, true)`). What it cannot do fails loudly
+ * (./rds-data-codec.ts, `unsupportedStatement`): streaming, transaction control in SQL, session state
+ * outside a transaction (session-level advisory locks included — which is why the migrator runs in one
+ * transaction, ./db-data-api.ts).
  *
  * AUTHORED — CUTOVER (`data-api`): proven against real Postgres through a strict emulator
  * (./rds-data-emulator.ts, `pnpm test:contract`); never run against the Data API itself.
@@ -68,7 +71,7 @@ export class RdsDataDialect implements Dialect {
     constructor(private readonly config: RdsDataDialectConfig) {}
 
     createAdapter() {
-        return new PostgresAdapter()
+        return new RdsDataPostgresAdapter()
     }
     createDriver(): Driver {
         return new RdsDataDriver(this.config)
@@ -80,6 +83,39 @@ export class RdsDataDialect implements Dialect {
     createIntrospector(db: Kysely<any>) {
         return new PostgresIntrospector(db)
     }
+}
+
+/** Kysely's own Postgres migration-lock id, so a `pg` migrator and a Data API one exclude each other. */
+const MIGRATION_LOCK_ID = '3853314791062309107'
+
+/**
+ * Postgres's adapter with a TRANSACTION-scoped migration lock. Kysely's takes a session-level
+ * `pg_advisory_lock` on `db.connection()`, outside the migration transaction — which on the Data API is a
+ * separate autocommitted call whose lock the connection reset (`DISCARD ALL`) drops at once, so two
+ * migrators would not exclude each other at all. Here the lock is `pg_advisory_xact_lock`, taken inside
+ * the one transaction the migrations run in (./db-data-api.ts hands the Migrator a Transaction), and
+ * released by its commit or rollback, so there is nothing to release by hand — and no unlock statement to
+ * fail in an aborted transaction and replace the migration's own error.
+ */
+class RdsDataPostgresAdapter extends PostgresAdapter {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- kysely's DialectAdapter signature
+    override async acquireMigrationLock(db: Kysely<any>): Promise<void> {
+        await lockMigrations(db)
+    }
+
+    override async releaseMigrationLock(): Promise<void> {}
+}
+
+/**
+ * Takes the migration lock for the rest of the current transaction. ./db-data-api.ts calls it as the
+ * migration transaction's FIRST statement, because Kysely creates its own bookkeeping tables before it
+ * asks the adapter for the lock — and two migrators doing that inside two open transactions collide on
+ * the catalog, which aborts the loser's transaction (Kysely's tolerance for that race assumes autocommit).
+ * Advisory locks stack within a transaction, so the adapter taking it again is harmless.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any Kysely or Transaction will do
+export async function lockMigrations(db: Kysely<any>): Promise<void> {
+    await sql`select pg_advisory_xact_lock(${sql.raw(MIGRATION_LOCK_ID)})`.execute(db)
 }
 
 /** How many SQL texts' parameter types are remembered before the cache starts over. */
@@ -116,30 +152,52 @@ class RdsDataDriver implements Driver {
         if (!begun.transactionId) throw new Error('RDS Data API: BeginTransaction returned no transaction id')
         conn.transactionId = begun.transactionId
         // BeginTransaction takes no isolation level or access mode; Postgres accepts them as the
-        // transaction's first statement instead.
+        // transaction's first statement instead. If that fails, Kysely never learns the transaction began
+        // and will not roll it back — so this does, rather than strand it for the three idle minutes.
         const modes = [
             settings.isolationLevel ? `isolation level ${settings.isolationLevel}` : '',
             settings.accessMode ?? '',
         ].filter(Boolean)
-        if (modes.length > 0) await conn.executeQuery(CompiledQuery.raw(`set transaction ${modes.join(' ')}`))
+        if (modes.length > 0) {
+            try {
+                await conn.executeQuery(CompiledQuery.raw(`set transaction ${modes.join(' ')}`))
+            } catch (error) {
+                await this.rollbackTransaction(conn).catch(() => undefined)
+                throw error
+            }
+        }
     }
 
+    /**
+     * A commit can fail — a deferred constraint, a serialization failure, a transaction the Data API
+     * already timed out — and Kysely then calls rollbackTransaction. Whatever that call does must not
+     * replace the commit's own error, whose `code` callers act on. Two defences, either one sufficient:
+     * the id is cleared only after a successful commit (so the rollback finds the transaction, and a
+     * "gone" answer is swallowed), and a rollback with no id is a no-op. The contract suite's deferred-
+     * constraint case goes red only with both removed, which is the bug they replaced.
+     */
     async commitTransaction(connection: DatabaseConnection): Promise<void> {
-        const transactionId = takeTransaction(connection)
+        const conn = asConnection(connection)
+        const transactionId = conn.transactionId
+        if (!transactionId) throw new Error('RDS Data API: no transaction is open on this connection')
         const { resourceArn, secretArn } = this.config
         await this.call(new CommitTransactionCommand({ resourceArn, secretArn, transactionId }))
+        conn.transactionId = undefined
     }
 
     async rollbackTransaction(connection: DatabaseConnection): Promise<void> {
-        const transactionId = takeTransaction(connection)
+        const conn = asConnection(connection)
+        const transactionId = conn.transactionId
+        if (!transactionId) return
+        conn.transactionId = undefined
         const { resourceArn, secretArn } = this.config
         try {
             await this.call(new RollbackTransactionCommand({ resourceArn, secretArn, transactionId }))
         } catch (error) {
             // Already gone means already rolled back: the Data API rolls a transaction back itself when it
-            // idles for three minutes or reaches an hour. Rethrowing would only replace the error that
-            // made Kysely roll back with one that says nothing about it.
-            if (error instanceof Error && error.name === 'TransactionNotFoundException') return
+            // idles for three minutes or reaches an hour, and a failed commit ends it too. Rethrowing would
+            // only replace the error that made Kysely roll back with one that says nothing about it.
+            if (isTransactionGone(error)) return
             throw error
         }
     }
@@ -302,12 +360,10 @@ function asConnection(connection: DatabaseConnection): RdsDataConnection {
     return connection
 }
 
-function takeTransaction(connection: DatabaseConnection): string {
-    const conn = asConnection(connection)
-    const transactionId = conn.transactionId
-    if (!transactionId) throw new Error('RDS Data API: no transaction is open on this connection')
-    conn.transactionId = undefined
-    return transactionId
+/** TransactionNotFoundException by name, or by the message older Data API versions sent in a BadRequest. */
+function isTransactionGone(error: unknown): boolean {
+    if (!(error instanceof Error)) return false
+    return error.name === 'TransactionNotFoundException' || /transaction\b.*\bnot found/i.test(error.message)
 }
 
 function quoteIdent(name: string): string {

@@ -160,8 +160,9 @@ const SESSION_STATE = new Set(['set', 'reset', 'prepare', 'deallocate', 'discard
  *   outside a transaction would be committed by the call that sent it. `ROLLBACK TO` (a savepoint) is
  *   fine inside a transaction.
  * - outside a transaction, a statement that only changes session state (`SET`, `SET ROLE`, `PREPARE`,
- *   a temporary table, `set_config(…, false)`) is lost before the next call, because the Data API
- *   resets the connection with `DISCARD ALL` whenever it reuses it. `SET LOCAL` would be a no-op.
+ *   a temporary table, `set_config(…, false)`, a session-level advisory lock) is lost before the next
+ *   call, because the Data API resets the connection with `DISCARD ALL` whenever it reuses it. `SET LOCAL`
+ *   would be a no-op.
  *
  * A heuristic over the leading keyword, not a parser: it exists to fail loudly on the mistakes someone
  * would actually make, and it does not claim to catch an alias.
@@ -184,6 +185,9 @@ export function unsupportedStatement(sql: string, inTransaction: boolean): strin
         if (/set_config\s*\([^)]*,\s*false\s*\)/i.test(sql)) {
             return '`set_config(…, false)` outside a transaction is lost before the next Data API call — use set_config(…, true) inside a transaction'
         }
+        if (/pg_(?:try_)?advisory_lock(?:_shared)?\s*\(/i.test(sql)) {
+            return 'a session-level advisory lock outside a transaction is released by the connection reset before the next Data API call — take pg_advisory_xact_lock inside a transaction'
+        }
     }
     return null
 }
@@ -194,9 +198,11 @@ export function unsupportedStatement(sql: string, inTransaction: boolean): strin
 
 /**
  * One parameter, as a string the server parses with the type's own input function (the explicit CAST
- * in the SQL), or as a NULL. Mirrors what node-postgres sends for the same JS value, so a value means
- * the same thing on both drivers: a `Date` is its ISO instant, a plain object is JSON, an array is a
- * Postgres array literal, a byte array is `\x` hex.
+ * in the SQL), or as a NULL. Follows what node-postgres sends for the same JS value, so a value means
+ * the same thing on both transports: a plain object is JSON, an array is a Postgres array literal, a byte
+ * array is `\x` hex. A `Date` is the same instant, written in UTC where node-postgres writes local time
+ * with an offset — identical for a `timestamptz` (keel's only time type); a `date` or `timestamp` target
+ * would differ in a process not running in UTC, which Lambda is.
  */
 export function toSqlParameter(index: number, value: unknown): SqlParameter {
     const name = parameterName(index)
@@ -235,9 +241,11 @@ function arrayLiteral(values: readonly unknown[]): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * One result row, keyed by column label, each value decoded to what node-postgres would have returned
- * through keel's pg adapter (../real/db.ts): `int8`/`numeric` as strings, `json`/`jsonb` parsed,
- * `timestamptz` as a `Date`, `date` as the wire string, `bytea` as a Buffer, arrays element by element.
+ * One result row, keyed by column label, each value decoded to what node-postgres returns through keel's
+ * pg adapter (../real/db.ts): `int8`/`numeric` as strings (but `numeric[]` elements as numbers, as
+ * node-postgres has it), `json`/`jsonb` parsed, `timestamptz` as a `Date` (`±Infinity` for infinity),
+ * `date` as the wire string, `bytea` as a Buffer, arrays element by element. Types keel's migrations do
+ * not use and node-postgres parses into objects (`interval`) come back as the Data API's string.
  */
 export function decodeRow(record: readonly Field[], columns: readonly ColumnMetadata[]): Record<string, unknown> {
     const row: Record<string, unknown> = {}
@@ -259,19 +267,25 @@ function decodeArray(value: ArrayValue, baseType: string): unknown[] {
     if (value.arrayValues) return value.arrayValues.map((inner) => (inner ? decodeArray(inner, baseType) : null))
     const items: readonly unknown[] =
         value.stringValues ?? value.longValues ?? value.doubleValues ?? value.booleanValues ?? []
-    return items.map((item) => (item === null || item === undefined ? null : decodeScalar(item, baseType)))
+    // node-postgres parses `numeric[]` elements as floats while a bare `numeric` stays a string.
+    const elementType = baseType === 'numeric' ? 'float8' : baseType
+    return items.map((item) => (item === null || item === undefined ? null : decodeScalar(item, elementType)))
 }
 
 function decodeScalar(raw: unknown, type: string): unknown {
     if (raw === undefined || raw === null) return null
     switch (type) {
+        // PgJDBC names an auto-increment column `serial`/`bigserial`, not its storage type.
         case 'int2':
         case 'int4':
         case 'oid':
+        case 'serial':
+        case 'smallserial':
         case 'float4':
         case 'float8':
             return Number(raw)
         case 'int8':
+        case 'bigserial':
         case 'numeric':
         case 'money':
             return String(raw)
@@ -291,31 +305,42 @@ function decodeScalar(raw: unknown, type: string): unknown {
     }
 }
 
-const TIMESTAMP = /^(\d{4,})-(\d\d)-(\d\d)[ T](\d\d):(\d\d):(\d\d)(?:\.(\d+))?(Z|[+-]\d\d(?::?\d\d)?)?$/
+const TIMESTAMP = /^(\d{4,})-(\d\d)-(\d\d)[ T](\d\d):(\d\d):(\d\d)(?:\.(\d+))?(Z|[+-]\d\d(?::?\d\d)?)?( BC)?$/
 
 /**
  * The Data API returns `timestamptz` as a UTC wall-clock string (`2026-11-16 23:00:00.123456`), and
- * node-postgres returns a `Date`; this makes the first into the second. A `timestamp` without a zone is
- * read as local time, as node-postgres does. Sub-millisecond digits are truncated, as a `Date` holds no
- * more. Anything else (`infinity`) comes back as the string.
+ * node-postgres returns a `Date`; this makes the first into the second, as node-postgres would: `±Infinity`
+ * for `±infinity`, a negative year for `BC`, years below 100 as themselves (not 19xx). A `timestamp`
+ * without a zone is read as local time, as node-postgres does. Sub-millisecond digits are truncated, as a
+ * `Date` holds no more. Anything unparseable comes back as the string.
  */
-function parseTimestamp(value: string, utc: boolean): Date | string {
+function parseTimestamp(value: string, utc: boolean): Date | number | string {
+    if (value === 'infinity') return Infinity
+    if (value === '-infinity') return -Infinity
     const m = TIMESTAMP.exec(value)
     if (!m) return value
-    const [, y, mo, d, h, mi, s, frac, zone] = m
+    const [, y, mo, d, h, mi, s, frac, zone, bc] = m
+    const year = bc ? 1 - Number(y) : Number(y)
     const ms = Number((frac ?? '').padEnd(3, '0').slice(0, 3))
-    const parts = [Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s), ms] as const
-    if (zone && zone !== 'Z') {
-        const sign = zone.startsWith('-') ? -1 : 1
-        const [zh, zm] = zone
-            .slice(1)
-            .replace(':', '')
-            .match(/^(\d\d)(\d\d)?$/)!
-            .slice(1)
-        const offsetMinutes = sign * (Number(zh) * 60 + Number(zm ?? 0))
-        return new Date(Date.UTC(...parts) - offsetMinutes * 60_000)
+    const date = new Date(0)
+    if (utc || zone) {
+        // setUTCFullYear, not Date.UTC: Date.UTC reads a year below 100 as 19xx.
+        date.setUTCFullYear(year, Number(mo) - 1, Number(d))
+        date.setUTCHours(Number(h), Number(mi), Number(s), ms)
+        if (zone && zone !== 'Z') {
+            const sign = zone.startsWith('-') ? -1 : 1
+            const [zh, zm] = zone
+                .slice(1)
+                .replace(':', '')
+                .match(/^(\d\d)(\d\d)?$/)!
+                .slice(1)
+            date.setTime(date.getTime() - sign * (Number(zh) * 60 + Number(zm ?? 0)) * 60_000)
+        }
+        return date
     }
-    return utc || zone === 'Z' ? new Date(Date.UTC(...parts)) : new Date(...parts)
+    date.setFullYear(year, Number(mo) - 1, Number(d))
+    date.setHours(Number(h), Number(mi), Number(s), ms)
+    return date
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -115,3 +115,6 @@ notice by measuring.
   record of this change, not in `pnpm verify`; the unit tests, the check against Mantine's real stylesheet
   and the mutations are what stay. A Playwright spec that diffs a pruned and an unpruned build would need the
   unpruned build to exist, which doubles the demo build for one assertion.
+
+**2026-11-16 addendum:** `init-app` now says it, in `fix/init-app-demo-budget`; see the decision-log entry
+"`init-app` says the demo size budget is the adopter's".

@@ -191,6 +191,15 @@ It prints this list when it finishes, because these are the parts that take judg
   section lists each one and what to do about it.
 - **The cutover checklist** — [cutover-checklist.md](cutover-checklist.md) is yours: owners, dates, and
   the proof each row owes.
+- **The demo size budget** — `apps/<app>/package.json`'s `check:demo-size` passes the static demo's byte
+  budget. It is yours now: the starter ships it roomy on purpose, sized for an app's own screens and not as
+  a pacing gate (it still fails on gross bloat). Re-set it when you want a tighter gate, to what your app
+  measures plus the headroom you want, in its own commit. If you renamed the showcase instead
+  (`--app showcase`), its script passes no number: `DEFAULT_BUDGET_BYTES` in `scripts/check-demo-size.mjs`
+  is your budget, and it is thin on purpose. After an eject, the header and
+  `DEFAULT_BUDGET_BYTES` of `scripts/check-demo-size.mjs` still describe the showcase and are left as
+  they are, since rewriting a history risks false sentences; only the number you pass counts. When it
+  goes red, that script's header says what to look at first.
 - **The licence** — this template is MIT, which means the product you build on it is yours with no
   copyleft obligation. Your own product's licence is still a decision you make; nothing here makes it
   for you.
@@ -313,7 +322,7 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 `packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 37 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 42 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module

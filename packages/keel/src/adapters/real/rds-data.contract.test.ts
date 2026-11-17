@@ -10,7 +10,7 @@ import type { DbPort } from '../../ports/db'
 import { createRealDb } from './db'
 import { createRealDataApiDb } from './db-data-api'
 import { RdsDataDatabaseError, RdsDataUnsupportedError } from './rds-data-codec'
-import { RdsDataEmulator } from './rds-data-emulator'
+import { RdsDataEmulator, type EmulatedCall } from './rds-data-emulator'
 
 /**
  * keel's proofs THROUGH the RDS Data API driver (ADR-0002, addendum 2026-11-16): the dialect in
@@ -23,6 +23,8 @@ import { RdsDataEmulator } from './rds-data-emulator'
  */
 
 const DATABASE = 'keel_data_api_contract'
+/** A second, empty database: two migrators race on it to prove the migration lock. */
+const LOCK_DATABASE = 'keel_data_api_lock'
 const RESOURCE_ARN = 'arn:aws:rds:us-east-1:000000000000:cluster:emulated'
 const SECRET_ARN = 'arn:aws:secretsmanager:us-east-1:000000000000:secret:emulated'
 
@@ -30,7 +32,8 @@ let embedded: InstanceType<typeof EmbeddedPostgres> | null = null
 let emulator: RdsDataEmulator
 let dataApi: DbPort
 let viaPg: DbPort
-let migrationCalls: string[] = []
+let migrationCalls: EmulatedCall[] = []
+let databaseUrl: (name: string) => string
 
 beforeAll(async () => {
     let serverUrl = process.env.CONTRACT_DATABASE_URL
@@ -50,6 +53,10 @@ beforeAll(async () => {
 
     const server = createRealDb(serverUrl).getDb()
     try {
+        // The lock database must start empty every run (a reused live server would otherwise hand it over
+        // already migrated, and the race below would prove nothing).
+        await sql`DROP DATABASE IF EXISTS ${sql.id(LOCK_DATABASE)}`.execute(server)
+        await sql`CREATE DATABASE ${sql.id(LOCK_DATABASE)}`.execute(server)
         await sql`CREATE DATABASE ${sql.id(DATABASE)}`.execute(server)
     } catch (error) {
         if (!/already exists/.test(String(error))) throw error
@@ -57,8 +64,13 @@ beforeAll(async () => {
         await server.destroy()
     }
 
-    const url = new URL(serverUrl)
-    url.pathname = `/${DATABASE}`
+    const base = serverUrl
+    databaseUrl = (name: string) => {
+        const url = new URL(base)
+        url.pathname = `/${name}`
+        return url.toString()
+    }
+    const url = new URL(databaseUrl(DATABASE))
     emulator = new RdsDataEmulator(url.toString())
     dataApi = createRealDataApiDb({
         resourceArn: RESOURCE_ARN,
@@ -67,7 +79,7 @@ beforeAll(async () => {
         client: emulator,
     })
     await dataApi.migrateToLatest()
-    migrationCalls = emulator.calls.map((call) => call.operation)
+    migrationCalls = [...emulator.calls]
     viaPg = createRealDb(url.toString())
 }, 120_000)
 
@@ -88,9 +100,36 @@ async function callsDuring(fn: () => Promise<unknown>): Promise<typeof emulator.
 }
 
 describe('keel on the RDS Data API driver (contract, through the emulator)', () => {
-    test('the migrator ran every migration inside a Data API transaction', () => {
-        expect(migrationCalls).toContain('BeginTransaction')
-        expect(migrationCalls).toContain('CommitTransaction')
+    test('the migrator ran every migration in ONE Data API transaction, holding a transaction-scoped lock', () => {
+        const operations = migrationCalls.map((call) => call.operation)
+        expect(operations.filter((op) => op === 'BeginTransaction')).toHaveLength(1)
+        expect(operations.at(-1)).toBe('CommitTransaction')
+        const transactionId = migrationCalls[0]!.transactionId
+        expect(migrationCalls.every((call) => call.transactionId === transactionId)).toBe(true)
+        // Kysely's own lock is a session-level pg_advisory_lock on a separate connection, which the Data
+        // API's connection reset would drop at once; here the lock is transaction-scoped and comes FIRST.
+        expect(migrationCalls[1]!.sql).toMatch(/pg_advisory_xact_lock/)
+        const locks = migrationCalls.filter((call) => /advisory/.test(call.sql ?? ''))
+        expect(locks.every((call) => /pg_advisory_xact_lock/.test(call.sql!))).toBe(true)
+    })
+
+    test('two migrators racing on an empty database are serialised by that lock', async () => {
+        const racers = [
+            new RdsDataEmulator(databaseUrl(LOCK_DATABASE)),
+            new RdsDataEmulator(databaseUrl(LOCK_DATABASE)),
+        ]
+        const ports = racers.map((client) =>
+            createRealDataApiDb({ resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN, database: LOCK_DATABASE, client }),
+        )
+        try {
+            await Promise.all(ports.map((port) => port.migrateToLatest()))
+            const duplicates = await sql<{ name: string }>`
+                select name from kysely_migration group by name having count(*) > 1`.execute(ports[0]!.getDb())
+            expect(duplicates.rows).toEqual([])
+        } finally {
+            for (const port of ports) await port.getDb().destroy()
+            for (const racer of racers) await racer.close()
+        }
     })
 
     test('the full RLS proof suite passes through the Data API', async () => {
@@ -203,6 +242,24 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         await expect(sql`select repeat('x', 1100000) as big`.execute(db())).rejects.toThrow(/response size limit/)
     })
 
+    test('a commit that fails keeps its own error, code and all, instead of a rollback complaint', async () => {
+        await sql`drop table if exists data_api_deferred`.execute(viaPg.getDb())
+        await sql`create table data_api_deferred (
+            k text, constraint data_api_deferred_k unique (k) deferrable initially deferred)`.execute(viaPg.getDb())
+        const error = await db()
+            .transaction()
+            .execute(async (trx) => {
+                await sql`insert into data_api_deferred values ('same'), ('same')`.execute(trx)
+            })
+            .then(
+                () => null,
+                (e: unknown) => e,
+            )
+        expect(error).toBeInstanceOf(RdsDataDatabaseError)
+        expect((error as RdsDataDatabaseError).code).toBe('23505')
+        expect((error as RdsDataDatabaseError).constraint).toBe('data_api_deferred_k')
+    })
+
     test('a unique violation carries code 23505 and its constraint, as node-postgres errors do', async () => {
         const slug = `dup-${Date.now()}`
         await db().insertInto('tenants').values({ slug, name: 'first' }).execute()
@@ -219,9 +276,10 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         expect((error as RdsDataDatabaseError).constraint).toBe('tenants_slug_key')
     })
 
-    test('every column type keel uses reads back exactly as through the pg driver', async () => {
+    test('every column type keel uses is written and read back exactly as through the pg transport', async () => {
+        await sql`drop table if exists data_api_parity`.execute(viaPg.getDb())
         await sql`
-            create table if not exists data_api_parity (
+            create table data_api_parity (
                 k text primary key, u uuid, t text, j jsonb, ja jsonb, ts timestamptz, d date, da date[],
                 ta text[], ua uuid[], i int4, big int8, n numeric, f float8, b boolean, by bytea, nothing uuid
             )`.execute(viaPg.getDb())
@@ -246,8 +304,7 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         const insert = (port: DbPort, k: string) =>
             sql`insert into data_api_parity values (${k}, ${values.u}, ${values.t}, ${values.j}, ${values.ja},
                 ${values.ts}, ${values.d}, ${values.da}, ${values.ta}, ${values.ua}, ${values.i}, ${values.big},
-                ${values.n}, ${values.f}, ${values.b}, ${values.by}, ${values.nothing})
-                on conflict (k) do nothing`.execute(port.getDb())
+                ${values.n}, ${values.f}, ${values.b}, ${values.by}, ${values.nothing})`.execute(port.getDb())
         await insert(dataApi, 'written-via-data-api')
         await insert(viaPg, 'written-via-pg')
 
@@ -259,8 +316,14 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             )
         const fromDataApi = (await read(dataApi)).rows
         const fromPg = (await read(viaPg)).rows
+        // READS: both transports return the same two rows identically.
         expect(fromDataApi).toHaveLength(2)
         expect(fromDataApi).toEqual(fromPg)
+        // WRITES: the row the Data API wrote is the row pg wrote — so a value encoded wrongly on the way IN
+        // (which both transports would then read back the same wrong way) cannot pass.
+        const withoutKey = (row: Record<string, unknown>) =>
+            Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'k'))
+        expect(withoutKey(fromPg[0]!)).toEqual(withoutKey(fromPg[1]!))
     })
 
     // ---- negative controls: the emulator is strict, so the dialect's casts are what made the above pass ----
@@ -291,5 +354,41 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
                 }),
             ),
         ).rejects.toThrow(/Array parameters are not supported/)
+    })
+
+    test('control: the emulator resets every connection, so session state does not survive between calls', async () => {
+        const call = (statement: string) =>
+            emulator.send(
+                new ExecuteStatementCommand({
+                    resourceArn: RESOURCE_ARN,
+                    secretArn: SECRET_ARN,
+                    database: DATABASE,
+                    sql: statement,
+                    includeResultMetadata: true,
+                }),
+            ) as Promise<{ records?: { stringValue?: string; isNull?: boolean }[][] }>
+        await call("select set_config('keel.probe', 'leaked', false)")
+        const after = await call("select current_setting('keel.probe', true) as probe")
+        const field = after.records![0]![0]!
+        expect(field.isNull === true || field.stringValue === '').toBe(true)
+    })
+
+    test('control: the emulator returns database errors without a SQLSTATE, the worst case reported', async () => {
+        const error = await emulator
+            .send(
+                new ExecuteStatementCommand({
+                    resourceArn: RESOURCE_ARN,
+                    secretArn: SECRET_ARN,
+                    database: DATABASE,
+                    sql: 'insert into tenants (slug, name) select slug, name from tenants limit 1',
+                }),
+            )
+            .then(
+                () => null,
+                (e: unknown) => e as Error & { code?: string },
+            )
+        expect(error?.name).toBe('DatabaseErrorException')
+        expect(error?.message).not.toMatch(/SQLState/)
+        expect(error?.code).toBeUndefined()
     })
 })

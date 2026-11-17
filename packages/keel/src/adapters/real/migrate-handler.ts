@@ -1,4 +1,5 @@
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
+import { databaseTransport } from './database-transport'
 import { createRealDb } from './db'
 
 /**
@@ -17,7 +18,7 @@ import { createRealDb } from './db'
  * @public
  */
 export async function handler(): Promise<{ ok: true }> {
-    if (process.env.DATABASE_TRANSPORT === 'data-api') {
+    if (databaseTransport() === 'data-api') {
         const { DATABASE_CLUSTER_ARN, DATABASE_SECRET_ARN, DATABASE_NAME } = process.env
         if (!DATABASE_CLUSTER_ARN || !DATABASE_SECRET_ARN || !DATABASE_NAME) {
             throw new Error('DATABASE_CLUSTER_ARN, DATABASE_SECRET_ARN and DATABASE_NAME must be set for the Data API')
