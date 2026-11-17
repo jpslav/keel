@@ -14,6 +14,16 @@
 export const DATABASE_TRANSPORTS = ['pg', 'data-api'] as const
 export type DatabaseTransport = (typeof DATABASE_TRANSPORTS)[number]
 
+/**
+ * The database variables each transport requires, each mapped to its cutover row. `assertRealEnv`
+ * (./index.ts) checks them at boot, and `infra/check-shapes.ts` checks the deployment sets them, by
+ * importing this — so the runtime and the infra draft cannot drift apart on a name.
+ */
+export const DATABASE_ENV: Record<DatabaseTransport, Record<string, string>> = {
+    pg: { DATABASE_URL: 'cloud-accounts' },
+    'data-api': { DATABASE_CLUSTER_ARN: 'data-api', DATABASE_SECRET_ARN: 'data-api', DATABASE_NAME: 'data-api' },
+}
+
 export function databaseTransport(): DatabaseTransport {
     const value = process.env.DATABASE_TRANSPORT ?? 'pg'
     if (!(DATABASE_TRANSPORTS as readonly string[]).includes(value)) {

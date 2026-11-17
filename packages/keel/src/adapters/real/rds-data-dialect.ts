@@ -24,6 +24,7 @@ import {
 import {
     castPlaceholder,
     decodeRow,
+    describableSql,
     leadingKeyword,
     normalizeDatabaseError,
     RdsDataUnsupportedError,
@@ -285,11 +286,26 @@ class RdsDataDriver implements Driver {
 
         const name = `keel_describe_${randomUUID().replace(/-/g, '')}`
         const describe = async (txId: string): Promise<readonly string[]> => {
-            await this.statement(`PREPARE ${name} AS ${sql}`, txId)
+            await this.statement(`PREPARE ${name} AS ${describableSql(sql)}`, txId)
+            // format_type(t, -1), not t::text: regtype prints `character` and `bit`, which a CAST reads as
+            // char(1) and bit(1). And a domain is walked down to its base type first: an explicit cast to a
+            // domain over char(3) or varchar(3) truncates, where node-postgres's input path errors on the
+            // same value. Cast to the length-free base, and storing the value in a column (or passing it to
+            // a function) checks length and constraints as it does for node-postgres. An explicit
+            // `::domain` cast written in the SQL still truncates: an accepted limit (ADR-0002's addendum).
             const out = await this.statement(
-                // format_type(t, -1), not t::text: regtype prints `character` and `bit`, which a CAST reads as
-                // char(1) and bit(1) and silently truncates to; format_type gives `bpchar` and `"bit"`.
-                `SELECT array(SELECT format_type(t, -1) FROM unnest(parameter_types) WITH ORDINALITY AS u(t, i) ORDER BY i) AS types FROM pg_prepared_statements WHERE name = '${name}'`,
+                `WITH RECURSIVE params AS (
+                    SELECT u.i, u.t::oid AS oid FROM pg_prepared_statements p,
+                        unnest(p.parameter_types) WITH ORDINALITY AS u(t, i) WHERE p.name = '${name}'
+                ), walk AS (
+                    SELECT i, oid FROM params
+                    UNION ALL
+                    SELECT w.i, ty.typbasetype FROM walk w JOIN pg_type ty ON ty.oid = w.oid WHERE ty.typtype = 'd'
+                )
+                SELECT array(
+                    SELECT format_type(w.oid, -1) FROM walk w JOIN pg_type ty ON ty.oid = w.oid
+                    WHERE ty.typtype <> 'd' ORDER BY w.i
+                ) AS types`,
                 txId,
             )
             await this.statement(`DEALLOCATE ${name}`, txId)
@@ -363,19 +379,31 @@ class RdsDataDriver implements Driver {
 
 class RdsDataConnection implements DatabaseConnection {
     transactionId: string | undefined
-    /** A statement in the open transaction failed after reaching the database (see commitTransaction). */
+    /**
+     * A statement in the open transaction failed, so Postgres has likely aborted it (see commitTransaction).
+     * Not set for a refusal made before any call, nor for the Data API's own request validation, neither of
+     * which reaches the database. Cleared by a successful `ROLLBACK TO SAVEPOINT`, Postgres's way back.
+     */
     failed = false
 
     constructor(private readonly driver: RdsDataDriver) {}
 
     async executeQuery<R>(compiledQuery: CompiledQuery): Promise<QueryResult<R>> {
+        let result: QueryResult<unknown>
         try {
-            return (await this.driver.execute(compiledQuery, this.transactionId)) as QueryResult<R>
+            result = await this.driver.execute(compiledQuery, this.transactionId)
         } catch (error) {
-            // Refused before any call was made: the transaction is untouched.
-            if (this.transactionId && !(error instanceof RdsDataUnsupportedError)) this.failed = true
+            const neverReachedDatabase =
+                error instanceof RdsDataUnsupportedError ||
+                (error instanceof Error && error.name === 'ValidationException')
+            if (this.transactionId && !neverReachedDatabase) this.failed = true
             throw error
         }
+        // Inside a transaction only `ROLLBACK TO SAVEPOINT` gets past unsupportedStatement with this keyword,
+        // and when it succeeds the transaction is usable again — whether Kysely's savepoint API sent it or
+        // raw SQL did (inside db.transaction() and withTenant, raw SQL is the only way to send it).
+        if (this.transactionId && leadingKeyword(compiledQuery.sql) === 'rollback') this.failed = false
+        return result as QueryResult<R>
     }
 
     // eslint-disable-next-line require-yield -- an async generator that refuses before its first chunk

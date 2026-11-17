@@ -132,8 +132,12 @@ untyped, so Postgres infers `$1` from context. The Data API cannot do that: an u
 shape once per process and reads Postgres's own inference from `pg_prepared_statements.parameter_types`.
 It then sends every value as a string inside an explicit `CAST(:name AS <type>)`. That reproduces
 node-postgres's semantics rather than approximating them. It is also how arrays get through at all: the
-Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. A warm process pays
-nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
+Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. The type in the cast
+never carries a length, and a domain is replaced by the type it is built on. An explicit cast to `char(3)`,
+`bit(4)` or a domain over `varchar(3)` truncates or pads a value that does not fit, where node-postgres's
+untyped parameter is checked on assignment and refused. Casting to the bare base type leaves that check to
+the same assignment. So a too-long value stored in a column or passed to a function fails the same way on
+both transports, and a domain's CHECK still runs. A warm process pays nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
 and five outside one, which also needs its own short transaction.
 
 **What the Data API cannot do fails loudly.** The dialect refuses, before calling, anything it cannot honour:
@@ -157,7 +161,8 @@ AWS's own limits surface as errors, never as truncation:
 
 - a 1 MiB response cap;
 - a 45-second call timeout;
-- a transaction that ends after three idle minutes or one hour;
+- a transaction that ends after three idle minutes or one hour (the `BeginTransaction` API reference;
+  the doc comment in `@aws-sdk/client-rds-data` 3.1169.0 still says 24 hours);
 - SQL of at most 65,536 characters;
 - a paused cluster that takes more than about 15 seconds to resume, which the dialect stops retrying.
 
@@ -185,6 +190,22 @@ lock. Nothing in
 `pnpm dev` changes: dev, the e2e suite and the static demo still run on pglite fakes. The emulator is a
 contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
 emulators".
+
+**Some limits are accepted rather than closed.** None of them arises in keel's own SQL.
+
+- **The inferred types are cached for the life of the process.** A migration that changes a parameter's
+  type while an old process keeps serving would be answered with the old type. Deploys replace processes,
+  so after an out-of-band schema change, restart the app.
+- **An explicit cast to a length-bearing domain, written in the SQL, truncates.** In
+  `${value}::code3`, where `code3` is a domain over `char(3)`, the value reaches that cast already
+  converted to the base type. The cast is explicit, so it truncates, where node-postgres refuses the value.
+  Storing the value in a domain column, or passing it to a function, refuses it on both transports.
+- **A colon directly before a name, outside a literal, is read as a parameter.** That is how the
+  emulator models the Data API, and step 2 of `docs/runbooks/data-api.md` checks it on AWS. The dialect
+  parenthesizes its own placeholders, so `a[1:$1]` works, but an array slice bounded by a column,
+  `a[lo:hi]`, fails loudly. Write `a[lo : hi]`.
+- **A statement PREPARE cannot take, such as `CALL proc($1)`,** cannot be described, so with parameters
+  it fails loudly. An EXPLAIN is described by the statement it explains.
 
 **Not proven, and owed by the `data-api` cutover row:**
 

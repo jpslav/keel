@@ -13,6 +13,15 @@ import type { ArrayValue, ColumnMetadata, Field, SqlParameter } from '@aws-sdk/c
  * `CAST(:name AS <that type>)`. That reproduces node-postgres's semantics instead of approximating them
  * with per-value guesses, and it is also what lets an array reach the server at all: the Data API
  * rejects array parameters, but an array literal cast to `uuid[]` is a string.
+ *
+ * The type in that CAST never carries a length, and a domain is replaced by the type it is built on.
+ * An explicit cast to `char(3)`, `bit(4)` or a domain over `varchar(3)` truncates or pads a value that
+ * does not fit, where node-postgres's untyped parameter is checked against the column on assignment and
+ * refused. Casting to the bare base type leaves that check to the same assignment, so a value that is too
+ * long fails the same way on both transports when it is stored in a column or passed to a function, and a
+ * domain's own CHECK still runs. An explicit cast to such a domain written in the SQL itself
+ * (`${value}::code3`) is the exception: the value meets an explicit cast and is truncated, where
+ * node-postgres refuses it. That limit is accepted (ADR-0002's addendum of 2026-11-16).
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -114,12 +123,11 @@ function blockCommentEnd(sql: string, start: number): number {
     return sql.length
 }
 
-/** The statement's first keyword, lower-cased, past leading whitespace, comments and parentheses. */
-export function leadingKeyword(sql: string): string {
-    let i = 0
+/** The index past any whitespace and comments (and opening parentheses, if asked) from `i` on. */
+function skipBlank(sql: string, i: number, parentheses: boolean): number {
     while (i < sql.length) {
         const ch = sql[i]!
-        if (/\s|\(/.test(ch)) {
+        if (/\s/.test(ch) || (parentheses && ch === '(')) {
             i += 1
         } else if (ch === '-' && sql[i + 1] === '-') {
             const end = sql.indexOf('\n', i)
@@ -130,16 +138,57 @@ export function leadingKeyword(sql: string): string {
             break
         }
     }
+    return i
+}
+
+/** The statement's first keyword, lower-cased, past leading whitespace, comments and parentheses. */
+export function leadingKeyword(sql: string): string {
+    const i = skipBlank(sql, 0, true)
     return (/^[A-Za-z_]+/.exec(sql.slice(i))?.[0] ?? '').toLowerCase()
 }
 
 /** The Data API names parameters; these are the names the rewritten SQL refers to. */
 const parameterName = (index: number): string => `kp${index}`
 
-/** `CAST(:kpN AS <type>)` — or the bare name when Postgres could not say (`unknown`). */
+/**
+ * `(CAST(:kpN AS <type>))` — or `(:kpN)` when the describe step gave no usable type (none, or `unknown`).
+ * Parenthesized, because a
+ * placeholder can follow a colon (`arr[1:$1]`), and `1:CAST(` would make the Data API read a parameter
+ * named `CAST`.
+ */
 export function castPlaceholder(index: number, type: string | undefined): string {
     const name = `:${parameterName(index)}`
-    return type && type !== 'unknown' ? `CAST(${name} AS ${type})` : name
+    return type && type !== 'unknown' ? `(CAST(${name} AS ${type}))` : `(${name})`
+}
+
+/**
+ * The statement to PREPARE when asking Postgres for `sql`'s parameter types. PREPARE refuses EXPLAIN, but
+ * an EXPLAIN's parameters are its statement's, numbered the same, so the prefix (and its options) is
+ * dropped for the question and kept for the statement itself.
+ */
+export function describableSql(sql: string): string {
+    let i = skipBlank(sql, 0, false)
+    const explain = /^explain\b/i.exec(sql.slice(i))
+    if (!explain) return sql
+    i += explain[0].length
+    for (;;) {
+        i = skipBlank(sql, i, false)
+        const rest = sql.slice(i)
+        const legacy = /^(?:analy[sz]e|verbose)\b/i.exec(rest)
+        if (legacy) {
+            i += legacy[0].length
+            continue
+        }
+        // `(` opens an option list unless it opens the statement itself: `explain (select …)`. An option
+        // list holds no parentheses of its own.
+        if (rest.startsWith('(') && !/^\(\s*(?:select|with|values|table|\()/i.test(rest)) {
+            const close = sql.indexOf(')', i)
+            if (close === -1) return sql
+            i = close + 1
+            continue
+        }
+        return sql.slice(i)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -201,8 +250,8 @@ export function unsupportedStatement(sql: string, inTransaction: boolean): strin
  * in the SQL), or as a NULL. Follows what node-postgres sends for the same JS value, so a value means
  * the same thing on both transports: a plain object is JSON, an array is a Postgres array literal, a byte
  * array is `\x` hex. A `Date` is the same instant, written in UTC where node-postgres writes local time
- * with an offset — identical for a `timestamptz` (keel's only time type); a `date` or `timestamp` target
- * would differ in a process not running in UTC, which Lambda is.
+ * with an offset. That is identical for a `timestamptz` (keel's only instant type; its dates travel as
+ * strings); a `date` or `timestamp` target would differ in a process not running in UTC, which Lambda is.
  */
 export function toSqlParameter(index: number, value: unknown): SqlParameter {
     const name = parameterName(index)
