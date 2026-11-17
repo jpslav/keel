@@ -4,6 +4,7 @@ import type { AuthUser } from '../ports/auth'
 import { ForbiddenError } from '../ports/errors'
 import type { ServiceIdentity } from '../service-auth/verify'
 import type { AbilityActor } from '../core/abilities'
+import type { OrgIdentity } from '../db/org-lookup'
 import type { MemberStanding } from '../ports/auth'
 import {
     abilityActorFromCredential,
@@ -178,7 +179,10 @@ describe('abilityActorFromCredential (a person who arrived without a session)', 
             },
         }
     }
-    const depot = { id: 'org-depot', slug: 'depot' }
+    // Test-only: an OrgIdentity is branded so that only orgIdentityForSlug makes one; tests that run
+    // without a database cast one here, deliberately.
+    const orgIdentity = (id: string, slug: string) => ({ id, slug }) as OrgIdentity
+    const depot = orgIdentity('org-depot', 'depot')
     const badge = { kind: 'fixture-badge', id: 'badge-7' } as const
 
     test('is the PERSON, with the standing the auth port reports and the credential that proved them', async () => {
@@ -228,7 +232,7 @@ describe('abilityActorFromCredential (a person who arrived without a session)', 
 
     test('a member of ANOTHER org is no member here', async () => {
         const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
-        const annex = { id: 'org-annex', slug: 'annex' }
+        const annex = orgIdentity('org-annex', 'annex')
         expect(
             await abilityActorFromCredential(w.auth, { userId: 'fixture-lead', org: annex, credential: badge }),
         ).toBeNull()
@@ -245,7 +249,7 @@ describe('abilityActorFromCredential (a person who arrived without a session)', 
 
     test('never wields the staff superpower, even acting in the staff org', async () => {
         const w = world({})
-        const steward = { id: 'org-steward', slug: staffOrgSlug }
+        const steward = orgIdentity('org-steward', staffOrgSlug)
         w.auth.getMember = async () => ({ role: 'admin', restricted: false })
         const actor = await abilityActorFromCredential(w.auth, {
             userId: 'fixture-lead',

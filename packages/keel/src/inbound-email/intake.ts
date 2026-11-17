@@ -1,6 +1,7 @@
 import type { Credential } from '../core/abilities'
 import { normalizeEmailAddress, normalizeInboundBody, parseInboundRecipient } from '../core/inbound-email'
 import { recordAuditEvent } from '../db/audit'
+import { orgIdentityForSlug } from '../db/org-lookup'
 import {
     insertInboundEmail,
     resolveOrgBySlugGlobally,
@@ -90,7 +91,10 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         return { stored: false, id: null, status: 'unmatched', handler: null, reason: 'unparseable recipient' }
     }
     const org = await resolveOrgBySlugGlobally(db, parsed.orgSlug)
-    if (!org) {
+    // The handler's `ctx.org` comes from orgIdentityForSlug, the one producer of an OrgIdentity, inside the
+    // tenant just resolved: a second indexed read, so no code here pairs an id with a slug by hand.
+    const identity = org ? await orgIdentityForSlug(db, org.tenantId, org.orgSlug) : null
+    if (!org || !identity) {
         return {
             stored: false,
             id: null,
@@ -129,7 +133,7 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
             tenantId: org.tenantId,
             orgId: org.orgId,
             orgSlug: org.orgSlug,
-            org: { id: org.orgId, slug: org.orgSlug },
+            org: identity,
             fromEmail,
             subject,
             bodyText,

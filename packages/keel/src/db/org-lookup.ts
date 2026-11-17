@@ -19,14 +19,21 @@ export async function orgIdForSlug(db: DbPort, tenantId: string, orgSlug: string
     return row?.id ?? null
 }
 
+/** The brand only this module writes: a value of {@link OrgIdentity} came from {@link orgIdentityForSlug}. */
+declare const fromOneRow: unique symbol
+
 /**
  * An org's uuid AND slug, read together from ONE `organizations` row. `abilityActorFromCredential` reads a
  * person's standing by slug (the auth port names orgs that way) and applies it to the id every sameOrg
  * check compares, so a pair taken from two places could carry one org's role into another's.
+ *
+ * BRANDED: {@link orgIdentityForSlug} is the only producer, so a hand-paired `{ id, slug }` literal does
+ * not compile where one is expected. (A test may cast one; an app that casts has chosen to.)
  */
 export interface OrgIdentity {
-    id: string
-    slug: string
+    readonly id: string
+    readonly slug: string
+    readonly [fromOneRow]: true
 }
 
 /** {@link OrgIdentity} for a slug within a tenant, from one row; null when the tenant has no such org. */
@@ -39,7 +46,7 @@ export async function orgIdentityForSlug(db: DbPort, tenantId: string, orgSlug: 
         .where('tenant_id', '=', tenantId)
         .where('slug', '=', orgSlug)
         .executeTakeFirst()
-    return row ? { id: row.id, slug: row.slug } : null
+    return row ? ({ id: row.id, slug: row.slug } as OrgIdentity) : null
 }
 
 /**
