@@ -7,6 +7,14 @@ import { createRealDb } from './db'
  * contract tests use. Invoked by the CD pipeline before each release shifts traffic.
  * AUTHORED — CUTOVER (`cloud-accounts`; `data-api` for the Data API path).
  *
+ * ROLES. The credentials here are the migrator's, and migration 0015 grants that role the switch to
+ * `app_user`. If the application connects as a DIFFERENT role, that role needs the switch too. It cannot
+ * grant itself that; this role, which created `app_user` and so holds ADMIN on it, or any other role with
+ * ADMIN on `app_user`, runs:  GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE;
+ * A SECOND database's owner on the same cluster (staging beside production) has no ADMIN on the
+ * `app_user` the first one created: its run stops at 0015 and prints the GRANT to run; see the same row.
+ * (the `db-role-not-superuser` row in docs/cutover-checklist.md; ADR-0004, 2026-11-16 addendum).
+ *
  * The transport follows the app's switch (`DATABASE_TRANSPORT`, ./index.ts), and the Data API one is a
  * dynamic import here too. On the Data API, Kysely's Migrator runs every pending migration in ONE Data
  * API transaction, as it does on `pg` (Postgres DDL is transactional). Two limits follow, and both fail

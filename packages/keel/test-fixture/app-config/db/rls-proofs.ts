@@ -16,6 +16,7 @@ import { runWithTenant } from 'keel/db/with-tenant'
  */
 export const appRlsProofs: RlsProofSuite = async ({
     db,
+    appDb,
     dbPort,
     expect,
     alphaTenantId,
@@ -53,10 +54,10 @@ export const appRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects under RLS
-    const ours = await runWithTenant(db, alphaTenantId, (trx) => trx.selectFrom('dockets').selectAll().execute())
+    const ours = await runWithTenant(appDb, alphaTenantId, (trx) => trx.selectFrom('dockets').selectAll().execute())
     expect(ours.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(ours.filter((r) => r.tenant_id === alphaTenantId).length).toBe(2)
-    const theirs = await runWithTenant(db, demoTenantId, (trx) => trx.selectFrom('dockets').selectAll().execute())
+    const theirs = await runWithTenant(appDb, demoTenantId, (trx) => trx.selectFrom('dockets').selectAll().execute())
     expect(theirs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
     expect(theirs.filter((r) => r.tenant_id === demoTenantId).length).toBe(1)
 
@@ -64,7 +65,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // the org id is a real org — the tenant, not the org, is the RLS boundary.
     let writeRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('dockets')
                 .values({
@@ -85,7 +86,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // docket can never be erased even by a correctly-scoped caller.
     let deleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM dockets`.execute(trx)
@@ -115,7 +116,7 @@ export const appRlsProofs: RlsProofSuite = async ({
         })
         .returning('id')
         .execute()
-    const dated = await runWithTenant(db, alphaTenantId, (trx) =>
+    const dated = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx
             .selectFrom('dockets')
             .select(['due_on', sql<string[]>`ARRAY[due_on, due_on + 1]`.as('due_window')])
@@ -168,7 +169,7 @@ export const appRlsProofs: RlsProofSuite = async ({
         .execute()
     // Rows are labelled by their position above; look the ids up rather than trust a multi-row
     // RETURNING order.
-    const orderedRows = await runWithTenant(db, alphaTenantId, (trx) =>
+    const orderedRows = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('dockets').select(['id', 'label']).where('org_id', '=', orderOrg!.id).execute(),
     )
     const indexById = new Map(orderedRows.map((r) => [r.id, Number(r.label.replace('ordered-', ''))]))
@@ -199,7 +200,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     }
 
     // (a) the tie is real: six dockets, but only four distinct last_touched_at values.
-    const touchStamps = await runWithTenant(db, alphaTenantId, (trx) =>
+    const touchStamps = await runWithTenant(appDb, alphaTenantId, (trx) =>
         trx.selectFrom('dockets').select('last_touched_at').where('org_id', '=', orderOrg!.id).execute(),
     )
     expect(touchStamps.length).toBe(6)
