@@ -1633,6 +1633,32 @@ the panel is the element that carries it.
   `@/*` import could sit in keel's fixture. In the typescript-eslint this repo pins (8.72) its specifier is
   `node.source`; print the AST before trusting that shape on another version.
 
+## Storage `head` and `copy`'s `ifMatch` (2026-11-17, `storage-head`)
+
+- **A HEAD error is a bare status.** AWS's HeadObject reference says the response is the GET's without a body, so an
+  error is "a generic code, such as 400, 403, 404, 405, 412 or 304" and "it's not possible to retrieve the exact
+  exception". The SDK has a `NotFound` class for it (`@aws-sdk/client-s3` 3.1096.0), and `head` maps that and
+  `NoSuchKey`. The same bareness is why a missing bucket cannot be told from a missing key on a HEAD.
+- **The ETag is checked on the bytes about to be published.** The fake stages the copy, hashes the STAGED file and
+  compares it with `ifMatch`, so no replacement of the source can put other bytes under the old etag. A mutation
+  that checks the source after staging instead survives, and should: it differs only when B is staged and the
+  source is back to A before the check (an ABA swap). A race with a writer that goes A, B, A did not catch it in 5
+  runs each at 9-byte and 1 MB bodies (the same test with 8 MB bodies failed even on the correct code, which was not
+  investigated), so the test's comment says what it does not pin. The staged check is the strict form by
+  construction, so it stays.
+- **Opening a directory read-only succeeds, and reading it fails.** `head` of a directory first passed its test by an
+  accident, most likely because the sidecar's `ENOENT` won the `Promise.all` and the catch turned it into `null`. Removing the
+  `isFile` guard survived until the test put a sidecar file beside the directory, so that only "not a regular file"
+  could say no. The mutant then failed 3 runs of 3.
+- **A race test needs the loser to happen.** The conditional copy loses to a simultaneous `put` of the source in
+  roughly 3% to 20% of rounds here (3 refusals took 18 to 107 rounds, five runs). Delaying the replacement by 0 to 7
+  event-loop turns to spread it across the copy made that rarer (50 to 257 rounds for 3), so it was dropped. The test runs
+  up to 1000 rounds until 3 refusals have happened, checks the invariant every round (the destination is absent or
+  holds the OLD bytes, never the new ones under the old etag), and requires that at least one refusal happened.
+  Vitest hides the output of a passing test, so the counts were written to a file to measure this.
+- **`copyFile` does not carry the modification time over**: the copy's time is the time of the copy (checked on this
+  machine), so the fake's `lastModified` after a copy is its own, as a new object's is.
+
 ## A superuser hides every grant a role switch needs (2026-11-16, `fix/grant-app-user-to-owner`)
 
 - **Every contract suite connected as `postgres`, so none of them could see that the deployed role may
