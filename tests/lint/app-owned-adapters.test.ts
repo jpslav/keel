@@ -117,6 +117,11 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         ['a quoted destructuring key', "const { 'APP_MODE': mode } = process.env\nexport { mode }\n"],
         ['destructuring assignment', 'let mode\n;({ APP_MODE: mode } = process.env)\nexport { mode }\n'],
         ['a parameter default', 'export function mode({ DEMO_MODE } = process.env) {\n    return DEMO_MODE\n}\n'],
+        ['a template-literal destructuring key', 'const { [`APP_MODE`]: mode } = process.env\nexport { mode }\n'],
+        // `env` itself spelled as a key: the same object, so the same ban
+        ['env as a quoted key', "export const mode = process['env'].APP_MODE\n"],
+        ['env as a template-literal key', 'export const mode = process[`env`][`DEMO_MODE`]\n'],
+        ['destructuring env as a quoted key', "const { E2E_BUILD } = process['env']\nexport const e2e = E2E_BUILD\n"],
     ])('a real adapter may not read the run mode itself (%s)', async (_form, code) => {
         expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, code), RUN_MODE)).toBe(1)
     })
@@ -147,9 +152,20 @@ describe('process.env: an app’s real adapters read their own configuration, ne
         `${APP}/config/params.ts`,
     ])('%s may not read process.env at all', async (file) => {
         expect(fired(await lint(file, 'export const storeArn = process.env.KVS_ARN\n'), PROCESS_ENV)).toBe(1)
+        // the same name spelled as a key
+        expect(fired(await lint(file, "export const storeArn = process['env'].KVS_ARN\n"), PROCESS_ENV)).toBe(1)
+        expect(fired(await lint(file, 'export const storeArn = process[`env`].KVS_ARN\n'), PROCESS_ENV)).toBe(1)
         // the same object under another name
         const imported = "import { env } from 'node:process'\nexport const storeArn = env.KVS_ARN\n"
         expect(fired(await lint(file, imported), PROCESS_ENV)).toBe(1)
+    })
+
+    // A template key is the name only when it has no expressions; `env${x}` could be anything.
+    it('a template key with an expression in it is not the name', async () => {
+        const notEnv = 'const x = 1\nexport const v = process[`env${x}`]\n'
+        expect(fired(await lint(`${APP}/src/domain/kv.ts`, notEnv), PROCESS_ENV)).toBe(0)
+        const notRunMode = 'const x = 1\nexport const m = process.env[`APP_MODE${x}`]\n'
+        expect(fired(await lint(`${APP}/src/adapters/real/kv.ts`, notRunMode), RUN_MODE)).toBe(0)
     })
 })
 

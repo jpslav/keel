@@ -143,20 +143,29 @@ const appCodePattern = {
 // one by one dropped the computed form for every route, page and component (the a11y block below, which
 // is the last no-restricted-syntax block for those files, so its list was the one that counted), and
 // `db['getDb']()` passed lint in a route handler although the two blocks before it listed the selector.
+//
+// A KEY can name something three ways, and every selector here that aims at a name (getDb, `env` on
+// `process`, a run-mode variable) accepts all three: an identifier (`.name`, `{ name }`), a string
+// (`['name']`, `{ 'name': x }`), or a template literal with no expressions. `path` is the esquery path to
+// the key; `name` is a quoted string or a regex. `quotedKey` leaves out the identifier because in a
+// computed access an identifier is a VARIABLE (`db[k]`), not the name.
+const quotedKey = (path, name) =>
+    `:matches([${path}.value=${name}], [${path}.expressions.length=0][${path}.quasis.0.value.cooked=${name}])`
+const anyKey = (path, name) =>
+    `:matches([${path}.name=${name}], [${path}.value=${name}], ` +
+    `[${path}.expressions.length=0][${path}.quasis.0.value.cooked=${name}])`
 const getDbSelector = {
     selector: 'MemberExpression[property.name="getDb"]',
     message:
         'Route/UI code must not use the raw db handle — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
 const getDbComputedSelector = {
-    selector:
-        'MemberExpression[computed=true]:matches([property.value="getDb"], [property.quasis.0.value.cooked="getDb"])',
+    selector: `MemberExpression[computed=true]${quotedKey('property', '"getDb"')}`,
     message:
         "Reaching the raw db handle as db['getDb'] bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).",
 }
 const getDbDestructureSelector = {
-    selector:
-        'ObjectPattern > Property:matches([key.name="getDb"], [key.value="getDb"], [key.quasis.0.value.cooked="getDb"])',
+    selector: `ObjectPattern > Property${anyKey('key', '"getDb"')}`,
     message:
         'Destructuring getDb out of the db port bypasses the same rule — use db.withTenant() (or a keel/db helper) so RLS tenant context is set (ADR-0004).',
 }
@@ -164,10 +173,11 @@ const getDbSelectors = [getDbSelector, getDbComputedSelector, getDbDestructureSe
 // Also the import form — `import { env }`, or a default or namespace import, from `process`/`node:process`
 // — which reads the same object under another name (a type-only import, or `import { cwd }`, does not).
 // Nothing in the tree uses it. It closes that one form: re-exporting `env` from `node:process`, or
-// `const { env } = process`, still gets past, as any alias does.
+// `const { env } = process`, still gets past, as any alias does (`globalThis.process.env` included).
+// `process['env']` is not an alias, it is the same name spelled as a key (anyKey).
 const processEnvSelector = {
     selector:
-        ':matches(MemberExpression[object.name="process"][property.name="env"], ' +
+        `:matches(MemberExpression[object.name="process"]${anyKey('property', '"env"')}, ` +
         'ImportDeclaration[importKind!="type"][source.value=/^(node:)?process$/] > ' +
         ':matches(ImportSpecifier[imported.name="env"], ImportDefaultSpecifier, ImportNamespaceSpecifier))',
     message:
@@ -179,10 +189,11 @@ const processEnvSelector = {
 // An app's real adapter may read its OWN configuration from process.env, but never the run mode. That is
 // keel's: `appMode`/`isSimulated`/`isDemoMode` from keel/adapters/index, whose import also runs the
 // fail-closed production guard. A second reader of APP_MODE can disagree with it (keel treats a legacy
-// `APP_MODE=fake` as simulated) and never runs the guard. Matched: `process.env.X`, `process.env['X']`,
-// ``process.env[`X`]``, and destructuring in a declaration, an assignment or a parameter default (quoted
-// keys included). As with the getDb selectors above, no lint rule chases an alias
-// (`const env = process.env; env.APP_MODE`, or `env` imported from `node:process`).
+// `APP_MODE=fake` as simulated) and never runs the guard. Matched: the variable read as a key of `process.env`
+// in any of anyKey's three spellings, with `env` itself in any of them too (`process['env'].APP_MODE`), and
+// destructuring in a declaration, an assignment or a parameter default. As with the getDb selectors above,
+// no lint rule chases an alias (`const env = process.env; env.APP_MODE`, or `env` imported from
+// `node:process`).
 const RUN_MODE_ENV = '/^(APP_MODE|DEMO_MODE|E2E_BUILD)$/'
 const runModeEnvMessage =
     "Run mode is keel's — import isSimulated/isDemoMode/appMode from keel/adapters/index. An app adapter " +
@@ -190,19 +201,18 @@ const runModeEnvMessage =
     'fail-closed production guard (docs/recipes/app-owned-adapter.md).'
 const runModeEnvSelector = {
     selector:
-        'MemberExpression[object.object.name="process"][object.property.name="env"]' +
-        `:matches([property.name=${RUN_MODE_ENV}], [property.value=${RUN_MODE_ENV}], ` +
-        `[property.quasis.0.value.cooked=${RUN_MODE_ENV}])`,
+        `MemberExpression[object.object.name="process"]${anyKey('object.property', '"env"')}` +
+        anyKey('property', RUN_MODE_ENV),
     message: runModeEnvMessage,
 }
 // Destructuring in a declaration, an assignment, or a parameter default — each puts `process.env` on the
 // right of the pattern under a different parent node.
 const runModeEnvDestructureSelector = {
     selector:
-        ':matches(VariableDeclarator[init.object.name="process"][init.property.name="env"], ' +
-        'AssignmentExpression[right.object.name="process"][right.property.name="env"], ' +
-        'AssignmentPattern[right.object.name="process"][right.property.name="env"]) > ObjectPattern > ' +
-        `Property:matches([key.name=${RUN_MODE_ENV}], [key.value=${RUN_MODE_ENV}])`,
+        `:matches(VariableDeclarator[init.object.name="process"]${anyKey('init.property', '"env"')}, ` +
+        `AssignmentExpression[right.object.name="process"]${anyKey('right.property', '"env"')}, ` +
+        `AssignmentPattern[right.object.name="process"]${anyKey('right.property', '"env"')}) > ObjectPattern > ` +
+        `Property${anyKey('key', RUN_MODE_ENV)}`,
     message: runModeEnvMessage,
 }
 // Together, for the reason getDbSelectors are.
@@ -445,7 +455,9 @@ const eslintConfig = [
             '!.ladle',
             '!.ladle/**',
             '**/.ladle/dist/**',
-            'apps/*/src/styles/generated/**',
+            // What Panda's codegen writes there, and nothing else: a hand-written module in that directory
+            // is fenced like any other.
+            'apps/*/src/styles/generated/**/*.{mjs,d.ts}',
             '**/test-results/**',
             '**/playwright-report/**',
             '**/coverage/**',

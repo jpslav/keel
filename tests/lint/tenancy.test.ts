@@ -66,6 +66,12 @@ describe('getDb: request-path code may not take the raw db handle, in any form',
         expect(fired(await lint(`${APP}/src/domain/kv.test.mjs`, code), GET_DB)).toBe(1)
     })
 
+    // A template key is the name only when it has no expressions: this one is `getDbRaw`.
+    it('a template key with an expression in it is not getDb', async () => {
+        const code = "export const load = (db) => db[`getDb${''}Raw`]()\n"
+        expect(fired(await lint(`${APP}/src/app/api/kv/route.ts`, code), GET_DB_COMPUTED)).toBe(0)
+    })
+
     it('keel’s own db helpers may: they are what opens withTenant', async () => {
         expect(
             fired(await lint('packages/keel/src/db/kv.ts', 'export const load = (db) => db.getDb()\n'), GET_DB),

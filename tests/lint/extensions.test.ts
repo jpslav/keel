@@ -187,9 +187,14 @@ describe('the carve-outs still let through what they were made for, in every spe
         expect(fired(await lint(`${APP}/src/components/kv-card.stories.${ext}`, label), A11Y_LITERAL)).toBe(0)
     })
 
-    // Panda's generated styled-system is ignored outright, whatever it is written in.
-    it.each(['mjs', 'js', 'ts'])('generated styles (.%s) are not linted', async (ext) => {
-        expect(await isIgnored(`${APP}/src/styles/generated/css/css.${ext}`)).toBe(true)
+    // Panda's generated styled-system is ignored, and only what Panda writes there: `.mjs` and `.d.ts`.
+    it.each(['css.mjs', 'css.d.ts'])('generated styles (%s) are not linted', async (name) => {
+        expect(await isIgnored(`${APP}/src/styles/generated/css/${name}`)).toBe(true)
+    })
+
+    it.each(['ts', 'js'])('a hand-written .%s module in the generated directory is fenced', async (ext) => {
+        const file = `${APP}/src/styles/generated/css/helper.${ext}`
+        expect(fired(await lint(file, readsEnv(file)), PROCESS_ENV)).toBe(1)
     })
 })
 
@@ -201,6 +206,18 @@ describe('what a later block used to drop', () => {
     it.each(['tsx', 'jsx'])('a story beside a fake (.%s) may not load real/ dynamically', async (ext) => {
         const code = "export const load = () => import('../real/kv')\n"
         expect(fired(await lint(`${APP}/src/adapters/fake/kv.stories.${ext}`, code), REAL_ADAPTER_DYNAMIC)).toBe(1)
+    })
+
+    // ...and keeps the process.env ban that block re-lists for it.
+    it.each(['tsx', 'jsx'])('a story beside a fake (.%s) may not read process.env', async (ext) => {
+        const file = `${APP}/src/adapters/fake/kv.stories.${ext}`
+        expect(fired(await lint(file, readsEnv(file)), PROCESS_ENV)).toBe(1)
+    })
+
+    // The registry is `adapters/index.ts` by name; an `index.mjs` beside it is one more module.
+    it.each(['index.mjs', 'index.js'])('adapters/%s may not load real/', async (name) => {
+        const code = "export const load = () => import('./real/kv')\n"
+        expect(fired(await lint(`${APP}/src/adapters/${name}`, code), REAL_ADAPTER_DYNAMIC)).toBe(1)
     })
 
     // keel/core's block replaced the framework fence and listed no font pattern; its own `next/*` group
