@@ -224,9 +224,10 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
         await runRlsProofs(realDb.getDb(), expect)
     })
 
-    // Aurora ends idle connections (a Serverless v2 cluster pausing at min capacity 0, a failover, an idle
-    // timeout). pg-pool reports that as an 'error' event on the pool, and an event with no listener is an
-    // uncaught exception: it would crash the Lambda between requests. The adapter must log it and carry on.
+    // The server can end a connection at any time: a failover, a reboot, an idle-session timeout, a socket
+    // dropped while a Lambda sat frozen between invocations. pg reports that as an 'error' EVENT, and an
+    // event with no listener is an uncaught exception, which crashes the process. The adapter must survive
+    // it both while the connection sits idle in the pool and while a transaction holds it.
     test('an idle pooled connection the server ends is logged, not a crash, and the pool carries on', async () => {
         const url = new URL(serverUrl)
         url.pathname = `/${DATABASE}`
@@ -249,6 +250,49 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
             expect(ended.rows[0]!.n).toBe(1)
             await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('57P01')))
             // The pool drops the dead client and opens a new one for the next query.
+            const again = await sql<{ ok: number }>`select 1 as ok`.execute(probe.getDb())
+            expect(again.rows).toEqual([{ ok: 1 }])
+        } finally {
+            warn.mockRestore()
+            await probe.getDb().destroy()
+            await admin.destroy()
+        }
+    })
+
+    // ...and while a transaction holds the connection, which is every request: withTenant runs in one, and so
+    // does the migrator. pg-pool listens only to IDLE clients, and Kysely adds no listener to the one it
+    // checks out, so this case needs its own listener: the transaction fails, and nothing else does.
+    test('a connection the server ends inside a transaction fails that transaction, not the process', async () => {
+        const url = new URL(serverUrl)
+        url.pathname = `/${DATABASE}`
+        url.searchParams.set('application_name', 'keel_busy_probe')
+        const probe = createRealDb(url.toString())
+        const admin = connect({
+            database: new URL(serverUrl).pathname.slice(1) || 'postgres',
+            user: decodeURIComponent(new URL(serverUrl).username),
+            password: decodeURIComponent(new URL(serverUrl).password),
+        })
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        try {
+            const outcome = await probe
+                .getDb()
+                .transaction()
+                .execute(async (trx) => {
+                    await sql`select 1`.execute(trx)
+                    const ended = await sql<{ n: number }>`
+                        SELECT count(*)::int AS n FROM (
+                            SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+                            WHERE application_name = 'keel_busy_probe' AND state = 'idle in transaction'
+                        ) AS terminated`.execute(admin)
+                    expect(ended.rows[0]!.n).toBe(1)
+                    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('57P01')))
+                    await sql`select 1`.execute(trx)
+                })
+                .then(
+                    () => 'committed',
+                    (error: unknown) => error,
+                )
+            expect(outcome).toBeInstanceOf(Error)
             const again = await sql<{ ok: number }>`select 1 as ok`.execute(probe.getDb())
             expect(again.rows).toEqual([{ ok: 1 }])
         } finally {
