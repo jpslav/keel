@@ -3,6 +3,8 @@ import path from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import { openSimulatorPanel } from '../support/simulator'
 import { pickOrg } from '../support/org-switcher'
+import { untilNewDocument } from '../support/new-document'
+import { reachDashboard } from '../support/people'
 
 /**
  * Notifications, end to end against real routes + RLS on pglite. Destructive because it writes
@@ -39,31 +41,37 @@ async function signInAs(page: Page, personId: string) {
 /**
  * Switch person mid-session via Simulator People (a real server-side session switch in simulated mode).
  *
- * The first wait accepts ANY protected route on purpose. People restores where that person last was, and
- * this file navigates Dana to /en/profile mid-test — so switching away and back legitimately lands on
- * profile, not dashboard. Pinning the wait to dashboard|org made the helper depend on whether the
- * continuity write had landed before the switch, which is a race the test has no reason to run: what it
- * actually needs to know is that the switch completed on a signed-in page, and the nav click below is
- * what gets it to the dashboard.
+ * People restores where that person last was, and this file navigates Dana to /en/profile mid-test —
+ * so switching away and back legitimately lands on profile, not dashboard. The helper therefore cannot
+ * wait on a URL: pinning one made it depend on whether the continuity write had landed before the
+ * switch, a race the test has no reason to run, and a wait for any protected route is satisfied at once
+ * by the page being left. What it needs to know is that the switch completed, which only a NEW
+ * document proves (`untilNewDocument`); `reachDashboard` then gets it to the dashboard from wherever
+ * it landed.
  */
 async function switchPerson(page: Page, personId: string) {
     await openSimulatorPanel(page)
-    await page.getByTestId(`people-${personId}`).click()
-    await page.waitForURL(/\/en\/(dashboard|org|profile)(\?.*)?$/)
-    await page.getByTestId('nav-dashboard').click()
-    await page.waitForURL('**/dashboard')
+    await untilNewDocument(page, () => page.getByTestId(`people-${personId}`).click())
+    await reachDashboard(page)
     await expect(page.getByTestId('escalations-card')).toBeVisible()
 }
 
-/** Raise an escalation frontline→`targetName`, hydration-safe (fill until the create button enables). */
+/**
+ * Raise an escalation frontline→`targetName`, hydration-safe (fill until the create button enables).
+ * Every step in the loop has its own short timeout so `toPass` can actually retry — a bare `click()` on an
+ * option that is not there waits out the whole test timeout (docs/build-notes.md, "An e2e wait that the
+ * page being left also passes"), and the trigger TOGGLES the dropdown, so it is only clicked when the
+ * option is not already on screen.
+ */
 async function createRequest(page: Page, targetName: string, subject: string) {
+    const option = page.getByRole('option', { name: targetName })
     await expect(async () => {
-        await page.getByTestId('escalation-target').click()
-        await page.getByRole('option', { name: targetName }).click()
-        await page.getByTestId('escalation-subject').fill(subject)
-        await page.getByTestId('escalation-body').fill('please collaborate')
+        if (!(await option.isVisible())) await page.getByTestId('escalation-target').click({ timeout: 2_000 })
+        await option.click({ timeout: 2_000 })
+        await page.getByTestId('escalation-subject').fill(subject, { timeout: 2_000 })
+        await page.getByTestId('escalation-body').fill('please collaborate', { timeout: 2_000 })
         await expect(page.getByTestId('escalation-create')).toBeEnabled({ timeout: 1_000 })
-    }).toPass()
+    }).toPass({ timeout: 45_000 })
     await page.getByTestId('escalation-create').click()
     await expect(page.getByTestId('escalations-sent-list')).toContainText(subject)
 }
