@@ -3,6 +3,7 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { runOwnerPass } from '../../db/owner-pass'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DbPort } from '../../ports/db'
 import { createRealDb } from './db'
@@ -23,9 +24,11 @@ const DATABASE = 'keel_contract'
 
 let embedded: InstanceType<typeof EmbeddedPostgres> | null = null
 let realDb: DbPort
+/** The server's superuser URL (to its `postgres` database), kept for the non-superuser pass. */
+let serverUrl: string
 
 beforeAll(async () => {
-    let serverUrl = process.env.CONTRACT_DATABASE_URL
+    serverUrl = process.env.CONTRACT_DATABASE_URL ?? ''
     if (!serverUrl) {
         const port = portFor('contractPg')
         embedded = new EmbeddedPostgres({
@@ -61,8 +64,44 @@ afterAll(async () => {
     await embedded?.stop()
 })
 
+/** A connection for a login on this server, through the REAL adapter (its pool, its `date` parser). */
+function connect(login: { database: string; user: string; password: string }) {
+    const url = new URL(serverUrl)
+    url.username = encodeURIComponent(login.user)
+    url.password = encodeURIComponent(login.password)
+    url.pathname = `/${login.database}`
+    return createRealDb(url.toString()).getDb()
+}
+
 describe('keel fixture seam on real Postgres, through the real adapter (contract)', () => {
     test('the full RLS proof suite passes', async () => {
         await runRlsProofs(realDb.getDb(), expect)
+    })
+
+    // The pass every other one cannot be: a NON-SUPERUSER owner, as Aurora's master user is, runs the
+    // migrations and makes every role switch in the proofs (packages/keel/src/db/owner-pass.ts).
+    test('a non-superuser owner migrates, and switches to app_user inside withTenant', async () => {
+        const server = new URL(serverUrl)
+        const admin = connect({
+            database: server.pathname.slice(1) || 'postgres',
+            user: decodeURIComponent(server.username),
+            password: decodeURIComponent(server.password),
+        })
+        try {
+            await runOwnerPass(
+                {
+                    admin,
+                    superuser: {
+                        user: decodeURIComponent(server.username),
+                        password: decodeURIComponent(server.password),
+                    },
+                    maintenanceDatabase: server.pathname.slice(1) || 'postgres',
+                    connect,
+                },
+                expect,
+            )
+        } finally {
+            await admin.destroy()
+        }
     })
 })

@@ -23,7 +23,16 @@ import { runWithTenant } from './with-tenant'
  * Deleting the demo app therefore never breaks keel's own tenancy proof: `frameworkRlsProofs` names no
  * app table, and an adopter with no tenant tables of its own registers an empty `appRlsProofs`.
  */
-export async function runRlsProofs(db: Kysely<DB>, expect: (actual: unknown) => ProofExpectation): Promise<void> {
+export async function runRlsProofs(
+    db: Kysely<DB>,
+    expect: (actual: unknown) => ProofExpectation,
+    /**
+     * `appDb`: the connection that switches to `app_user` (see `RlsProofContext.appDb`). Omitted, it is
+     * `db`. The contract suite's non-superuser pass passes the database owner here, with a superuser as
+     * `db` for the seeding and the negative control.
+     */
+    { appDb = db }: { appDb?: Kysely<DB> } = {},
+): Promise<void> {
     // The shared fixtures, seeded as the privileged migration user: two tenants to isolate against, and
     // one organization inside each. Both halves need a valid org id on the right tenant AND one on the
     // wrong tenant, so their cross-tenant WITH CHECK proofs fail on the tenant boundary rather than on a
@@ -55,13 +64,14 @@ export async function runRlsProofs(db: Kysely<DB>, expect: (actual: unknown) => 
     // of them. Migration/ready are not this suite's business — it is handed an already-migrated engine.
     const dbPort: DbPort = {
         getDb: () => db,
-        withTenant: (tenantId, fn) => runWithTenant(db, tenantId, fn),
+        withTenant: (tenantId, fn) => runWithTenant(appDb, tenantId, fn),
         ready: () => Promise.resolve(),
         migrateToLatest: () => Promise.resolve(),
     }
 
     const context = {
         db,
+        appDb,
         dbPort,
         expect,
         alphaTenantId: alpha!.id,
