@@ -203,6 +203,12 @@ ADMIN on `app_user` must. It must own nothing. With INHERIT TRUE it holds exactl
 privileges, and every tenant table it reaches outside `withTenant` is still bound by RLS, with no tenant
 set: zero rows, and no insert passes the `WITH CHECK`.
 
+**Postgres 16 or later is keel's minimum.** 0015 uses `pg_has_role(…, 'SET')` and `GRANT … WITH SET`,
+and both arrived in Postgres 16. Every server keel targets is 16 or later: Aurora 16.10 (`infra/stack.ts`),
+CI's postgres:16 contract job, pglite (Postgres 18.6) and the embedded Postgres 18.4 that a local
+`pnpm test:contract` starts. So keel states the minimum (`docs/adopting.md`, "Cutover") instead of
+branching on `server_version_num`. A branch for 15 would be code that no gate runs.
+
 **The gate: a non-superuser pass in `pnpm test:contract`** (`packages/keel/src/db/owner-pass.ts`, run
 from `packages/keel/src/adapters/real/db.contract.test.ts`).
 

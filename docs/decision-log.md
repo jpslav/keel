@@ -2194,3 +2194,12 @@ The design is in ADR-0004's addendum of the same date.
   the name (`quote_ident`), so copying it runs as-is. The test's second owner has a mixed-case name to pin
   both. Its remedy is run by an ADMIN-only creator, not the superuser, so the docs' "a role holding ADMIN"
   is what is tested.
+- **Postgres 16 or later is stated as keel's minimum, not branched on.** 0015's `pg_has_role(…, 'SET')`
+  and `GRANT … WITH SET` arrived in 16, and nothing in the repo stated a minimum version (found in the
+  independent re-check). Every server keel targets is 16 or later (Aurora 16.10, CI's postgres:16, pglite
+  18.6), so a `server_version_num` branch for 15 would be code no gate runs. The minimum is in
+  `docs/adopting.md`, the ADR addendum and 0015's header.
+- **A logical restore carries the ledger, not the grant.** `pg_dump` dumps one database, and roles and
+  their memberships are cluster-wide. Restored into another cluster, the ledger says 0001 and 0015 ran, so
+  neither runs again, and neither `app_user` nor anyone's switch to it came along. The
+  `db-role-not-superuser` cutover row says what to do before and after a restore.

@@ -421,6 +421,13 @@ domain" is a proof.
 The file opens with a worked row — closed, dated, owned, with a proof column that was thought through
 rather than restated. Read it once for the level of detail each row deserves before you fill in your own.
 
+**keel needs Postgres 16 or later.** Framework migration
+`packages/keel/src/db/migrations/0015_app_user_grant.ts` lets the migrating role switch to `app_user`
+with `GRANT … WITH SET TRUE`, checked by `pg_has_role(…, 'SET')`. Both arrived in Postgres 16, so on an
+older server that migration cannot run. Everything keel targets already meets it: the Aurora cluster in
+`infra/stack.ts` (16.10), CI's contract job (`postgres:16` in `.github/workflows/checks.yml`), pglite
+(18.6) and the embedded Postgres that a local `pnpm test:contract` starts (18.4).
+
 ## Staying current with keel
 
 Adopting is a fork, not a dependency: keel ships as a workspace package inside the repo you took, so
