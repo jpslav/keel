@@ -95,7 +95,8 @@ on, not in an adopter's fork. Being opt-in means three things:
   module loads.
 - **Dev never reaches it.** `pnpm dev` and the static demo never import the real adapters at all.
 
-The SDK sits inside the vendor fence.
+The SDK sits inside the vendor fence. The transport adds five internal modules to `packages/keel` and
+publishes none, which takes the internal count `docs/adopting.md` states from 37 to 42.
 
 **Tenant context through the Data API — what is known, and how.** `runWithTenant` sets the role and the
 tenant transaction-locally, then runs the caller's queries. Through the Data API every statement is a
