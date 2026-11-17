@@ -2,8 +2,9 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { NotFoundError } from '../../ports/errors'
 import type { StoragePort, StoredObject, UploadConstraints, UploadTarget } from '../../ports/storage'
-import { writeFileAtomic, writeFileAtomicSync } from './atomic-write'
+import { copyFileAtomic, writeFileAtomic, writeFileAtomicSync } from './atomic-write'
 import { dataDir } from './data-dir'
 
 const META_SUFFIX = '.meta.json'
@@ -154,6 +155,28 @@ export const fakeStorage: StoragePort = {
             await rm(file, { force: true })
             await rm(`${file}${META_SUFFIX}`, { force: true })
         }
+    },
+
+    async copy(from, to) {
+        // `to` is checked as `put` checks a key it writes; `from` as `get` checks one it reads (a reserved
+        // name is never an object, so it is a missing source, not an invalid one). Either can still be an
+        // escape, which resolveKey refuses with the same error as everywhere else.
+        if (isReserved(to)) throw new Error(`invalid storage key: ${to} (reserved by the fake store)`)
+        const source = resolveKey(from)
+        const target = resolveKey(to)
+        if (isReserved(from) || !existsSync(source)) throw new NotFoundError(`storage object not found: ${from}`)
+        // Compared as resolved paths: `a/../a` and `a` are one file here (S3 would see two keys, which is a
+        // quirk of every method of this fake, not of copy).
+        if (source === target) throw new Error(`storage copy: source and destination are the same key: ${from}`)
+        await mkdir(path.dirname(target), { recursive: true })
+        // The sidecar first and the body LAST. The body is what makes a key exist (`get` and `list` both look
+        // for it), so `to` appears only once it is complete, with its content type already in place. The other
+        // order would leave a window where a new `to` has a body and no sidecar, and `get` would throw on the
+        // missing sidecar. (Over an EXISTING `to`, the content type changes a moment before the bytes do; a
+        // copy that fails between the two leaves the new type on the old bytes. `put` has the same gap in its
+        // own order, and this is a fake.)
+        await copyFileAtomic(`${source}${META_SUFFIX}`, `${target}${META_SUFFIX}`)
+        await copyFileAtomic(source, target)
     },
 
     async getSignedDownloadUrl(key): Promise<string> {

@@ -2,7 +2,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
-import { writeFileAtomic, writeFileAtomicSync, writeJsonAtomic, writeJsonAtomicSync } from './atomic-write'
+import {
+    copyFileAtomic,
+    writeFileAtomic,
+    writeFileAtomicSync,
+    writeJsonAtomic,
+    writeJsonAtomicSync,
+} from './atomic-write'
 
 function freshDir(): string {
     return makeTestTmpDir('atomic-write-')
@@ -105,5 +111,42 @@ describe('atomic-write', () => {
         for (const seen of observed) {
             expect(values).toContainEqual(seen)
         }
+    })
+})
+
+describe('copyFileAtomic', () => {
+    test('publishes a byte-identical copy and leaves no temp file', async () => {
+        const dir = freshDir()
+        const bytes = new Uint8Array([0, 255, 1, 254, 10, 13])
+        await writeFileAtomic(path.join(dir, 'from'), bytes)
+
+        await copyFileAtomic(path.join(dir, 'from'), path.join(dir, 'to'))
+
+        expect(new Uint8Array(readFileSync(path.join(dir, 'to')))).toEqual(bytes)
+        expect(readdirSync(dir).sort()).toEqual(['from', 'to'])
+    })
+
+    test('replaces an existing target whole, never splicing the two', async () => {
+        const dir = freshDir()
+        await writeFileAtomic(path.join(dir, 'from'), 'short')
+        await writeFileAtomic(path.join(dir, 'to'), 'a much longer earlier value')
+
+        await copyFileAtomic(path.join(dir, 'from'), path.join(dir, 'to'))
+
+        expect(readFileSync(path.join(dir, 'to'), 'utf8')).toBe('short')
+    })
+
+    test('a copy that fails leaves the target exactly as it was, and no temp file', async () => {
+        const dir = freshDir()
+        await writeFileAtomic(path.join(dir, 'to'), 'before')
+
+        // a missing source: the temp file is never created, and the cleanup swallows that
+        await expect(copyFileAtomic(path.join(dir, 'missing'), path.join(dir, 'to'))).rejects.toThrow(/ENOENT/)
+        // a source that cannot be read as a file: the failure comes after the temp path was chosen
+        await expect(copyFileAtomic(dir, path.join(dir, 'to'))).rejects.toThrow()
+
+        expect(readFileSync(path.join(dir, 'to'), 'utf8')).toBe('before')
+        expect(readdirSync(dir)).toEqual(['to'])
+        expect(existsSync(path.join(dir, 'missing'))).toBe(false)
     })
 })

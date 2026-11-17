@@ -1,5 +1,5 @@
 import { renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { rename, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, rename, unlink, writeFile } from 'node:fs/promises'
 
 /**
  * Atomic file writes for the fake adapters (packages/keel/src/adapters/fake/*.ts). Internal helper —
@@ -101,6 +101,23 @@ export async function writeFileAtomic(
     try {
         await writeFile(tmp, data, opts?.mode !== undefined ? { mode: opts.mode } : undefined)
         await rename(tmp, file)
+    } catch (err) {
+        await cleanupTemp(tmp)
+        throw err
+    }
+}
+
+/**
+ * Atomic file COPY: the bytes go to a temp file colocated with `to` and are published with a rename, so a
+ * reader of `to` sees either what was there before or the whole copy, never a half-written one. A failed
+ * copy removes its temp file and leaves `to` exactly as it was. Not `copyFile(from, to)` directly: that
+ * writes into `to` in place.
+ */
+export async function copyFileAtomic(from: string, to: string): Promise<void> {
+    const tmp = tempFileFor(to)
+    try {
+        await copyFile(from, tmp)
+        await rename(tmp, to)
     } catch (err) {
         await cleanupTemp(tmp)
         throw err
