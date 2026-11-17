@@ -9,9 +9,7 @@
 
 [ADR-0013](0013-upstream-updates-fork-and-merge.md) chose to keep keel publishable-shaped and to distribute it
 by fork and merge, and it named four triggers that would reopen the question. The first has fired: **a second
-real app outside this repo.** The SafeInsights sharing site (`safeinsights/pages`, app slug `console`, one
-tenant per deployment, AWS Lambda with Aurora, reaching it through the RDS Data API once keel's transport for it
-(#46, #49) arrives) adopted keel by fork this week.
+real app outside this repo.** The SafeInsights sharing site (`safeinsights/pages`, app slug `console`, deploying to AWS Lambda with Aurora, reaching it through the RDS Data API once keel's transport for it (#46, #49) arrives) adopted keel by fork this week.
 
 Its first days measured where a fork's cost lands, and it is not where ADR-0013 expected.
 
@@ -37,12 +35,7 @@ keel's `main` (3d9b96a), read-only through the GitHub API:
 - **Everything outside `apps/`, `packages/` and the lockfile: 176 files.** 85 are identical, 22 are older
   keel versions and 4 are Pages' own. **65 differ from every version keel has ever had.** Each is a file where
   any later keel change conflicts.
-- **Of those 65, 37 are mechanical.** The newest keel commit in Pages' history is 26d65a5 (#47).
-  `pnpm init-app console --repo pages --eject-showcase`, run on that commit, writes 37 of them byte for byte.
-  The other 28 differ from what `init-app` writes, for two reasons. Some carry Pages' own changes: its CI
-  workflow, `eslint.config.mjs`, `knip.json`, `.gitleaks.toml`, its `pages` script in `package.json`, and
-  `packages/cli` in `tsconfig.json`. Others are keel files left at an older version by a merge that conflicted:
-  Pages' `docs/adopting.md` lacks a section keel had added by 26d65a5.
+- **Of those 65, 47 are mechanical and 18 are Pages' own.** The newest keel commit in the history of Pages' `main` is 24b0589 (#32). `pnpm init-app console --repo pages --eject-showcase`, run on that commit, writes 47 of the 65 byte for byte. The other 18 are Pages' deliberate edits to files keel also owns: its own `README.md` and the head of its `CLAUDE.md`; `eslint.config.mjs`, `knip.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore` and `.prettierignore` extended for `packages/gate`, `packages/cli` and `infra`; its `pages` script in `package.json`; its CI workflow; its `.gitleaks.toml` entry; its owner details; its own migration's name in `docs/adopting.md`; and a `LICENSE` that adds Rice University's copyright above keel's.
 
 So the framework already travels like a package. The scaffold is what a fork cannot carry. ADR-0013's other
 point stands, and it is the constraint any answer has to meet: keel is also scaffolding (the verify gate, the
@@ -53,8 +46,7 @@ deliver scaffolding. Publishing only `packages/keel` would fix the half that alr
 The first adopter is also not a single app. Pages is a workspace holding `apps/console`, its own
 `packages/gate` (a CloudFront Function, its stand-in runtime and tests) and `packages/cli` (bundled with
 esbuild), and an `infra/` with its own `PagesEdge` construct, an edge stack, conformance scripts and separate
-CDK apps. Its console has its own `src/adapters/real/` (S3 and the CloudFront key-value store). Its CI runs on
-pushes to `main` and `integration`, with its own `.gitleaks.toml`. Whatever keel ships has to sit beside all of
+CDK apps. On its `integration` branch, where its work lands before `main`, its console has its own `src/adapters/real/` (S3 and the CloudFront key-value store). Its CI runs on pushes to `main` and `integration`, with its own `.gitleaks.toml`. Whatever keel ships has to sit beside all of
 that, not replace it.
 
 ## Decision
@@ -203,8 +195,7 @@ resolved it through ordinary package resolution, with **every** `@app-config` al
 `next build`, Vite, Vitest, esbuild with no alias and no tsconfig (the migrator bundle held the app's
 `1001_items`), and tsx. The same held in the Pages-shaped workspace, with the app at `apps/console`: the peer
 linked to `apps/console/src/app-config`. It keeps ADR-0012's seam as decided: plain modules, imported directly,
-checked by the compiler, one module per capability. pnpm keys a linked peer by its path, so two apps in one
-workspace get two keel instances, each bound to its own seam.
+checked by the compiler, one module per capability. In that workspace, a second app linking its own seam got a second keel instance in the virtual store, each linked to its own app's `src/app-config`.
 
 What C costs:
 
@@ -244,7 +235,7 @@ accepted, ADR-0012 gets an addendum recording the new specifier.
   esbuild and tsx (the table in part 1, under C). **Plain Node cannot**: Node 24.19 refuses with
   `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.
 - **Some of today's scaffold hands keel to plain Node**, and would break the same way:
-    - Playwright does not transform files under `node_modules`, and
+    - Playwright does not transform files under `node_modules` (`shouldTransform` in `playwright/lib/common/index.js` returns false for them), and
       `apps/showcase/tests/e2e/destructive/simulator-webhooks.spec.ts` imports `keel/core/webhook-signing`.
     - A Vite or Vitest config file is bundled with its bare imports left external, so a preset it imports is
       loaded by Node. The prune plugin that would move into the Vite preset is TypeScript today
@@ -270,9 +261,7 @@ what both apps compile against today. It comes with:
 
 - a `files` allowlist;
 - **keel compiling under a named set of strict options**, so that an adopter who turns any of them on cannot
-  break keel: `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` (42 errors in keel's source in the
-  spike), `noPropertyAccessFromIndexSignature` (58) and `erasableSyntaxOnly` (8). The `noUnused*`,
-  `noImplicitReturns`, `noImplicitOverride` and `noFallthroughCasesInSwitch` flags already pass. Code that passes
+  break keel: `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noPropertyAccessFromIndexSignature` and `erasableSyntaxOnly`, which give 26, 24, 58 and 8 errors in keel's non-test source at 6d67a7c. `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`, `noImplicitOverride` and `noFallthroughCasesInSwitch` give none. Code that passes
   a flag still compiles with it off. Pack and consume typechecks its consumer with the whole set on, so the set
   is a tested promise, not a hope;
 - the `@types` keel's source needs: those of host singletons (`@types/react`) and `typescript` as peers, with
@@ -553,9 +542,7 @@ The measurement in the Context is the reason this can be early and cheap: Pages 
 reference they edit came from a sweep of Pages' `integration` branch for files outside the ones step 2 deletes
 that name something step 2 deletes.
 
-1. **No catch-up merge.** Pages holds its keel merges and takes everything since 26d65a5 (#46, #49, #51, #52,
-   #53, #54 and the seam rename) through the switch. The release candidate's notes, whose "Seam changes" and
-   "Framework migrations" cover everything since 26d65a5, are its list of seam edits, and `tsc` points at each
+1. **No catch-up merge.** Pages holds its keel merges and takes everything since 24b0589 (#32) through the switch: among it #34's `authorize()` seam changes, #46 and #49's Data API transport, #51's lint exceptions, #52, #53, #54 and the seam rename. The release candidate's notes, whose "Seam changes" and "Framework migrations" cover everything since 24b0589, are its list of seam edits, and `tsc` points at each
    one. Until the switch, Pages' migrator has the bug #54 fixed in keel (step 7).
 2. **Delete what keel now ships:**
     - `packages/keel`, and keel's spike: `spikes/kysely-pglite`, its `spikes/*` entry in `pnpm-workspace.yaml`
@@ -630,13 +617,9 @@ that name something step 2 deletes.
 
     It moves the stack onto the `KeelApp` construct when that lands.
 
-8. **Agent rules and the rest of the 28.** Pages' `CLAUDE.md` is keel's text, citing `packages/keel`,
+8. **Agent rules and the rest of the 18.** Pages' `CLAUDE.md` is keel's text, citing `packages/keel`,
    `scripts/` and `tests/support`, and `keel check-doc-paths` reads it. At the switch it keeps Pages' own rules
-   and imports keel's app guide, which ships in the release candidate. The other files among the 28 that differ
-   from `init-app`'s output (the Context's split) are Pages' own changes, kept (its CI, its gitleaks entries, its
-   `pages` script, `packages/cli` in its configs, its cutover checklist, `docs/keel-readme.md`), or stale keel
-   files, which go with the rest of keel's docs. The 37 that `init-app` wrote are deleted or replaced in steps 2
-   and 4.
+   and imports keel's app guide, which ships in the release candidate. The other 17 files Pages edited on purpose (the Context's split) stay Pages': its CI, its configs' entries for `gate`, `cli` and `infra` (moved into its own blocks beside the presets), its `pages` script, its gitleaks entry, its `README.md`, `LICENSE` and owner details. So do files keel never had: its cutover checklist's own rows and `docs/keel-readme.md`. The 47 that `init-app` wrote are deleted or replaced in steps 2 and 4.
 9. **Then:** `pnpm install`, `pnpm verify`, the contract tests and `pnpm --filter infra synth`.
 
 **A script?** Not a shipped one: there is one adopter. Two one-off inventories drive the steps above, and both
@@ -653,10 +636,7 @@ These are listed with recommendations under "Open decisions for JP" below.
    The cheapest serious version of this path is **rewrite-free adoption**: make every scaffold file
    app-agnostic, so `init-app` rewrites nothing outside the app's directory (the app list, the contract app, the
    tsconfig and infra literals move into the app or into config the app owns), and give the two record files a
-   `merge=union` attribute. Measured against Pages, that removes the 37 files `init-app` wrote. It leaves the 28
-   that differ from `init-app`'s output: Pages' own edits to keel-owned files (CI, ESLint, knip, `package.json`,
-   `tsconfig.json`), where a keel change still conflicts, and keel files stranded at an older version by a merge
-   that conflicted, which is the cost recurring. It also
+   `merge=union` attribute. Measured against Pages, that removes the 47 files `init-app` wrote. It leaves the 18 Pages edited on purpose (its CI, its ESLint, knip, TypeScript and Vitest configs, `package.json`, `CLAUDE.md`, `README.md`, `LICENSE`), and a keel change to any of them still conflicts. It also
    leaves a fork with no version to pin or roll back, no way to take one fix without the whole merge, and every
    friction fix itself a change to scaffold files that conflicts on its way in. Worth doing only if this ADR is
    rejected.
@@ -699,8 +679,7 @@ These are listed with recommendations under "Open decisions for JP" below.
   the apps use `"keel": "workspace:@<scope>/keel@*"`. The rename step verifies the alias with peers,
   `transpilePackages` and the CLI.
 - **D3 — Licence and copyright line. Recommend deciding before the first release-candidate tarball, with
-  counsel.** Today it is MIT, "Copyright (c) 2026 JP Slavinsky". A tarball on a GitHub release is a published
-  copy, so it carries the line too.
+  counsel.** Today it is MIT, "Copyright (c) 2026 JP Slavinsky". A tarball on a GitHub release is a published copy, so it carries the line too. Pages' own `LICENSE` already reads "Copyright (c) 2026-present Rice University" above keel's line, so the owner of the adopter's copyright and the owner of keel's are already two parties.
 - **D4 — Does this repo keep the showcase? Recommend yes**, as the reference app, the public demo and the first
   of the two consumers. It is never published. `create-keel-app` has no eject: its template is `apps/starter`,
   copied when the generator is packed, so the template is always the app the two-consumer rule tests.
@@ -727,7 +706,7 @@ D3 blocks P7. D1 blocks P14.**
 | P4   | **`@<scope>/keel-tools`**, as JavaScript, with no dependency on keel: the `keel` CLI (demo size, ports, launch config, `dev:real` preflight through esbuild, standalone serve, e2e profile, the temp-dir leak wrapper, `check-doc-paths`, `ci <job>`), the helpers any workspace package may import (`makeTestTmpDir`, the ports module, the two assembly checks), the Next, Vite and Vitest presets, and the tsconfig base. Both apps switch; `scripts/` keeps only what is keel's own. It comes before P5 and P6, whose checks are `keel` commands.                                                                                                                                             | P2, D2        |
 | P5   | **The conformance kit at `keel/testing`** (the mutation scan per app root with app-owned exemptions and their staleness check, i18n partition and parity, the pglite RLS runner, migration order, demo presets, the seam-map check, the seam-free `keel/testing/e2e`), **`keel doctor`** and **`keel check-e2e`** (with an in-repo mode, since here keel's files are under `packages/keel/src`). Each app runs the kit from its own test file, as a consumer will, instead of `vitest.config.ts` including keel's test files, and the showcase's specs move onto `keel/testing/e2e`; the `files` allowlist then drops keel's tests.                                                               | P2, P3, P4    |
 | P6   | **`@<scope>/eslint-plugin-keel`**, as JavaScript, with no dependency on keel: one plugin object with every rule, every app-side fence under its own rule id, repo anchors as rule options, `configs.app({ root })`, and `keel check-fences`, which also probes each `lint-exceptions.mjs` entry. This repo's config imports the same object. Pack and consume lints from the workspace root and from the app.                                                                                                                                                                                                                                                                                     | P3, P4        |
-| P7   | **The first release candidate.** Pack and consume attaches its tarballs to a GitHub prerelease, whose notes carry hand-written "Seam changes" and "Framework migrations" since 26d65a5 and the install lines for each workspace package. keel's app guide (the app-facing half of `CLAUDE.md`) ships inside keel from here, checked by the doc gate against `apps/starter`. **This is the first step that lets Pages switch**: it needs no registry, no generator, no CDK construct and no reusable workflow.                                                                                                                                                                                     | P5, P6, D3    |
+| P7   | **The first release candidate.** Pack and consume attaches its tarballs to a GitHub prerelease, whose notes carry hand-written "Seam changes" and "Framework migrations" since 24b0589 and the install lines for each workspace package. keel's app guide (the app-facing half of `CLAUDE.md`) ships inside keel from here, checked by the doc gate against `apps/starter`. **This is the first step that lets Pages switch**: it needs no registry, no generator, no CDK construct and no reusable workflow.                                                                                                                                                                                     | P5, P6, D3    |
 | P8   | **Pages switches** (in `safeinsights/pages`, part 11).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | P7            |
 | P9   | **`@<scope>/keel-cdk`**, as JavaScript, with no dependency on keel: the `KeelApp` construct (both transports), the migrator resolved from the app with the explicit seam alias, the synth assertions (the app's migrations, the fail-closed environment, the app's keel at the construct's own version), `check-shapes` as its test, and the production-guard test moved onto it. `infra/` becomes an instantiation for the showcase. Pages adopts it when it chooses.                                                                                                                                                                                                                            | P3, P4        |
 | P10  | **The reusable workflow** (orchestration only, the apps input, an optional `synth` job), called by this repo's own CI for both apps, pinned by SHA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | P4, P5, P6    |
