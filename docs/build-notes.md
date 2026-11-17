@@ -1829,6 +1829,14 @@ the panel is the element that carries it.
   writes. jsonb also rewrites what it stores: `{"a":1e2}` reads back as `{"a": 100}`, with a space after
   each colon and comma. A byte bound in SQL measures that text, not the one the writer sent.
 
+## A gitleaks allowlist that names a path exempts the whole file unless it says AND (2026-11-17, `fix/gitleaks-webhook-allowlist-and`)
+
+- **An `[[allowlists]]` entry's criteria are OR'd by default.** gitleaks' own README (v8.30.1) says so:
+  with several criteria set, the default condition is OR. So `.gitleaks.toml`'s `webhook.test.ts` entry,
+  which set `paths` and `regexes` to allow one placeholder string, exempted every finding in that file,
+  while its comment said "that one file AND that one string". It was found while scoping a second entry.
+  Both now set `condition = "AND"`. Any new entry that pairs a path with a string needs it too.
+
 ## The authorization scan matched text (2026-11-17, `fix/authz-scan-per-verb`)
 
 - **A text match cannot say whose path a call is on.** The scan asked whether a FILE contained `authorize(`, or an
