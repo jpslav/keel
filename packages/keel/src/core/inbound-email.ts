@@ -85,7 +85,11 @@ export function parseInboundRecipient(rawRecipient: string): InboundRecipient | 
 export type InboundReceivedDetail =
     | { outcome: 'handled' }
     | { outcome: 'unmatched'; cause: 'no-handler' | 'declined' }
-    | { outcome: 'failed'; cause: 'handler-threw' }
+    /**
+     * `handler-threw`: the handler did. `intake-threw`: the handler returned, and keel's own recording of
+     * its result then threw, so whatever the handler did may already have happened.
+     */
+    | { outcome: 'failed'; cause: 'handler-threw' | 'intake-threw' }
 
 /** Build the intake address for an org+handler under a domain — the inverse of parseInboundRecipient. */
 export function formatInboundRecipient(orgSlug: string, handler: string, domain: string): string {

@@ -112,12 +112,15 @@ const AUDIT_DETAIL_MAX_DEPTH = 4
 
 /**
  * A key whose LAST word (or last two words, joined) is one of these names a secret. Words split on
- * camelCase and on anything not a letter or digit, lower-cased, with one trailing `s` dropped.
+ * camelCase and on anything not a letter or digit, lower-cased. A plural (`tokens`, `apiKeys`) names
+ * secrets too, unless its value is a number, which counts them (`revokedTokens: 3`).
  */
 const SECRET_KEY_WORDS = new Set([
     'password',
     'passwd',
+    'pwd',
     'passphrase',
+    'passcode',
     'secret',
     'token',
     'cookie',
@@ -125,16 +128,20 @@ const SECRET_KEY_WORDS = new Set([
     'bearer',
     'jwt',
     'otp',
+    'pem',
     'apikey',
     'accesskey',
     'privatekey',
     'secretkey',
     'signingkey',
+    'sessionkey',
+    'encryptionkey',
+    'hmackey',
 ])
 
-const EMAIL_SHAPE = /[^\s@]+@[^\s@]+\.[^\s@]+/
+const EMAIL_SHAPE = /[^\s@]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i
 const JWT_SHAPE = /eyJ[\w-]+\.[\w-]+\./
-const BEARER_SHAPE = /\bbearer\s+\S/i
+const BEARER_SHAPE = /\bbearer\s+[\w.~+/=-]{16,}/i
 const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
 function keyWords(key: string): string[] {
@@ -144,14 +151,18 @@ function keyWords(key: string): string[] {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter(Boolean)
-        .map((word) => (word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word))
 }
 
-function namesASecret(key: string): boolean {
+/** Whether a key names a secret (`accessToken`), names secrets as a plural (`tokens`), or neither. */
+function secretNamed(key: string): 'one' | 'plural' | null {
     const words = keyWords(key)
     const last = words.at(-1)
-    if (last === undefined) return false
-    return SECRET_KEY_WORDS.has(last) || (words.length > 1 && SECRET_KEY_WORDS.has(`${words.at(-2)}${last}`))
+    if (last === undefined) return null
+    const before = words.length > 1 ? words.at(-2) : ''
+    const names = (word: string) => SECRET_KEY_WORDS.has(word) || SECRET_KEY_WORDS.has(`${before}${word}`)
+    if (names(last)) return 'one'
+    if (last.length > 1 && last.endsWith('s') && names(last.slice(0, -1))) return 'plural'
+    return null
 }
 
 /** What is wrong with a string, without repeating it. */
@@ -167,6 +178,10 @@ function stringProblem(value: string): string | null {
 function isPlainObject(value: object): boolean {
     const proto: unknown = Object.getPrototypeOf(value)
     return proto === Object.prototype || proto === null
+}
+
+function isTopLevelObject(value: unknown): value is object {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function refuse(path: string, problem: string): never {
@@ -187,7 +202,7 @@ function checkValue(value: unknown, path: string, depth: number): void {
         if (!Number.isFinite(value)) refuse(path, 'is not a finite number')
         return
     }
-    if (value === undefined) refuse(path, 'is undefined, which JSON drops')
+    if (value === undefined) refuse(path, 'is undefined, which JSON writes as null in an array')
     if (typeof value !== 'object') refuse(path, `is a ${typeof value}, not JSON`)
     if (depth > AUDIT_DETAIL_MAX_DEPTH) refuse(path, `nests deeper than ${AUDIT_DETAIL_MAX_DEPTH} levels`)
     if (Array.isArray(value)) {
@@ -204,26 +219,42 @@ function checkObject(value: object, path: string, depth: number): void {
         const keyProblem = stringProblem(key)
         // A key that fails a shape check is not repeated either: it may be the very thing refused.
         if (keyProblem) refuse(path, `has a key that ${keyProblem}`)
-        if (namesASecret(key)) refuse(`${path}.${key}`, 'names a secret')
+        // An optional property left undefined is absent, as JSON writes it (and as the type allows).
+        if (child === undefined) continue
+        const named = secretNamed(key)
+        if (named === 'one') refuse(`${path}.${key}`, 'names a secret')
+        if (named === 'plural' && typeof child !== 'number')
+            refuse(`${path}.${key}`, 'names secrets, and is not a count')
         checkValue(child, `${path}.${key}`, depth + 1)
     }
 }
 
-/** Throws, naming the rule and the path, when `detail` breaks a rule {@link AuditDetail} lists. */
-function assertAuditDetail(detail: unknown): asserts detail is AuditDetail {
-    if (typeof detail !== 'object' || detail === null || Array.isArray(detail)) {
-        refuse('detail', 'is not an object')
-    }
+/**
+ * The detail as it will be WRITTEN, or a refusal naming the rule and the path. Two walks: one of what the
+ * caller handed over, which refuses what JSON cannot carry, and one of what `JSON.stringify` made of it,
+ * since a `toJSON`, a getter or a Proxy can make the two differ. The second is what is bounded and written.
+ */
+function writableDetail(detail: unknown): AuditDetail {
+    if (!isTopLevelObject(detail)) refuse('detail', 'is not an object')
     checkObject(detail, 'detail', 1)
-    const bytes = new TextEncoder().encode(JSON.stringify(detail)).length
+    let text: string
+    try {
+        text = JSON.stringify(detail)
+    } catch {
+        refuse('detail', 'cannot be serialized as JSON')
+    }
+    const bytes = new TextEncoder().encode(text).length
     if (bytes > AUDIT_DETAIL_MAX_BYTES)
         refuse('detail', `is ${bytes} bytes of JSON, over the ${AUDIT_DETAIL_MAX_BYTES}-byte bound`)
+    const written: unknown = JSON.parse(text)
+    if (!isTopLevelObject(written)) refuse('detail', 'is not an object once serialized')
+    checkObject(written, 'detail', 1)
+    return written as AuditDetail
 }
 
 export async function recordAuditEvent(db: DbPort, input: AuditEventInput): Promise<void> {
     // Checked before anything opens, so a refused detail never half-writes.
-    const detail = input.detail ?? null
-    if (detail !== null) assertAuditDetail(detail)
+    const detail = input.detail === undefined || input.detail === null ? null : writableDetail(input.detail)
     await db.withTenant(input.tenantId, (trx) =>
         trx
             .insertInto('audit_events')

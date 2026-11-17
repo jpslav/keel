@@ -125,6 +125,8 @@ describe('recordAuditEvent detail', () => {
         const withDetail = `docket-${Date.now()}-detail`
         const without = `docket-${Date.now()}-none`
         const detail = { refusal: 'revoked', removed: 3, steps: ['a', 'b'], nested: { ok: true, none: null } }
+        // A type with an optional property, as an adopter would write one; the property is left undefined.
+        const withOptional: typeof detail & { hint?: string } = { ...detail, hint: undefined }
         await recordAuditEvent(fakeDb, {
             tenantId,
             orgId,
@@ -132,7 +134,8 @@ describe('recordAuditEvent detail', () => {
             action: 'membership.invited',
             subjectType: 'Membership',
             subjectId: withDetail,
-            detail,
+            // An optional property left undefined is written as JSON writes it: absent.
+            detail: withOptional,
         })
         await recordAuditEvent(fakeDb, {
             tenantId,
@@ -209,7 +212,7 @@ describe('recordAuditEvent detail', () => {
         ['a Date', { at: new Date(0) }, 'detail.at is not a plain object'],
         ['a Map', { m: new Map() }, 'detail.m is not a plain object'],
         ['a function', { run: () => 1 }, 'detail.run is a function'],
-        ['undefined', { gone: undefined }, 'detail.gone is undefined'],
+        ['undefined in an array', { list: [1, undefined] }, 'detail.list[1] is undefined'],
         ['a bigint', { n: BigInt(1) }, 'detail.n is a bigint'],
         ['NaN', { n: Number.NaN }, 'detail.n is not a finite number'],
         ['Infinity', { n: Number.POSITIVE_INFINITY }, 'detail.n is not a finite number'],
@@ -224,7 +227,15 @@ describe('recordAuditEvent detail', () => {
         ['a snake_case api key', { api_key: 'x' }, 'detail.api_key names a secret'],
         ['an apiKey', { apiKey: 'x' }, 'detail.apiKey names a secret'],
         ['a client secret', { clientSecret: 'x' }, 'detail.clientSecret names a secret'],
-        ['a plural', { passwords: ['x'] }, 'detail.passwords names a secret'],
+        ['a plural that is not a count', { passwords: ['x'] }, 'detail.passwords names secrets, and is not a count'],
+        ['a plural holding a string', { revokedTokens: 'many' }, 'detail.revokedTokens names secrets'],
+        ['an accessKey', { accessKey: 'x' }, 'detail.accessKey names a secret'],
+        ['an AWS secret key name', { aws_secret_access_key: 'x' }, 'detail.aws_secret_access_key names a secret'],
+        ['a secretAccessKey', { secretAccessKey: 'x' }, 'detail.secretAccessKey names a secret'],
+        ['an encryptionKey', { encryptionKey: 'x' }, 'detail.encryptionKey names a secret'],
+        ['a pwd', { pwd: 'x' }, 'detail.pwd names a secret'],
+        ['a passcode', { passcode: 'x' }, 'detail.passcode names a secret'],
+        ['a PEM', { privateKeyPem: 'x' }, 'detail.privateKeyPem names a secret'],
         ['a header name', { Authorization: 'x' }, 'detail.Authorization names a secret'],
         ['a kebab-case cookie', { 'set-cookie': 'x' }, 'detail.set-cookie names a secret'],
         ['a nested secret', { items: [{ ok: 1 }, { privateKey: 'x' }] }, 'detail.items[1].privateKey names a secret'],
@@ -235,7 +246,7 @@ describe('recordAuditEvent detail', () => {
     test.each([
         ['an email address', { reason: 'sender jo.doe@example.test is not a member' }, 'looks like an email address'],
         ['a JWT', { seen: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' }, 'looks like a JWT'],
-        ['a Bearer credential', { header: 'Bearer abc123' }, 'looks like a Bearer credential'],
+        ['a Bearer credential', { header: 'Bearer sk_live_51HxYzAbCdEfGh0123' }, 'looks like a Bearer credential'],
     ])('refuses a value shaped like %s, and never repeats it', async (_name, detail, message) => {
         const refused = await attempt(detail)
         expect(refused).toContain(message)
@@ -261,9 +272,43 @@ describe('recordAuditEvent detail', () => {
         ['passwordChangedAt', { passwordChangedAt: '2026-11-17' }],
         ['keyId', { keyId: 'key-1' }],
         ['a refusal code', { refusal: 'revoked' }],
+        ['a count of revoked tokens', { revokedTokens: 3 }],
+        ['a count of cookies', { cookies: 2 }],
+        ['a count of input tokens', { inputTokens: 512 }],
+        ['a package version', { adapter: 'mailgun.js@4.1.0' }],
+        ['a refusal that mentions a bearer', { refusal: 'bearer missing' }],
+        ['an optional property left undefined', { outcome: 'ok', hint: undefined }],
         ['four levels', { a: { b: { c: { d: 1 } } } }],
     ])('lets %s through to the write', async (_name, detail) => {
         expect(await attempt(detail)).toBe(OPENED)
+    })
+
+    test('checks what JSON.stringify makes of the detail, since that is what is written', async () => {
+        // An array whose own toJSON swaps in a secret: its elements pass, its JSON does not.
+        const swapped = Object.assign(['ok'], { toJSON: () => ({ password: 'hunter2' }) })
+        expect(await attempt({ list: swapped })).toContain('detail.list.password names a secret')
+
+        // A hidden toJSON on the top object.
+        const hidden = { outcome: 'ok' }
+        Object.defineProperty(hidden, 'toJSON', { value: () => ({ reason: 'jo.doe@example.test' }) })
+        const refused = await attempt(hidden)
+        expect(refused).toContain('detail.reason looks like an email address')
+        expect(refused).not.toContain('jo.doe')
+
+        // A getter that answers one thing to the check and another to the write.
+        let reads = 0
+        const flipping = {
+            get reason() {
+                reads += 1
+                return reads === 1 ? 'fine' : 'jo.doe@example.test'
+            },
+        }
+        expect(await attempt(flipping)).toContain('detail.reason looks like an email address')
+
+        // And a toJSON that JSON cannot serialize at all.
+        const unserializable = { outcome: 'ok' }
+        Object.defineProperty(unserializable, 'toJSON', { value: () => ({ n: BigInt(1) }) })
+        expect(await attempt(unserializable)).toContain('detail cannot be serialized as JSON')
     })
 
     test('bounds the JSON in bytes, not characters, and says by how much', async () => {

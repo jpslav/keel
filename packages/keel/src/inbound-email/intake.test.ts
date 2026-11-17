@@ -283,6 +283,49 @@ describe('intakeInboundEmail', () => {
         }
     })
 
+    test("keel's own recording failing after the handler returned is not blamed on the handler", async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { fakeAuth } = await import('../adapters/fake/auth')
+        const { intakeInboundEmail } = await import('./intake')
+        const { inboundHandlers } = await import('./handlers')
+        const { tenantId } = await depotIds()
+
+        // The handler returns 'handled', naming a credential id Postgres cannot store (a NUL), so intake's
+        // own audit insert for the handled email throws.
+        inboundHandlers['unrecordable'] = () =>
+            Promise.resolve({
+                status: 'handled',
+                actorUserId: 'fixture-lead',
+                credential: { kind: 'inbound-email', id: 'bad\u0000id' },
+            })
+        try {
+            const outcome = await intakeInboundEmail(fakeDb, fakeAuth, {
+                to: formatInboundRecipient('depot', 'unrecordable', DEMO_INBOUND_DOMAIN),
+                from: ADA,
+                subject: 'hi',
+                bodyText: 'body',
+            })
+            expect(outcome.status).toBe('failed')
+
+            const trail = await fakeDb.withTenant(tenantId, (trx) =>
+                trx
+                    .selectFrom('audit_events')
+                    .select(['action', 'actor_user_id', 'detail'])
+                    .where('subject_id', '=', outcome.id!)
+                    .execute(),
+            )
+            expect(trail).toEqual([
+                {
+                    action: 'inbound-email.received',
+                    actor_user_id: 'system:inbound-email',
+                    detail: { outcome: 'failed', cause: 'intake-threw' },
+                },
+            ])
+        } finally {
+            delete inboundHandlers['unrecordable']
+        }
+    })
+
     test('an unresolvable org is unmatched and unstored (no tenant to anchor)', async () => {
         const { fakeDb } = await import('../adapters/fake/db')
         const { fakeAuth } = await import('../adapters/fake/auth')

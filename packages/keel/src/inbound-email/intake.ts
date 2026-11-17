@@ -135,6 +135,10 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         return { stored: true, id, status: 'unmatched', handler: null, reason: `no handler: ${parsed.handler}` }
     }
 
+    // The catch below keeps a poison message from becoming a 5xx (and a retry that would run the handler
+    // again). It also catches keel's own recording after the handler returned, which the audit row must
+    // not blame on the handler.
+    let handlerReturned = false
     try {
         const result = await handler({
             db,
@@ -148,6 +152,7 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
             bodyText,
             emailId: id,
         })
+        handlerReturned = true
         if (result.status === 'handled') {
             await setInboundStatus(db, org.tenantId, id, { status: 'handled', handler: parsed.handler, error: null })
             await auditReceived(db, org, id, result.actorUserId, { outcome: 'handled' }, result.credential ?? null)
@@ -164,7 +169,10 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         // Poison-message isolation: record 'failed', keep the row, do NOT re-raise (the caller 200s).
         const message = error instanceof Error ? error.message : String(error)
         await setInboundStatus(db, org.tenantId, id, { status: 'failed', handler: parsed.handler, error: message })
-        await auditReceived(db, org, id, SYSTEM_ACTOR, { outcome: 'failed', cause: 'handler-threw' })
+        await auditReceived(db, org, id, SYSTEM_ACTOR, {
+            outcome: 'failed',
+            cause: handlerReturned ? 'intake-threw' : 'handler-threw',
+        })
         return { stored: true, id, status: 'failed', handler: parsed.handler, reason: message }
     }
 }
