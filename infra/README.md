@@ -35,7 +35,9 @@ CIDRs and rolls back. Changing shape later means a new stack and a snapshot rest
     `data-api-access` (this shape, deployed) close it.
 
 `pnpm --filter infra synth` builds both shapes offline: `cdk synth` builds the one the params choose, then
-`check-shapes.ts` builds both and checks each against the runtime's list of required variables.
+`check-shapes.ts` builds both and checks each against the runtime's list of required variables. It also
+checks the way in: every Secrets Manager grant names this database's secret alone, every `rds-data` grant
+names this cluster alone, and on `data-api` the database's security group admits nothing.
 
 ## Deploys — checks in CI, deploys in your own pipeline
 

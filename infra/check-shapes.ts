@@ -42,6 +42,34 @@ function lambda(all: Record<string, Resource>, name: 'Server' | 'Migrator') {
 
 const count = (all: Record<string, Resource>, type: string) => Object.values(all).filter((r) => r.Type === type).length
 
+const idsOf = (all: Record<string, Resource>, ...types: string[]) =>
+    Object.entries(all)
+        .filter(([, r]) => types.includes(r.Type))
+        .map(([id]) => id)
+
+type Statement = { Action?: unknown; Resource?: unknown }
+
+/** Every IAM policy statement in the stack whose actions name `service`'s (`rds-data:`, `secretsmanager:`). */
+function grantsOf(all: Record<string, Resource>, service: string): Statement[] {
+    return Object.values(all)
+        .filter((r) => r.Type === 'AWS::IAM::Policy')
+        .flatMap(
+            (r) =>
+                ((r.Properties?.PolicyDocument as { Statement?: unknown[] } | undefined)?.Statement ??
+                    []) as Statement[],
+        )
+        .filter((s) => JSON.stringify(s.Action ?? '').includes(service))
+}
+
+/** Whether every resource `statement` grants refers to one of `ids`, and none is a wildcard. */
+function namesOnly(statement: Statement, ids: readonly string[]): boolean {
+    const granted = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource ?? '*']
+    return granted.every((resource) => {
+        const text = JSON.stringify(resource)
+        return !text.includes('*') && ids.some((id) => text.includes(`"Ref":"${id}"`))
+    })
+}
+
 for (const transport of ['pg', 'data-api'] as const) {
     const all = resources(transport)
     const label = (what: string) => `[${transport}] ${what}`
@@ -52,6 +80,14 @@ for (const transport of ['pg', 'data-api'] as const) {
 
     check(server.env.DATABASE_TRANSPORT === transport, label('the server says which transport it runs'))
     check(migrator.env.DATABASE_TRANSPORT === transport, label('the migrator says which transport it runs'))
+
+    // The database secret is read by name, on both shapes: never a wildcard, never another secret.
+    const secretIds = idsOf(all, 'AWS::SecretsManager::Secret', 'AWS::SecretsManager::SecretTargetAttachment')
+    const secretGrants = grantsOf(all, 'secretsmanager:')
+    check(
+        secretGrants.length > 0 && secretGrants.every((s) => namesOnly(s, secretIds)),
+        label('every Secrets Manager grant names this database secret alone'),
+    )
 
     if (transport === 'data-api') {
         for (const name of Object.keys(DATABASE_ENV['data-api'])) {
@@ -66,27 +102,26 @@ for (const transport of ['pg', 'data-api'] as const) {
         check(count(all, 'AWS::EC2::InternetGateway') === 0, label('no internet gateway'))
         // Every statement granting a Data API action names this cluster, and nothing wider: the grant plus the
         // secret is the whole way in on this shape.
-        const dataApiStatements = Object.values(all)
-            .filter((r) => r.Type === 'AWS::IAM::Policy')
-            .flatMap(
-                (r) =>
-                    ((r.Properties?.PolicyDocument as { Statement?: unknown[] } | undefined)?.Statement ?? []) as {
-                        Action?: unknown
-                        Resource?: unknown
-                    }[],
-            )
-            .filter((s) => JSON.stringify(s.Action ?? '').includes('rds-data:'))
+        const dataApiGrants = grantsOf(all, 'rds-data:')
         check(
-            dataApiStatements.some((s) => JSON.stringify(s.Action).includes('rds-data:ExecuteStatement')),
+            dataApiGrants.some((s) => JSON.stringify(s.Action).includes('rds-data:ExecuteStatement')),
             label('a role is granted rds-data:ExecuteStatement'),
         )
         check(
-            dataApiStatements.every((s) => {
-                const resource = JSON.stringify(s.Resource ?? '*')
-                return resource.includes(`"Ref":"${clusterId}"`) && !resource.includes('"*"')
-            }),
+            dataApiGrants.every((s) => namesOnly(s, [clusterId])),
             label('every rds-data grant is scoped to this cluster alone'),
         )
+        // Nothing reaches the database over the network on this shape: its security group admits nobody.
+        const dbGroups = JSON.stringify(cluster.VpcSecurityGroupIds ?? [])
+        const ingress = Object.entries(all).filter(
+            ([id, r]) =>
+                (r.Type === 'AWS::EC2::SecurityGroupIngress' &&
+                    dbGroups.includes(JSON.stringify(r.Properties?.GroupId ?? null))) ||
+                (r.Type === 'AWS::EC2::SecurityGroup' &&
+                    dbGroups.includes(`"${id}"`) &&
+                    ((r.Properties?.SecurityGroupIngress as unknown[] | undefined) ?? []).length > 0),
+        )
+        check(ingress.length === 0, label('the database security group admits no inbound traffic'))
     } else {
         for (const name of Object.keys(DATABASE_ENV.pg)) {
             check(name in server.env, label(`the server sets ${name}, which the runtime requires`))

@@ -1985,6 +1985,11 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   `infra/check-shapes.ts`. It found what review found missing: nothing built the `data-api` shape, and
   nothing tied its environment to `DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`.
   knip needs no entry for it: it reads the `synth` script.
+- **The gate checks the way in, not only the wiring** (the independent cold review, 2026-11-17). It passed
+  with `secretsmanager:GetSecretValue` on `*` and the database port open to `0.0.0.0/0`. Now every
+  Secrets Manager grant must name this database's secret alone, on both shapes; every `rds-data` grant
+  must name this cluster alone; and on `data-api` the database's security group must admit nothing.
+  Each was seen red by a mutation of the stack.
 
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 
