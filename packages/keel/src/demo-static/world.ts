@@ -33,6 +33,7 @@ import { advisoryGates, evaluateGates, firstBlockingGate } from '../core/gates'
 import {
     DEMO_INBOUND_DOMAIN,
     formatInboundRecipient,
+    type InboundReceivedDetail,
     normalizeEmailAddress,
     normalizeInboundBody,
     parseInboundRecipient,
@@ -320,7 +321,13 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
     /** The same append, for a mutation whose tenant/org is RESOLVED rather than ambient (inbound mail
      *  files into the addressed team, not the team you happen to be looking at). */
     function appendAudit(
-        entry: { action: string; subjectType: string; subjectId: string | null; actorUserId: string },
+        entry: {
+            action: string
+            subjectType: string
+            subjectId: string | null
+            actorUserId: string
+            detail?: InboundReceivedDetail
+        },
         tenantSlug: string,
         orgSlug: string,
         at = new Date().toISOString(),
@@ -803,6 +810,8 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
         let error: string | null = null
         let actor = INBOUND_SYSTEM_ACTOR
         let subjectId: string | undefined
+        // The same closed vocabulary the server intake records (keel/core/inbound-email).
+        let detail: InboundReceivedDetail = { outcome: 'unmatched', cause: 'no-handler' }
 
         const handler = inboundHandlers[parsed.handler]
         if (!handler) {
@@ -825,12 +834,15 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
                     status = 'handled'
                     actor = result.actorUserId
                     subjectId = result.subjectId
+                    detail = { outcome: 'handled' }
                 } else {
                     error = result.reason
+                    detail = { outcome: 'unmatched', cause: 'declined' }
                 }
             } catch (thrown) {
                 status = 'failed'
                 error = thrown instanceof Error ? thrown.message : String(thrown)
+                detail = { outcome: 'failed', cause: 'handler-threw' }
             }
         }
 
@@ -850,7 +862,13 @@ export function useDemoWorld(options: DemoWorldOptions = {}): DemoWorld {
             ...prev,
         ])
         appendAudit(
-            { action: 'inbound-email.received', subjectType: 'InboundEmail', subjectId: id, actorUserId: actor },
+            {
+                action: 'inbound-email.received',
+                subjectType: 'InboundEmail',
+                subjectId: id,
+                actorUserId: actor,
+                detail,
+            },
             seedOrg.tenantSlug,
             seedOrg.slug,
             at,

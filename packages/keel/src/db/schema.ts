@@ -1,5 +1,6 @@
 import type { AppTables } from '@app-config/db/schema'
 import type { Generated } from 'kysely'
+import type { AuditDetail } from './audit'
 
 // The FRAMEWORK's tables. Kept in lockstep with packages/keel/src/db/migrations (kysely-codegen regeneration against
 // embedded-postgres arrives with the contract-test job). The app's tenant-scoped tables register
@@ -59,6 +60,8 @@ interface AuditEventsTable {
     credential_kind: string | null
     /** WHICH credential (a token id, a key id), never a secret; NULL for a session or not recorded (0014). */
     credential_id: string | null
+    /** WHY, as codes and counts (keel/db/audit AuditDetail); jsonb, round-trips as a parsed object. NULL = none recorded (0016). */
+    detail: AuditDetail | null
     at: Generated<string>
 }
 

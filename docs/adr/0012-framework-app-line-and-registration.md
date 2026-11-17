@@ -732,3 +732,60 @@ exists to stop. `keel/no-dynamic-app-import` and `keel/no-dynamic-framework-impo
 fences there. They match each group through the same `ignore` matcher `no-restricted-imports` uses, so
 the two halves of a fence read a specifier the same way, and `tests/lint/framework-fence.test.ts` checks
 that specifier by specifier.
+
+## Addendum (2026-11-17): an audit row can say why
+
+The trail said who acted, what they did, to which subject, when, and (since 0014) with which credential.
+It could not say why: a refused credential's reason (unknown, revoked, expired), or how many rows a purge
+removed. The first adopter, the pages console, asked for both.
+
+**The column.** Framework migration `0016_audit_detail` adds a nullable `detail jsonb` to `audit_events`.
+NULL means "none recorded": every older row, and every writer that passes none. The grant is unchanged.
+`app_user` keeps SELECT and INSERT only, and table-level grants cover the new column. The RLS proofs write
+and read a nested detail as `app_user` on both engines, and prove that an UPDATE of it is refused.
+
+**Never a secret, a token, a password or free-form personal data.** `app_user` holds no UPDATE or DELETE
+on the table, so the app can never correct or redact a detail once written. Record a code or a count.
+
+**The writer is the gate.** `recordAuditEvent` takes an optional `detail` (`AuditDetail`, `keel/db/audit`)
+and checks it before it opens a transaction. The type admits only JSON (strings, numbers, booleans, null,
+arrays and plain objects), so a Date, a function or `undefined` does not compile. At run time it refuses:
+
+- anything that is not JSON, or a number that is not finite;
+- nesting deeper than four levels, or more than 1024 bytes of JSON;
+- a NUL or an unpaired surrogate in a string (Postgres's jsonb refuses both, and would fail the insert);
+- a key whose last word names a secret (`token`, `password`, `secret`, `cookie`, `apiKey` and the like;
+  `tokenId` and `tokensRemoved` pass);
+- any key or value shaped like an email address, a JWT or a `Bearer` credential.
+
+The error names the rule and the path, never the value, which may be the secret it refused.
+
+These checks catch the likely accident, which is spreading a request, a member or an error into the detail.
+They are not a scrubber: a secret under an innocent key, in an innocent shape, passes. The rule above is the
+contract.
+
+**A run-time denylist, not a lint rule.** A lint rule sees the literal keys at a call site. The accident it
+would have to catch is a spread or a variable (`detail: { ...body }`, `detail: { error: err.message }`),
+which only a run-time check sees. The denylist names secrets by their key, which is reliable. It does not
+try to name personal data by key, which is not (a name, a note or an address can sit under any key). The
+one personal-data shape keel itself handles, an email address, is caught by its value.
+
+**No CHECK constraint.** jsonb rewrites numbers and whitespace (`1e2` reads back as `100`), so a byte bound
+in SQL would measure a different text from the writer's, and the two could disagree about the same detail.
+
+**Keel's own use: inbound intake.** The `inbound-email.received` row now records why the email was filed as
+it was, in a closed vocabulary (`InboundReceivedDetail`, `keel/core/inbound-email`):
+
+- `{ outcome: 'handled' }`;
+- `{ outcome: 'unmatched', cause: 'no-handler' }` or `{ outcome: 'unmatched', cause: 'declined' }`;
+- `{ outcome: 'failed', cause: 'handler-threw' }`.
+
+The static twin records the same. The handler's own reason never goes in: it is free text, and keel's
+handlers write the sender's address into it. It stays on the `inbound_emails` row.
+
+**Reading it.** The Simulator's Events tab shows `detail` inside the expanded row's JSON, as a React text
+child, so it is escaped and never parsed as HTML. An adopter's own audit screen must do the same: render it
+as text, never through `dangerouslySetInnerHTML` or a Markdown renderer.
+
+**What an adopter does.** Nothing to copy. 0016 runs on the next migrator run, and existing rows read NULL.
+To record a why, pass `detail` to `recordAuditEvent`.

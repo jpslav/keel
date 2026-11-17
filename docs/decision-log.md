@@ -2203,3 +2203,28 @@ The design is in ADR-0004's addendum of the same date.
   their memberships are cluster-wide. Restored into another cluster, the ledger says 0001 and 0015 ran, so
   neither runs again, and neither `app_user` nor anyone's switch to it came along. The
   `db-role-not-superuser` cutover row says what to do before and after a restore.
+
+## Audit rows carry a `detail` (2026-11-17, `feat/audit-detail`)
+
+The design is in ADR-0012's addendum of the same date. It was asked for by the pages console (item T-037).
+
+- **One nullable jsonb column, not typed columns.** A refusal's reason and a purge's count share nothing
+  but "why", and the next adopter's why will be different again. Typed columns would make every one a
+  framework migration.
+- **Checked in the writer, before any transaction opens.** The trail is append-only, so a bad detail could
+  never be taken back. A refused detail throws, and the audited mutation (already committed) answers 500,
+  the existing "committed write, failed audit" direction. The bound is 1024 bytes because codes and counts
+  take a few dozen, and a list that grows with the data then fails in a test rather than in a log nobody
+  can trim.
+- **A key denylist, matched on the key's last word.** Matching the whole key on a substring refused
+  `tokensRemoved`, which is the pages purge's own count. Matching on the last word refuses what a key
+  NAMES (`accessToken`, `apiKey`) and passes what it describes (`tokenId`, `tokenCount`). Personal data is
+  caught only by value, as an email-address shape, because no key name reliably marks it.
+- **The error never repeats the value.** It names the rule and the path. The value may be the secret, and
+  the error goes to logs and to error tracking.
+- **Intake records a closed vocabulary, not the handler's reason.** Both of keel's handlers write the
+  sender's address into `reason`. Copying it would have put personal data into the one table nobody can
+  redact, in keel's own first use of the column. Letting a handler add a structured code of its own is a
+  possible follow-up; nothing asks for it yet.
+- **No SQL CHECK.** jsonb normalizes numbers and whitespace, so a SQL byte bound and the writer's would
+  measure different texts.

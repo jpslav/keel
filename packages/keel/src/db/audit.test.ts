@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { makeTestTmpDir } from '../../../../tests/support/tmp-dir'
+import type { DbPort } from '../ports/db'
+import type { AuditDetail } from './audit'
 import { orgIdForSlug } from './org-lookup'
 import { tenantIdForSlug } from './tenant-lookup'
 
@@ -111,6 +113,172 @@ describe('recordAuditEvent', () => {
             { subject_id: byBadge, credential_kind: 'fixture-badge', credential_id: 'badge-7' },
             { subject_id: unsaid, credential_kind: null, credential_id: null },
         ])
+    })
+})
+
+describe('recordAuditEvent detail', () => {
+    test('records a detail as jsonb and reads it back; a writer that passes none records NULL', async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { recordAuditEvent } = await import('./audit')
+        const { tenantId, orgId } = await ids('harbor', 'depot')
+
+        const withDetail = `docket-${Date.now()}-detail`
+        const without = `docket-${Date.now()}-none`
+        const detail = { refusal: 'revoked', removed: 3, steps: ['a', 'b'], nested: { ok: true, none: null } }
+        await recordAuditEvent(fakeDb, {
+            tenantId,
+            orgId,
+            actorUserId: 'system:scheduler',
+            action: 'membership.invited',
+            subjectType: 'Membership',
+            subjectId: withDetail,
+            detail,
+        })
+        await recordAuditEvent(fakeDb, {
+            tenantId,
+            orgId,
+            actorUserId: 'system:scheduler',
+            action: 'membership.invited',
+            subjectType: 'Membership',
+            subjectId: without,
+        })
+
+        const rows = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select(['subject_id', 'detail'])
+                .where('subject_id', 'in', [withDetail, without])
+                .orderBy('subject_id')
+                .execute(),
+        )
+        expect(rows).toEqual([
+            { subject_id: withDetail, detail },
+            { subject_id: without, detail: null },
+        ])
+    })
+
+    test('the type refuses what JSON cannot carry', async () => {
+        const ok: AuditDetail = { refusal: 'expired', removed: 0, ids: ['a'], nested: { flag: false, none: null } }
+        // @ts-expect-error a Date is not JSON
+        const date: AuditDetail = { at: new Date(0) }
+        // @ts-expect-error neither is a function
+        const fn: AuditDetail = { run: () => 1 }
+        // @ts-expect-error nor undefined
+        const undef: AuditDetail = { gone: undefined }
+        expect([ok, date, fn, undef]).toHaveLength(4)
+    })
+
+    // A DbPort that fails if anything opens: a refused detail must be refused before any transaction.
+    const OPENED = 'stub: a transaction was opened'
+    const unopenable: DbPort = {
+        getDb: () => {
+            throw new Error(OPENED)
+        },
+        withTenant: () => Promise.reject(new Error(OPENED)),
+        ready: () => Promise.resolve(),
+        migrateToLatest: () => Promise.resolve(),
+    }
+
+    async function attempt(detail: unknown): Promise<string> {
+        const { recordAuditEvent } = await import('./audit')
+        try {
+            await recordAuditEvent(unopenable, {
+                tenantId: 't',
+                orgId: 'o',
+                actorUserId: 'system:scheduler',
+                action: 'membership.invited',
+                subjectType: 'Membership',
+                detail: detail as AuditDetail,
+            })
+        } catch (error) {
+            return error instanceof Error ? error.message : String(error)
+        }
+        return 'no error'
+    }
+
+    const cycle: Record<string, unknown> = {}
+    cycle.self = cycle
+    const symbolKeyed = { ok: 1, [Symbol('s')]: 2 }
+    const holed: number[] = []
+    holed[0] = 1
+    holed[2] = 3
+
+    test.each([
+        ['an array at the top', [1, 2], 'detail is not an object'],
+        ['a string at the top', 'revoked', 'detail is not an object'],
+        ['a Date', { at: new Date(0) }, 'detail.at is not a plain object'],
+        ['a Map', { m: new Map() }, 'detail.m is not a plain object'],
+        ['a function', { run: () => 1 }, 'detail.run is a function'],
+        ['undefined', { gone: undefined }, 'detail.gone is undefined'],
+        ['a bigint', { n: BigInt(1) }, 'detail.n is a bigint'],
+        ['NaN', { n: Number.NaN }, 'detail.n is not a finite number'],
+        ['Infinity', { n: Number.POSITIVE_INFINITY }, 'detail.n is not a finite number'],
+        ['a hole in an array', { list: holed }, 'detail.list[1] is undefined'],
+        ['a symbol key', symbolKeyed, 'detail has a symbol key'],
+        ['five levels', { a: { b: { c: { d: { e: 1 } } } } }, 'detail.a.b.c.d nests deeper than 4 levels'],
+        ['a cycle', cycle, 'nests deeper than 4 levels'],
+        ['a NUL character', { s: 'a\u0000b' }, 'detail.s holds a NUL character'],
+        ['an unpaired surrogate', { s: 'a\uD800b' }, 'detail.s holds an unpaired surrogate'],
+        ['a key named token', { token: 'x' }, 'detail.token names a secret'],
+        ['a camelCase secret', { accessToken: 'x' }, 'detail.accessToken names a secret'],
+        ['a snake_case api key', { api_key: 'x' }, 'detail.api_key names a secret'],
+        ['an apiKey', { apiKey: 'x' }, 'detail.apiKey names a secret'],
+        ['a client secret', { clientSecret: 'x' }, 'detail.clientSecret names a secret'],
+        ['a plural', { passwords: ['x'] }, 'detail.passwords names a secret'],
+        ['a header name', { Authorization: 'x' }, 'detail.Authorization names a secret'],
+        ['a kebab-case cookie', { 'set-cookie': 'x' }, 'detail.set-cookie names a secret'],
+        ['a nested secret', { items: [{ ok: 1 }, { privateKey: 'x' }] }, 'detail.items[1].privateKey names a secret'],
+    ])('refuses %s, naming the rule and the path', async (_name, detail, message) => {
+        expect(await attempt(detail)).toContain(message)
+    })
+
+    test.each([
+        ['an email address', { reason: 'sender jo.doe@example.test is not a member' }, 'looks like an email address'],
+        ['a JWT', { seen: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' }, 'looks like a JWT'],
+        ['a Bearer credential', { header: 'Bearer abc123' }, 'looks like a Bearer credential'],
+    ])('refuses a value shaped like %s, and never repeats it', async (_name, detail, message) => {
+        const refused = await attempt(detail)
+        expect(refused).toContain(message)
+        expect(refused).not.toContain(String(Object.values(detail)[0]))
+    })
+
+    test('a key shaped like an email address is refused without repeating it', async () => {
+        const refused = await attempt({ 'jo.doe@example.test': 1 })
+        expect(refused).toContain('detail has a key that looks like an email address')
+        expect(refused).not.toContain('jo.doe')
+    })
+
+    test('a secret under a key that names it is refused without repeating the value', async () => {
+        const refused = await attempt({ sessionToken: 'sk_live_51HxYz' })
+        expect(refused).toContain('names a secret')
+        expect(refused).not.toContain('sk_live_51HxYz')
+    })
+
+    test.each([
+        ['tokenId', { tokenId: 'tok-1' }],
+        ['tokenCount', { tokenCount: 2 }],
+        ['tokensRemoved', { tokensRemoved: 42 }],
+        ['passwordChangedAt', { passwordChangedAt: '2026-11-17' }],
+        ['keyId', { keyId: 'key-1' }],
+        ['a refusal code', { refusal: 'revoked' }],
+        ['four levels', { a: { b: { c: { d: 1 } } } }],
+    ])('lets %s through to the write', async (_name, detail) => {
+        expect(await attempt(detail)).toBe(OPENED)
+    })
+
+    test('bounds the JSON in bytes, not characters, and says by how much', async () => {
+        const { AUDIT_DETAIL_MAX_BYTES } = await import('./audit')
+        // `{"s":"…"}` is 8 bytes around the string.
+        const atBound = { s: 'x'.repeat(AUDIT_DETAIL_MAX_BYTES - 8) }
+        expect(await attempt(atBound)).toBe(OPENED)
+        const overByOne = { s: 'x'.repeat(AUDIT_DETAIL_MAX_BYTES - 7) }
+        expect(await attempt(overByOne)).toContain(
+            `detail is ${AUDIT_DETAIL_MAX_BYTES + 1} bytes of JSON, over the ${AUDIT_DETAIL_MAX_BYTES}-byte bound`,
+        )
+        // Two bytes a character: under the bound in characters, over it in bytes.
+        const accented = { s: 'é'.repeat(AUDIT_DETAIL_MAX_BYTES / 2) }
+        expect(JSON.stringify(accented).length).toBeLessThan(AUDIT_DETAIL_MAX_BYTES)
+        expect(await attempt(accented)).toContain('bytes of JSON, over the')
     })
 })
 

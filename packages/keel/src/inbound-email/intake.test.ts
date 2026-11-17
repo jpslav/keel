@@ -82,6 +82,17 @@ describe('intakeInboundEmail', () => {
         )
         expect(audit.map((a) => a.action)).toContain('inbound-email.received')
 
+        // ...whose detail says why it was filed so: its handler handled it
+        const handled = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select('detail')
+                .where('subject_id', '=', outcome.id!)
+                .where('action', '=', 'inbound-email.received')
+                .executeTakeFirstOrThrow(),
+        )
+        expect(handled.detail).toEqual({ outcome: 'handled' })
+
         // ...and both rows name the PERSON as the actor and THIS email as the credential they acted with,
         // so a docket filed by email never reads like one filed in the browser.
         const credentialed = await fakeDb.withTenant(tenantId, (trx) =>
@@ -138,11 +149,23 @@ describe('intakeInboundEmail', () => {
         const received = await fakeDb.withTenant(tenantId, (trx) =>
             trx
                 .selectFrom('audit_events')
-                .select(['actor_user_id', 'credential_kind', 'credential_id'])
+                .select(['actor_user_id', 'credential_kind', 'credential_id', 'detail'])
                 .where('subject_id', '=', outcome.id!)
                 .executeTakeFirstOrThrow(),
         )
-        expect(received).toEqual({ actor_user_id: 'system:inbound-email', credential_kind: null, credential_id: null })
+        expect(received).toEqual({
+            actor_user_id: 'system:inbound-email',
+            credential_kind: null,
+            credential_id: null,
+            // WHY, in the closed vocabulary: the handler declined. Its reason names the sender, so it stays
+            // on the inbound row and never reaches the append-only trail.
+            detail: { outcome: 'unmatched', cause: 'declined' },
+        })
+        expect(outcome.reason).toContain('stranger@nowhere.test')
+        const trail = await fakeDb.withTenant(tenantId, (trx) =>
+            trx.selectFrom('audit_events').selectAll().where('subject_id', '=', outcome.id!).execute(),
+        )
+        expect(JSON.stringify(trail)).not.toContain('stranger@nowhere.test')
     })
 
     test('a restricted member is refused: email authoring grants no more than the UI', async () => {
@@ -211,6 +234,53 @@ describe('intakeInboundEmail', () => {
         expect(row.status).toBe('unmatched')
         expect(row.handler).toBeNull()
         expect(row.error).toContain('bogus')
+
+        const received = await fakeDb.withTenant(tenantId, (trx) =>
+            trx
+                .selectFrom('audit_events')
+                .select('detail')
+                .where('subject_id', '=', outcome.id!)
+                .executeTakeFirstOrThrow(),
+        )
+        expect(received.detail).toEqual({ outcome: 'unmatched', cause: 'no-handler' })
+    })
+
+    test('a handler that throws is filed failed, and its audit row says so without the message', async () => {
+        const { fakeDb } = await import('../adapters/fake/db')
+        const { fakeAuth } = await import('../adapters/fake/auth')
+        const { intakeInboundEmail } = await import('./intake')
+        const { inboundHandlers } = await import('./handlers')
+        const { tenantId } = await depotIds()
+
+        // A poison handler, registered for this test only under a slug no seam uses.
+        inboundHandlers['explodes'] = () => Promise.reject(new Error(`cannot parse mail from ${ADA}`))
+        try {
+            const outcome = await intakeInboundEmail(fakeDb, fakeAuth, {
+                to: formatInboundRecipient('depot', 'explodes', DEMO_INBOUND_DOMAIN),
+                from: ADA,
+                subject: 'hi',
+                bodyText: 'body',
+            })
+            expect(outcome.status).toBe('failed')
+            expect(outcome.reason).toContain(ADA)
+
+            const trail = await fakeDb.withTenant(tenantId, (trx) =>
+                trx
+                    .selectFrom('audit_events')
+                    .select(['action', 'actor_user_id', 'detail'])
+                    .where('subject_id', '=', outcome.id!)
+                    .execute(),
+            )
+            expect(trail).toEqual([
+                {
+                    action: 'inbound-email.received',
+                    actor_user_id: 'system:inbound-email',
+                    detail: { outcome: 'failed', cause: 'handler-threw' },
+                },
+            ])
+        } finally {
+            delete inboundHandlers['explodes']
+        }
     })
 
     test('an unresolvable org is unmatched and unstored (no tenant to anchor)', async () => {

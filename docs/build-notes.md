@@ -1652,3 +1652,12 @@ the panel is the element that carries it.
   `current_user::regrole` turns a role named `Keel_Second` into a lookup of `keel_second`. Compare
   `pg_roles.rolname = current_user` instead, and quote any role name you print for someone to run
   (`quote_ident`). A test role with a mixed-case name is what found it.
+
+## jsonb refuses some JSON, and rewrites the rest (2026-11-17, `feat/audit-detail`)
+
+- **Postgres's jsonb refuses a NUL and an unpaired surrogate, and `JSON.stringify` writes both.**
+  `JSON.stringify({ s: 'a\u0000b' })` is valid JSON, and jsonb refuses it as an "unsupported Unicode
+  escape sequence". A lone `\uD800` is refused as "invalid input syntax for type json" (probed on pglite,
+  Postgres 18.6). So "it serialized" is not "it will store": `recordAuditEvent` checks both before it
+  writes. jsonb also rewrites what it stores: `{"a":1e2}` reads back as `{"a": 100}`, with a space after
+  each colon and comma. A byte bound in SQL measures that text, not the one the writer sent.
