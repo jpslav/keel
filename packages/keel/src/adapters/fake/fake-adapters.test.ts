@@ -1,5 +1,8 @@
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import path from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { NotFoundError } from '../../ports/errors'
 
 // Point all fake-adapter state at a throwaway dir BEFORE importing the adapters.
 const tmp = makeTestTmpDir('app-fakes-')
@@ -98,6 +101,209 @@ describe('fake storage', () => {
         test('delete keeps resolveKey’s path-escape guard', async () => {
             const { fakeStorage } = await import('./storage')
             await expect(fakeStorage.delete(['../outside.txt'])).rejects.toThrow(/invalid storage key/)
+        })
+    })
+
+    describe('copy', () => {
+        // A directory of its own, as for list and delete.
+        const sub = (name: string) => `copy-test/${name}`
+        const text = (body: Uint8Array) => new TextDecoder().decode(body)
+
+        test('copies the bytes and the content type, and leaves the source where it was', async () => {
+            const { fakeStorage } = await import('./storage')
+            // Not text: a copy that went through a string would corrupt these.
+            const bytes = new Uint8Array([0, 255, 128, 10, 13, 0, 1, 254])
+            await fakeStorage.put(sub('basic/from.bin'), bytes, 'application/x-keel-test')
+
+            await expect(fakeStorage.copy(sub('basic/from.bin'), sub('basic/deep/to.bin'))).resolves.toBeUndefined()
+
+            expect(await fakeStorage.get(sub('basic/deep/to.bin'))).toEqual({
+                body: bytes,
+                contentType: 'application/x-keel-test',
+            })
+            expect((await fakeStorage.get(sub('basic/from.bin')))!.body).toEqual(bytes)
+            expect(await fakeStorage.list(sub('basic/'))).toEqual([sub('basic/deep/to.bin'), sub('basic/from.bin')])
+        })
+
+        test('the copy is its own object: changing the source later does not change it', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('own/from'), 'one', 'text/plain')
+            await fakeStorage.copy(sub('own/from'), sub('own/to'))
+
+            await fakeStorage.put(sub('own/from'), 'two', 'application/json')
+
+            expect(await fakeStorage.get(sub('own/to'))).toEqual({
+                body: new TextEncoder().encode('one'),
+                contentType: 'text/plain',
+            })
+        })
+
+        test('overwrites an existing destination, body and content type both, as put does', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('over/from'), 'new bytes', 'text/plain')
+            await fakeStorage.put(sub('over/to'), 'old bytes that were longer', 'application/json')
+
+            await fakeStorage.copy(sub('over/from'), sub('over/to'))
+
+            const object = (await fakeStorage.get(sub('over/to')))!
+            expect(text(object.body)).toBe('new bytes')
+            expect(object.contentType).toBe('text/plain')
+            expect(await fakeStorage.list(sub('over/'))).toEqual([sub('over/from'), sub('over/to')])
+        })
+
+        test('a missing source is a NotFoundError and creates nothing', async () => {
+            const { fakeStorage } = await import('./storage')
+
+            const failure = fakeStorage.copy(sub('missing/nope'), sub('missing/deep/dest'))
+
+            await expect(failure).rejects.toBeInstanceOf(NotFoundError)
+            await expect(failure).rejects.toThrow(/missing\/nope/)
+            expect(await fakeStorage.get(sub('missing/deep/dest'))).toBeNull()
+            expect(await fakeStorage.list(sub('missing/'))).toEqual([])
+            // Nothing at all: not even the destination's directory, which the check runs before.
+            expect(existsSync(path.join(tmp, 'storage', sub('missing/deep')))).toBe(false)
+        })
+
+        test('a source that is a directory is a missing source too: a directory is not an object', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('dir/inner/x'), 'x', 'text/plain')
+
+            const failure = fakeStorage.copy(sub('dir/inner'), sub('dir/deep/dest'))
+
+            await expect(failure).rejects.toBeInstanceOf(NotFoundError)
+            expect(existsSync(path.join(tmp, 'storage', sub('dir/deep')))).toBe(false)
+            expect(await fakeStorage.list(sub('dir/'))).toEqual([sub('dir/inner/x')])
+        })
+
+        test('a source deleted while it is being copied is a missing source, and leaves nothing behind', async () => {
+            const { fakeStorage } = await import('./storage')
+            let missing = 0
+            // The two race for real (an in-process interleaving, not a mock), so each round may go either way; what
+            // may never happen is a raw filesystem error, an orphan sidecar or a temp file. It runs until the
+            // deletion has won a few times, so the failure path is known to have run, and gives up at 300 rounds.
+            for (let round = 0; round < 300 && missing < 3; round++) {
+                const from = sub(`gone/${round}/from`)
+                const to = sub(`gone/${round}/to`)
+                await fakeStorage.put(from, 'bytes', 'text/plain')
+
+                const [copied, deleted] = await Promise.allSettled([
+                    fakeStorage.copy(from, to),
+                    fakeStorage.delete([from]),
+                ])
+
+                expect(deleted.status).toBe('fulfilled')
+                const dir = path.join(tmp, 'storage', sub(`gone/${round}`))
+                expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+                if (copied.status === 'rejected') {
+                    missing++
+                    expect(copied.reason).toBeInstanceOf(NotFoundError)
+                    expect(readdirSync(dir)).not.toContain('to.meta.json')
+                    expect(await fakeStorage.get(to)).toBeNull()
+                } else {
+                    expect(text((await fakeStorage.get(to))!.body)).toBe('bytes')
+                }
+            }
+            // Not vacuous: the failure path ran.
+            expect(missing).toBeGreaterThan(0)
+        })
+
+        test('a destination that cannot be published fails and leaves no temp file, whichever file blocks it', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('pubfail/from'), 'f', 'text/plain')
+            // The fake cannot hold an object `d` beside the directory `d/` (`put` fails on such a key too), and
+            // the sidecar of `e` is `e.meta.json`, which a key like `e.meta.json/inner` makes a directory.
+            await fakeStorage.put(sub('pubfail/d/inner'), 'i', 'text/plain')
+            await fakeStorage.put(sub('pubfail/e.meta.json/inner'), 'i', 'text/plain')
+
+            // the body cannot be published (the sidecar already was)
+            await expect(fakeStorage.copy(sub('pubfail/from'), sub('pubfail/d'))).rejects.toThrow()
+            // the sidecar cannot be published (the body, staged beside it, must not be left behind)
+            await expect(fakeStorage.copy(sub('pubfail/from'), sub('pubfail/e'))).rejects.toThrow()
+
+            const dir = path.join(tmp, 'storage', sub('pubfail'))
+            expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+            expect(await fakeStorage.list(sub('pubfail/'))).toEqual([
+                sub('pubfail/d/inner'),
+                sub('pubfail/e.meta.json/inner'),
+                sub('pubfail/from'),
+            ])
+            expect((await fakeStorage.get(sub('pubfail/from')))!.contentType).toBe('text/plain')
+        })
+
+        test('a source that is a bookkeeping name is a missing source, and the bookkeeping is untouched', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('book/kept'), 'k', 'text/plain')
+
+            await expect(fakeStorage.copy(`${sub('book/kept')}.meta.json`, sub('book/dest'))).rejects.toBeInstanceOf(
+                NotFoundError,
+            )
+            await expect(fakeStorage.copy('upload-secret', sub('book/dest2'))).rejects.toBeInstanceOf(NotFoundError)
+            expect(await fakeStorage.list(sub('book/'))).toEqual([sub('book/kept')])
+        })
+
+        test('a destination that is a bookkeeping name is refused, as put refuses it', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('res/from'), 'f', 'text/plain')
+
+            await expect(fakeStorage.copy(sub('res/from'), sub('res/x.meta.json'))).rejects.toThrow(/reserved/)
+            await expect(fakeStorage.copy(sub('res/from'), 'upload-secret')).rejects.toThrow(/reserved/)
+            expect(await fakeStorage.list(sub('res/'))).toEqual([sub('res/from')])
+        })
+
+        test('cannot reach outside the store through either key', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('esc/from'), 'f', 'text/plain')
+
+            await expect(fakeStorage.copy('../outside.txt', sub('esc/a'))).rejects.toThrow(/invalid storage key/)
+            await expect(fakeStorage.copy(sub('esc/from'), '../outside.txt')).rejects.toThrow(/invalid storage key/)
+            await expect(fakeStorage.copy(sub('esc/from'), '../../outside.txt')).rejects.toThrow(/invalid storage key/)
+            // Neither refusal wrote anywhere: not outside the store, not inside it.
+            expect(existsSync(path.join(tmp, 'outside.txt'))).toBe(false)
+            expect(existsSync(path.join(tmp, '..', 'outside.txt'))).toBe(false)
+            expect(await fakeStorage.list(sub('esc/'))).toEqual([sub('esc/from')])
+        })
+
+        test('a destination is never visible half-copied, while a large copy is in flight', async () => {
+            const { fakeStorage } = await import('./storage')
+            // Big enough that copying it takes many polls on a real disk (a plain copyFile into the
+            // destination shows thousands of distinct partial sizes for 100 MB on the development machine).
+            const size = 64 * 1024 * 1024
+            await fakeStorage.put(sub('big/from'), new Uint8Array(size).fill(7), 'application/x-keel-big')
+            const body = path.join(tmp, 'storage', sub('big/to'))
+            const sidecar = `${body}.meta.json`
+
+            let finished = false
+            const copying = fakeStorage.copy(sub('big/from'), sub('big/to')).finally(() => (finished = true))
+            const bodySizes = new Set<number | 'absent'>()
+            let bodyWithoutSidecar = 0
+            while (!finished) {
+                // Body first: if it is there, its sidecar (published before it, and never removed) must be too.
+                const bodyNow = existsSync(body) ? statSync(body).size : 'absent'
+                bodySizes.add(bodyNow)
+                if (bodyNow !== 'absent' && !existsSync(sidecar)) bodyWithoutSidecar++
+                await new Promise((resolve) => setImmediate(resolve))
+            }
+            await copying
+
+            // Only ever not there, or whole. (A poll can miss the instant of the rename; it cannot see a partial.)
+            expect([...bodySizes].filter((seen) => seen !== 'absent' && seen !== size)).toEqual([])
+            expect(bodyWithoutSidecar).toBe(0)
+            expect(statSync(body).size).toBe(size)
+            expect((await fakeStorage.get(sub('big/to')))!.contentType).toBe('application/x-keel-big')
+        })
+
+        test('copying an object onto itself is refused, including by another spelling of the same key', async () => {
+            const { fakeStorage } = await import('./storage')
+            await fakeStorage.put(sub('same/k'), 'kept', 'text/plain')
+
+            await expect(fakeStorage.copy(sub('same/k'), sub('same/k'))).rejects.toThrow(/same key/)
+            await expect(fakeStorage.copy(sub('same/k'), sub('same/x/../k'))).rejects.toThrow(/same key/)
+
+            expect(text((await fakeStorage.get(sub('same/k')))!.body)).toBe('kept')
+            // The same refusal for a key that does not exist, as the real adapter gives without asking S3.
+            const missing = fakeStorage.copy(sub('same/never'), sub('same/never'))
+            await expect(missing).rejects.toThrow(/same key/)
+            await expect(missing).rejects.not.toBeInstanceOf(NotFoundError)
         })
     })
 
