@@ -249,3 +249,11 @@ was watched turning the pglite RLS suite red, so the role really is set by it. T
 fail-closed case and their privilege-layer cases (the append-only tables, `service_keys`, and DELETE on
 `agreements`) still write `SET LOCAL ROLE` directly; that form stays valid, and those cases are about
 the policies and grants, not about `runWithTenant`.
+
+## Addendum — 2026-11-16 (last): an app's raw-client exceptions live in the app
+
+The deny-by-default addendum (2026-11-16, later) put a module that needs the raw client into `eslint.config.mjs`,
+by exact path. That path names the app's directory, which `pnpm init-app` renames without rewriting keel's config,
+and an adopter's edit to that file conflicts with every later keel update to it. So an app lists its exceptions in its own
+`apps/<app>/lint-exceptions.mjs`, by path relative to the app, and `eslint.config.mjs` reads every app's when it
+loads. Each entry names one existing file under the app's `src/` and gives a reason, or the config fails to load.
