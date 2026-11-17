@@ -1719,3 +1719,9 @@ the panel is the element that carries it.
   does a migrator bundle missing one of the app's migrations. The old line, put back, fails on all of it.
   The migrator is the only bundled Lambda today. The server ships a prebuilt zip, and CDK's own
   providers ship theirs.
+- **Encryption at rest is asserted on the cluster, not the instance.** `storageEncrypted: true` was already
+  set on the Aurora cluster. The shape check now fails if any `AWS::RDS::DBCluster` lacks it, on either
+  shape. A CloudFormation linter's W9008 asks for `StorageEncrypted` on the writer `AWS::RDS::DBInstance`.
+  An Aurora instance takes its encryption from its cluster, so that warning is a false positive and
+  nothing is set on the instance. This repo's synth runs no such linter, so there is nothing in the stack
+  to suppress it.

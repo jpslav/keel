@@ -191,6 +191,14 @@ for (const transport of ['pg', 'data-api'] as const) {
         label(`no role attaches an AWS-managed policy the check cannot read: ${unreadable.join('; ')}`),
     )
 
+    // Encrypted at rest, on both shapes. An Aurora instance takes its encryption from its cluster, so the
+    // cluster is what is checked.
+    const clusters = Object.values(all).filter((r) => r.Type === 'AWS::RDS::DBCluster')
+    check(
+        clusters.length > 0 && clusters.every((r) => r.Properties?.StorageEncrypted === true),
+        label('every database cluster is encrypted at rest (StorageEncrypted)'),
+    )
+
     // What each bundled Lambda really contains. The tsconfig it is built with decides where
     // `@app-config/*` resolves: to the app's seam, never to keel's test fixture.
     const built = bundles(all, assembly)
