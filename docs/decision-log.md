@@ -1758,7 +1758,8 @@ worth keeping.
   19.2.8, the showcase built at 816,387 and the starter at 725,995: React was about 29 KB of the
   showcase's ~31 KB growth. It is React's own code, not something keel can trim: react-dom's
   `cjs/react-dom-client.production.js` is 536,016 bytes in 19.2.8 and 625,168 in 19.3.1. Taking it means
-  raising the showcase budget, which the budget's own rule reserves for a feature, so that is JP's call.
+  raising the showcase budget, which the budget's own rule reserves for a feature
+  (`scripts/check-demo-size.mjs`, "WHEN IT GOES RED"), so that is JP's call.
   Until then the tildes keep 19.2 through a lockfile regeneration. keel's `react` peer is `~19.2.8` too,
   the same range the apps name. Holding React back took one more lockfile regeneration (build-notes,
   same date).
@@ -1771,8 +1772,9 @@ worth keeping.
   installed version, under `node_modules/next/dist/docs/` (resolved from an app directory). The manager
   session that ran this catch-up decided this on JP's behalf; JP can overrule it when approving the PR.
 - **Next's upgrade advisor is switched off (`experimental.agentUpgrade: false` in both apps).** next 16.4
-  added it with the default `'security'`: every `next dev` and `next build` outside CI queries npm's
-  advisory feed, and an agent's run stops when an advisory matches. The CLAUDE.md hard rule that
-  `pnpm dev` makes no network calls decides this, so it is not a new choice. Advisories reach keel through
-  Dependabot and review instead. Note that Dependabot security updates are currently off in the repository
-  settings.
+  added it with the default `'security'`: every `next dev` outside CI queries npm's advisory feed, as does
+  `next build` when an agent runs it or the CLI can prompt at a terminal, and an agent's run stops when an
+  advisory matches (build-notes, same date). The CLAUDE.md hard rule that `pnpm dev` makes no network calls
+  decides this, so it is not a new choice. It does not make `pnpm dev` offline: the dev overlay's version
+  check, which next 16.2 already had, still fetches `next`'s dist-tags. Advisories now have to reach keel
+  another way, through Dependabot security updates (currently off in the repository settings) or review.
