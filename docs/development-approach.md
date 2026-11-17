@@ -299,7 +299,9 @@ distinct from the dev telemetry above it; _Errors_ carries the technical proofs;
 _Jobs_ is the cross-tenant view of every job's status timeline, with a "run pending jobs" control for the
 `jobs-held` world flag, plus (recurring work) a schedule list and a world-clock offset — advance
 +1h/+1d/+1w, run due now, reset — that drains due `job_schedules` on every move; the offset is stored in
-a Snapshots-covered `.data/` file and applied only in simulated mode, so a real build always runs on real time;
+a Snapshots-covered `.data/` file and applied only in simulated mode, so a real build always runs on real time. New audit events
+take the world clock too, through the database port's optional `now` (the fake sets it; a real adapter has none, so an audit row's
+time is Postgres's `now()` and nothing a caller passes can change it);
 _Hooks_ (outbound webhooks) is the cross-tenant view of every org's webhook endpoints and their
 deliveries, with the signed body/header inspectable per delivery, a per-endpoint failure toggle, and a
 "deliver due now" control that drains on the same ticks as Jobs' schedule runner;

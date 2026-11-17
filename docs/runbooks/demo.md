@@ -201,6 +201,8 @@ which case they land on sign-in.
 - **Demo on the host you invited from.** `localhost` and `127.0.0.1` are different origins and
   different cookie hosts: switch mid-demo and you'll look signed-out, and accept links minted on the
   other host won't open (Simulator says why in the notice strip rather than doing nothing).
+- **Reset the clock last.** New audit events take the world clock, so after **Reset clock** the events recorded later sort
+  below the ones recorded while it was advanced, in **Simulator → Events** (it orders by time, newest first).
 - **"Mine" vs "Everyone's mail"** is the most common stumble: an invite never lands in the _inviter's_
   inbox.
 - **Invites are one per address** — inviting an existing member or re-inviting the same address is
