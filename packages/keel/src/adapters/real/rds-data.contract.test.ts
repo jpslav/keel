@@ -1,10 +1,8 @@
 import { CommitTransactionCommand, ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
-import EmbeddedPostgres from 'embedded-postgres'
 import { AbortedTransactionError, sql, type Kysely } from 'kysely'
 import { Migrator } from 'kysely/migration'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
-import { portFor } from '../../../../../scripts/ports.mjs'
-import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
+import { startContractServer, type ContractServer } from '../../../../../tests/support/contract-postgres'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DB } from '../../db/schema'
 import type { DbPort } from '../../ports/db'
@@ -29,7 +27,7 @@ const LOCK_DATABASE = 'keel_data_api_lock'
 const RESOURCE_ARN = 'arn:aws:rds:us-east-1:000000000000:cluster:emulated'
 const SECRET_ARN = 'arn:aws:secretsmanager:us-east-1:000000000000:secret:emulated'
 
-let embedded: InstanceType<typeof EmbeddedPostgres> | null = null
+let server: ContractServer
 let emulator: RdsDataEmulator
 let dataApi: DbPort
 let viaPg: DbPort
@@ -37,33 +35,14 @@ let migrationCalls: EmulatedCall[] = []
 let databaseUrl: (name: string) => string
 
 beforeAll(async () => {
-    let serverUrl = process.env.CONTRACT_DATABASE_URL
-    if (!serverUrl) {
-        const port = portFor('contractPg')
-        embedded = new EmbeddedPostgres({
-            databaseDir: makeTestTmpDir('keel-data-api-pg-'),
-            user: 'postgres',
-            password: 'postgres',
-            port,
-            persistent: false,
-        })
-        await embedded.initialise()
-        await embedded.start()
-        serverUrl = `postgres://postgres:postgres@localhost:${port}/postgres`
-    }
-
-    const server = createRealDb(serverUrl).getDb()
-    try {
-        // The lock database must start empty every run (a reused live server would otherwise hand it over
-        // already migrated, and the race below would prove nothing).
-        await sql`DROP DATABASE IF EXISTS ${sql.id(LOCK_DATABASE)}`.execute(server)
-        await sql`CREATE DATABASE ${sql.id(LOCK_DATABASE)}`.execute(server)
-        await sql`CREATE DATABASE ${sql.id(DATABASE)}`.execute(server)
-    } catch (error) {
-        if (!/already exists/.test(String(error))) throw error
-    } finally {
-        await server.destroy()
-    }
+    // CONTRACT_DATABASE_URL's server in CI, otherwise an embedded-postgres of its own
+    // (tests/support/contract-postgres.ts, which every contract suite shares).
+    server = await startContractServer('keel-data-api')
+    const serverUrl = server.url
+    // The lock database must start empty every run (a reused live server would otherwise hand it over
+    // already migrated, and the race below would prove nothing).
+    await server.recreateDatabase(LOCK_DATABASE)
+    await server.createDatabase(DATABASE)
 
     const base = serverUrl
     databaseUrl = (name: string) => {
@@ -88,7 +67,7 @@ afterAll(async () => {
     await dataApi?.getDb().destroy()
     await viaPg?.getDb().destroy()
     await emulator?.close()
-    await embedded?.stop()
+    await server?.stop()
 })
 
 const db = (): Kysely<DB> => dataApi.getDb()

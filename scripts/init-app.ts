@@ -16,7 +16,7 @@
  * params, seed data, cutover rows) are the things that actually take judgement.
  */
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -359,7 +359,6 @@ function renameApp(current: Identity, slug: string, displayName: string): void {
         ],
         'app list / framework-suite app',
     )
-    rewrite('vitest.contract.config.ts', [[`'${dir}'`, `'${slug}'`]], 'contract app')
     // tsconfig.json deliberately needs NO rewrite: no path in it names an app. `@app-config/*`
     // points at packages/keel/test-fixture, and there is no `@/*` entry to repoint.
     // config/params too: infra/app.ts reads `params.database.transport` to pick the network shape. And
@@ -405,45 +404,6 @@ function renameApp(current: Identity, slug: string, displayName: string): void {
 const SHOWCASE = 'showcase'
 
 /**
- * Two things inside the showcase are not the demo: the RLS contract harness (generic — it runs
- * keel's composed proof runner against real Postgres, and is the anti-drift gate CI depends on) and
- * `config/params.ts` (the deployment-parameter scaffold every cutover row points at). Deleting the
- * directory around them would quietly delete a gate, so they are relocated to the surviving app
- * first. Everything else in there is the demo product.
- */
-function rescueFromShowcase(onDisk: string): void {
-    const contractSource = abs(`apps/${SHOWCASE}/tests/contract`)
-    const contractTarget = abs(`apps/${onDisk}/tests/contract`)
-    if (existsSync(contractSource) && !existsSync(contractTarget)) {
-        if (!dryRun) {
-            mkdirSync(path.dirname(contractTarget), { recursive: true })
-            cpSync(contractSource, contractTarget, { recursive: true })
-        }
-        note(changed, `apps/${onDisk}/tests/contract/ — RLS contract harness relocated from the showcase`)
-    }
-
-    const paramsSource = `apps/${SHOWCASE}/config/params.ts`
-    const paramsTarget = `apps/${onDisk}/config/params.ts`
-    if (existsSync(abs(paramsSource)) && !existsSync(abs(paramsTarget))) {
-        if (!dryRun) cpSync(abs(paramsSource), abs(paramsTarget))
-        note(changed, `${paramsTarget} — deployment params relocated from the showcase`)
-    }
-
-    // The harness imports embedded-postgres/pg/vitest; with pnpm's isolated node_modules those must
-    // be declared by the package the test file now lives in, or a root-run `pnpm test:contract`
-    // cannot resolve them.
-    const showcasePkg = readJson<PackageJson>(`apps/${SHOWCASE}/package.json`)
-    editJson<PackageJson>(`apps/${onDisk}/package.json`, 'contract-harness devDependencies', (pkg) => {
-        const devDependencies = { ...pkg.devDependencies }
-        for (const dependency of ['embedded-postgres', 'pg', 'vitest']) {
-            const version = showcasePkg.devDependencies?.[dependency]
-            if (version && !devDependencies[dependency]) devDependencies[dependency] = version
-        }
-        pkg.devDependencies = Object.fromEntries(Object.entries(devDependencies).sort(([a], [b]) => a.localeCompare(b)))
-    })
-}
-
-/**
  * `survivor` is the app's name AFTER the rename (what the rewritten files should say); `onDisk` is
  * the directory that exists right now. They differ under --dry-run, where the rename was only
  * printed — so reads use `onDisk` and rewrites use `survivor`, and the preview stays honest.
@@ -454,8 +414,6 @@ function ejectShowcase(survivor: string, onDisk: string): void {
         return
     }
     if (survivor === SHOWCASE) fail('cannot eject the showcase while it is the only app')
-
-    rescueFromShowcase(onDisk)
 
     const survivorPkg = readJson<PackageJson>(`apps/${onDisk}/package.json`)
     const survivorName = survivorPkg.name ?? survivor
@@ -520,14 +478,9 @@ function ejectShowcase(survivor: string, onDisk: string): void {
         ],
         'app list collapsed to the surviving app',
     )
-    rewrite(
-        'vitest.contract.config.ts',
-        [[`const CONTRACT_APP = '${SHOWCASE}'`, `const CONTRACT_APP = '${survivor}'`]],
-        'contract app',
-    )
     // tsconfig.json needs no rewrite here either — see the rename path. Its `@app-config/*` pointing
     // at packages/keel/test-fixture is what keeps `tsc` green through an eject.
-    // config/params moved to the survivor above (rescueFromShowcase), so the stack's import follows it.
+    // config/params is the survivor's own (every app carries one), so the stack's import follows it.
     // So does the tsconfig the stack bundles with: the survivor's seam, and so its migrations.
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
         rewrite(
@@ -838,15 +791,9 @@ function wrapBullet(paragraph: string, width = 100): string {
     return lines.join('\n')
 }
 
-function reportUntouched(
-    survivor: string,
-    hasParams: boolean,
-    hasStarterContent: boolean,
-    demoBudget: DemoBudget,
-): void {
-    const params = hasParams
-        ? `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
-        : `apps/${survivor} ships no config/params.ts yet. You get one when you eject the\n    showcase, or write it when you reach your first cloud cutover row.`
+function reportUntouched(survivor: string, hasStarterContent: boolean, demoBudget: DemoBudget): void {
+    // Every app carries its own config/params.ts (tests/tooling/app-scaffold.test.ts holds it), so there is always one.
+    const params = `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
     console.log(`
 WHAT THIS DID NOT TOUCH — the parts that need judgement, not a rename:
 
@@ -963,9 +910,8 @@ async function main(): Promise<void> {
         summary.push(`rename the root package to "${slug}" and repoint every app-scoped script`)
     }
     if (options.ejectShowcase) {
-        summary.push('rescue the RLS contract harness and config/params.ts into the surviving app')
         summary.push('DELETE apps/showcase and packages/seed')
-        summary.push('repoint tsconfig, both vitest configs, knip and infra at the surviving app')
+        summary.push('repoint tsconfig, the vitest config, knip and infra at the surviving app')
     }
     // `--repo` alone is the fix-up for a tree init-app already adopted, and does only that: no citations, no
     // prose review, no "run pnpm install" (nothing about the workspace changed).
@@ -1030,12 +976,7 @@ async function main(): Promise<void> {
     // `survivor` is the name AFTER the rename; on disk that directory only exists if the rename
     // actually ran, so a dry run still has to look under the old name (the ejectShowcase convention).
     const survivorOnDisk = dryRun ? targetDir : survivor
-    reportUntouched(
-        survivor,
-        options.ejectShowcase || existsSync(abs(`apps/${survivorOnDisk}/config/params.ts`)),
-        existsSync(abs(`apps/${survivorOnDisk}/src/seed`)),
-        readDemoBudget(survivorOnDisk),
-    )
+    reportUntouched(survivor, existsSync(abs(`apps/${survivorOnDisk}/src/seed`)), readDemoBudget(survivorOnDisk))
 }
 
 // Not top-level await: the root package is CJS, so tsx transforms this file to CommonJS.

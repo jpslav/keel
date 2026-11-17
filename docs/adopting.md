@@ -184,7 +184,7 @@ cannot break the gate.
 
 It prints this list when it finishes, because these are the parts that take judgement:
 
-- **Deployment parameters** — `apps/<app>/config/params.ts` (you get one when you eject the showcase).
+- **Deployment parameters** — `apps/<app>/config/params.ts`, which every app carries (the starter's is yours from the start).
   Every `PLACEHOLDER_` value, and `sentry.org`. Each maps to a cutover row.
 - **The starter's content** — its seed world, its welcome copy, its one entity and its static-demo
   wiring are all still there and all still on screen. `init-app` renamed the app around them. The next
@@ -264,12 +264,14 @@ When the sweep is done, run `pnpm build:demo-static`, open `apps/<app>/dist-demo
 That one look is the check: the picker, the first screen and the dashboard are exactly the three places
 the starter survives.
 
-### What ejecting the showcase costs, and what it rescues
+### What ejecting the showcase costs
 
-Two things inside `apps/showcase` are not the demo, and `--eject-showcase` moves them into your app
-before deleting the directory: the **RLS contract harness** (`apps/<app>/tests/contract/`, which runs keel's
-composed proof suite against real Postgres — the anti-drift gate CI depends on) and
-**`apps/<app>/config/params.ts`**. Deleting the directory around them would have quietly deleted a gate.
+`apps/starter` already owns the two things that are not the demo and that were once the showcase's alone: the **RLS
+contract suite** (`apps/<app>/tests/contract/`, which runs keel's composed proof suite on real Postgres, in a database
+of the app's own, once by a non-superuser owner as Aurora's master user is and once by a superuser: the anti-drift gate
+CI depends on) and **`apps/<app>/config/params.ts`**. So ejecting rescues nothing and deletes no gate:
+`pnpm test:contract` runs your app's suite, and `tests/tooling/app-scaffold.test.ts` fails if an app registers
+migrations without one, or its params stop matching the shape `infra/` reads.
 
 Five root scripts are dropped, because the starter does not ship the capabilities behind them:
 `dev:real`, `llm:record`, `ladle`, `build:demo`, `start:demo`. They come back with the thing they
@@ -280,7 +282,7 @@ want it.
 
 One gate is relaxed on the way out. keel's knip workspace carries `includeEntryExports: true`, which
 means "every symbol keel PUBLISHES must have a consumer" — an invariant the showcase made true by using
-nearly all of it. A one-entity app does not: `apps/starter` imports 32 of keel's 130 published subpaths,
+nearly all of it. A one-entity app does not: `apps/starter` imports 32 of keel's 131 published subpaths,
 so the same setting would start demanding you delete the other 98 — capabilities you merely have not
 reached yet, not dead code. `--eject-showcase` therefore turns it off. knip keeps reporting unused
 files, and the declared `exports` surface goes back to being what it is without a rich consumer: a
@@ -322,9 +324,9 @@ apps/<app>/tests/             your e2e, static-demo and contract specs
 
 ### What you may import from keel
 
-`packages/keel/package.json`'s `exports` map is the contract: it lists the 130 subpaths your app may
+`packages/keel/package.json`'s `exports` map is the contract: it lists the 131 subpaths your app may
 import as `keel/<subpath>` (`keel/ports/db`, `keel/components/app-header`, `keel/db/with-tenant`). The
-other 46 modules of the package are internals — private sub-components, the fake-db plumbing, the
+other 45 modules of the package are internals — private sub-components, the fake-db plumbing, the
 framework migrations, the real adapters the registry constructs for you — and importing one fails
 `pnpm lint` with the rule `keel/public-surface`, which reads that map directly. If you find yourself
 reaching for an internal, that is a signal the capability needs a seam, not a wider fence; if a module
