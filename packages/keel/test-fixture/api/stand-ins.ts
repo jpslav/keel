@@ -6,10 +6,10 @@ import type { ServiceIdentity } from 'keel/service-auth/verify'
 /**
  * STAND-INS for the fixture routes in this tree, which are scanned and never served (see ./dockets/route.ts).
  *
- * The authorization scan counts an exemption's gate only when its name is IMPORTED into the route
- * (keel/authz/route-scan.ts): a local `const isSimulated = true` or `const withWebhookSecret = (h) => h` is a
- * look-alike, not the gate, and a route that defines one is refused. So the fixture's routes import their
- * stand-ins from here, as an app's routes import the real ones.
+ * The authorization scan counts an exemption's gate only when its name is IMPORTED into the route, under the name
+ * it is exported by (keel/authz/route-scan.ts): a local `const isSimulated = true` or `const withWebhookSecret =
+ * (h) => h` is a look-alike, not the gate, and a handler that relies on one fails its exemption. So the fixture's
+ * routes import their stand-ins from here, as an app's routes import the real ones.
  *
  * Why stand-ins at all: the real ones cannot be imported into this tree. `isSimulated`, `auth`, `llm` and
  * `analytics` come from keel/adapters, which pulls the whole adapter registry and `server-only`;

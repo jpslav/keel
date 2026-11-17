@@ -354,9 +354,10 @@ function isGate(gate: unknown): boolean {
 /**
  * The route shapes that PASSED the text-matching scan this replaced (ADR-0012 addendum, 2026-11-17), judged
  * against the real policy above. Each was dropped into an app's api tree and run through the old scan, which
- * passed every `fails` row below; the first two rows of the webhook group are the ones that review found
- * (`.claude/future-tasks/resolved/authz-scan-exemption-matches-text-not-verbs.md`), the rest are the same flaw
- * in the main rule, in the `service/` gate and in the `simulator/` gate.
+ * passed every row below that now fails, except the comment-only mention, which failed there too. The second and
+ * third rows are the two that review found (`.claude/future-tasks/resolved/authz-scan-exemption-matches-text-not-verbs.md`).
+ * The rest are the same flaw in the main rule, in the `service/` gate and in the `simulator/` gate, and the last
+ * three are what this change's own review found: a local look-alike of a gate, and a 404 branch that does work.
  */
 describe('the shapes the text-matching scan passed now fail', () => {
     const AUTHORIZE = "import { authorize } from 'keel/authz/authorize'\n"

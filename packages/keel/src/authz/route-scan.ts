@@ -21,16 +21,17 @@ import ts from 'typescript'
  *   ASSUMED to invoke. That is the wrapper idiom every route uses, and the one trust this module extends:
  *   it cannot read an imported wrapper to see whether it really calls its argument;
  * - in a function declared in the SAME module and called (or passed as an argument) from the handler's
- *   path, followed to any depth. A function that is only defined, or that the file reassigns, is not
- *   followed.
+ *   path, followed to any depth. A function that is only defined, or that the file reassigns or declares twice,
+ *   is not followed.
  *
  * For a handler that is a wrapper's result (`export const POST = withX(fn)`), the wrapper call itself and
  * its other arguments run once, when the module loads; only the functions handed to it run per request, so
  * only those are the handler's path.
  *
  * What is NOT followed, and so does not count: a call into another module (an imported helper that calls
- * `authorize` inside it), a method on an object, a getter, a class body, and a parameter or destructuring
- * default (it runs only when the value is missing). Each of those fails the handler.
+ * `authorize` inside it), a method on an object, a getter, a class body, a generator (calling one runs none of its
+ * body), and a parameter or destructuring default (it runs only when the value is missing). Each of those fails the
+ * handler.
  *
  * WHAT COUNTS AS `authorize`: a call to the `authorize` imported from one of `ScanOptions.authorizeModules`
  * (keel's `keel/authz/authorize` by default), under any local name or through a namespace import, by a

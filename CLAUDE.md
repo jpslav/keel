@@ -119,7 +119,8 @@ screen does; a sortable table does not (`docs/recipes/list-kit.md`).
   `authorize(...)` itself. The exemption map's staleness is measured against the FIXTURE tree, so a new
   exemption needs a file there to demonstrate it; the fixture's routes are scanned, never served. **Every
   exemption MUST carry a `mustMatch`**, a gate checked on each verb (the handler IS the guard's call, reaches a
-  port call, or opens with the simulated-mode 404) — entries are matched by relative path in every root, so a
+  port call, or opens with the simulated-mode 404), every name in it a value import kept under its exported name,
+  so a local look-alike or an alias is not the gate — entries are matched by relative path in every root, so a
   gateless one would exempt an adopter's same-named route from authorization entirely. It proves the route is
   the KIND the reason describes, never the reason's whole claim; ADR-0012 states the limit.
 - Dead code fails the gate (`knip`); never silence a finding with a broad ignore — add the narrowest

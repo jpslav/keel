@@ -27,9 +27,12 @@ exemption map and the gates. The fix went wider than this file asked, because th
 | `service/`: a wrapped `POST` and an unwrapped `PATCH`                       | pass        | fail |
 | `simulator/`: the `if (!isSimulated)` gate on `POST` only, an open `DELETE` | pass        | fail |
 | `simulator/`: the gate's text only in a string                              | pass        | fail |
+| `webhooks/`: a local look-alike of the guard wraps an open `POST`           | pass        | fail |
+| `simulator/`: `isSimulated` is a local constant                             | pass        | fail |
+| `simulator/`: the real-mode branch mutates before its 404                   | pass        | fail |
 
 Each row is a case in `authorized-mutations.test.ts` ("the shapes the text-matching scan passed now fail"), judged
-against the real policy.
+against the real policy. The last three came from the review of this change.
 
 What this file asked for, and what was built:
 
@@ -38,13 +41,17 @@ What this file asked for, and what was built:
 - **Per verb.** Every exemption's `mustMatch` is now a structured gate checked on each exempted handler, and its
   kind says what "guarded" means for that entry: `wrapped-by` (the handler IS the guard's call; `webhooks/`, and
   `service/`'s required `withServiceCaller`), `calls` (the handler reaches the port call), or
-  `opens-with-simulated-404` (the handler's first statement is the `if (!isSimulated)` gate, and it exits).
+  `opens-with-simulated-404` (the handler's first statement is the `if (!isSimulated)` gate, and its branch only
+  returns or throws a response built from literals). Every name in a gate must be a value import kept under its
+  exported name, so a local look-alike or an alias is not the gate.
 - **The `simulator/` worry.** A per-verb rule there fails nothing: each of the 19 mutating simulator handlers (18 in
   the showcase, 1 in the fixture) opens with its own gate, and the two files that export a second verb (`flags`,
   `snapshots`) gate their `GET` separately as well. So the rule is per verb everywhere, and no entry is per file.
-- **Fixture.** `webhooks/jobs/route.ts` and `service/jobs/route.ts` called their wrapper inside a function
-  handler; they now have the apps' shape, `export const POST = withX(…)`. `dockets/[id]/route.ts` is new: two
-  mutating verbs in one file, one authorizing through a same-file helper.
+- **Fixture.** The gated routes import their stand-ins from `packages/keel/test-fixture/api/stand-ins.ts`; each had
+  defined its own locally, which is the look-alike the scan now refuses. `webhooks/jobs/route.ts` and
+  `service/jobs/route.ts` called their wrapper inside a function handler; they now have the apps' shape,
+  `export const POST = withX(…)`. `dockets/[id]/route.ts` is new: two mutating verbs in one file, one authorizing
+  through a same-file helper.
 
 No app route was a false green. Every route that passed still passes, with the same verbs judged.
 
