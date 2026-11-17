@@ -19,7 +19,7 @@
         "build:demo": "NEXT_TELEMETRY_DISABLED=1 DEMO_MODE=1 APP_MODE=simulated next build",
         "start:demo": "DEMO_MODE=1 APP_MODE=simulated node ../../scripts/serve-standalone.mjs",
         "build:demo-static": "vite build --config vite.demo.config.ts",
-        "check:demo-size": "node ../../scripts/check-demo-size.mjs",
+        "check:demo-size": "node ../../scripts/check-demo-size.mjs 840000",
         "e2e:demo-static": "playwright test --config playwright.demo.config.ts"
     },
     "dependencies": {

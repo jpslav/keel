@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -482,40 +482,58 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
             )
         })
 
-        it('says the showcase is gone, and what that left behind, only when it was ejected', () => {
-            expect(flat(ejected.output)).toContain('still describe the showcase you removed')
-            expect(flat(named.output)).not.toContain('still describe the showcase you removed')
-            expect(flat(named.output)).toContain('The demo size budget')
+        it("points at the app's own DEMO-SIZE.md, and says the script is keel's, in every kind of adoption", () => {
+            for (const probe of [ejected, named]) {
+                expect(flat(probe.output)).toContain(
+                    `apps/${SLUG}/DEMO-SIZE.md says what the number was set for, and is where you record each change and why.`,
+                )
+                expect(flat(probe.output)).toContain(
+                    "scripts/check-demo-size.mjs is keel's, and an upstream merge will change it: re-set the number in package.json, never in the script.",
+                )
+            }
+        })
+
+        it('ships the history beside the number, in a file the adopter owns, with room for their own entries', () => {
+            const note = readProbe('apps/' + SLUG + '/DEMO-SIZE.md')
+            expect(note).toContain('## Changes')
+            expect(note).toContain("keel's history for the starter")
+            expect(note).toContain('scripts/check-demo-size.mjs')
         })
 
         it('leaves scripts/check-demo-size.mjs exactly as the template has it, whichever way it is called', () => {
-            // A rewrite of its history is the false-sentence trap; the bullet says what is stale instead.
+            // keel's file: an upstream merge changes it, so adoption must not.
             const template = readFileSync(path.join(ROOT, 'scripts/check-demo-size.mjs'), 'utf8')
             expect(readProbe('scripts/check-demo-size.mjs', ejected)).toBe(template)
             expect(readProbe('scripts/check-demo-size.mjs', named)).toBe(template)
         })
 
-        it('points at a script that has what it promises: a default, and a WHEN IT GOES RED section', () => {
-            const script = readProbe('scripts/check-demo-size.mjs')
-            expect(script).toContain('DEFAULT_BUDGET_BYTES')
-            expect(script).toContain('WHEN IT GOES RED')
+        it('points at a script that has what it promises: a WHEN IT GOES RED section', () => {
+            expect(readProbe('scripts/check-demo-size.mjs')).toContain('WHEN IT GOES RED')
         })
 
-        it('says the default applies when the app passes no number (a renamed showcase)', () => {
-            // --dry-run on an untouched copy: the showcase's own script passes no number.
+        it("states a renamed showcase's own number and its own DEMO-SIZE.md, not the starter's", () => {
+            // --dry-run on an untouched copy, renaming the showcase: its script now passes 840000 like any app.
             const result = spawnInitApp(pristineDir, ['demo', '--app', 'showcase', '--dry-run'])
             expect(result.status, result.stderr).toBe(0)
+            const showcase = JSON.parse(readFileSync(path.join(pristineDir, 'apps/showcase/package.json'), 'utf8')) as {
+                scripts: Record<string, string>
+            }
+            const budget = /check-demo-size\.mjs\s+(\d+)\s*$/.exec(showcase.scripts['check:demo-size'] ?? '')?.[1]
+            expect(budget, "the showcase's script passes no number").toBeDefined()
             expect(flat(result.stdout)).toContain(
-                "apps/demo/package.json's check:demo-size passes no number, so DEFAULT_BUDGET_BYTES in scripts/check-demo-size.mjs is your budget",
+                `apps/demo/package.json's check:demo-size passes the static demo's byte budget, ${budget}.`,
             )
+            expect(flat(result.stdout)).toContain('apps/demo/DEMO-SIZE.md says')
         })
 
-        it('says nothing, rather than guess, when the script is not one of the two shapes it knows', () => {
+        it('says nothing, rather than guess, when the script is not the shape the template ships', () => {
             // A copy of the untouched tree whose showcase script is the adopter's own: a number followed by
-            // more shell, an underscored number the script would reject, and no script at all.
+            // more shell, an underscored number the script would reject, no number at all (which the script
+            // now refuses), and no script.
             for (const [label, script] of [
                 ['a number then more shell', 'node ../../scripts/check-demo-size.mjs 820000 && echo ok'],
                 ['an underscored number', 'node ../../scripts/check-demo-size.mjs 820_000'],
+                ['no number', 'node ../../scripts/check-demo-size.mjs'],
                 ['no script', undefined],
             ] as const) {
                 const dir = makeTestTmpDir('keel-adopter-identity-budget-')
@@ -531,22 +549,15 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
             }
         })
 
-        it('counts a renamed showcase as still there, on a dry run and on a real one alike', () => {
-            // A number passed, so the stale-header sentence is the only thing that could differ between them.
+        it('does not point at a DEMO-SIZE.md the app does not have', () => {
             const dir = makeTestTmpDir('keel-adopter-identity-budget-')
             copyTree(ROOT, dir)
-            const file = path.join(dir, 'apps/showcase/package.json')
-            const pkg = JSON.parse(readFileSync(file, 'utf8')) as { scripts: Record<string, string> }
-            pkg.scripts['check:demo-size'] = 'node ../../scripts/check-demo-size.mjs 900000'
-            writeFileSync(file, JSON.stringify(pkg, null, 4))
-            const dry = spawnInitApp(dir, ['demo', '--app', 'showcase', '--dry-run'])
-            const real = spawnInitApp(dir, ['demo', '--app', 'showcase', '--yes'])
-            expect(dry.status, dry.stderr).toBe(0)
-            expect(real.status, real.stderr).toBe(0)
-            for (const run of [dry, real]) {
-                expect(flat(run.stdout)).toContain("passes the static demo's byte budget, 900000.")
-                expect(flat(run.stdout)).not.toContain('still describe the showcase you removed')
-            }
+            rmSync(path.join(dir, 'apps/starter/DEMO-SIZE.md'))
+            const result = spawnInitApp(dir, [SLUG, '--dry-run'])
+            expect(result.status, result.stderr).toBe(0)
+            expect(flat(result.stdout)).toContain('The demo size budget')
+            expect(flat(result.stdout)).not.toContain('DEMO-SIZE.md')
+            expect(flat(result.stdout)).toContain('re-set the number in package.json, never in the script')
         })
     })
 

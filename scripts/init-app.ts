@@ -767,50 +767,39 @@ WHAT NOW NEEDS YOUR DETAILS — placeholders init-app just wrote, not left alone
  * for it every path and every instruction below would be false.
  */
 /**
- * The survivor's static-demo size budget, read from its own `check:demo-size` script, because what is true
- * to say about it depends on that script: the starter passes a number, the showcase passes none (it takes
- * `DEFAULT_BUDGET_BYTES` from scripts/check-demo-size.mjs), and an app without the script has nothing to
- * describe. `null` means say nothing rather than guess.
+ * The survivor's static-demo size budget, read from its own `check:demo-size` script, because the bullet
+ * states it back and a number written here would be stale the first time the app re-sets it. `null` means
+ * say nothing rather than guess: no such script, or one that is not exactly the shape the template ships
+ * (a number then `&& …`, a quoted or underscored number: `Number('820_000')` is NaN, so the script would
+ * refuse what this would have printed). `hasNote` is whether the app has a DEMO-SIZE.md beside the number.
  */
-type DemoBudget = { kind: 'explicit'; bytes: string } | { kind: 'default' } | null
+type DemoBudget = { bytes: string; hasNote: boolean } | null
 
 function readDemoBudget(onDisk: string): DemoBudget {
     const file = `apps/${onDisk}/package.json`
     if (!existsSync(abs(file))) return null
     const script = readJson<PackageJson>(file).scripts?.['check:demo-size']
-    if (script === undefined) return null
-    // Only the two shapes the template ships. Anything else (a `&&` after the number, a quoted or
-    // underscored one, extra arguments) is the adopter's own and gets no bullet rather than a wrong one:
-    // `Number('820_000')` is NaN, so the script would refuse a number this would have printed back.
-    const bytes = /check-demo-size\.mjs\s+(\d+)\s*$/.exec(script)?.[1]
-    if (bytes) return { kind: 'explicit', bytes }
-    return /check-demo-size\.mjs\s*$/.test(script) ? { kind: 'default' } : null
+    const bytes = /check-demo-size\.mjs\s+(\d+)\s*$/.exec(script ?? '')?.[1]
+    return bytes ? { bytes, hasNote: existsSync(abs(`apps/${onDisk}/DEMO-SIZE.md`)) } : null
 }
 
 /**
- * Why this is in "WHAT THIS DID NOT TOUCH" and not a rewrite: the budget is a number the adopter has to
- * own, and the script that enforces it carries the template's two-app history in its header. That header
- * is not rewritten, for the reason the note at
- * .claude/future-tasks/eject-rewrites-prose-into-false-sentences.md gives for prose in general: a repair
- * pass cannot tell a history from a claim. So it is pointed at instead.
+ * Why this is in "WHAT THIS DID NOT TOUCH" and not something init-app does: the budget is a number the
+ * adopter has to own. And why it says where to record a change: the obvious place is the header of
+ * scripts/check-demo-size.mjs, which is keel's, so a note written there is a conflict on every later upstream
+ * merge (ADR-0013). The history lives beside the number, in the app's own DEMO-SIZE.md.
  */
-function demoBudgetBullet(survivor: string, budget: DemoBudget, showcaseGone: boolean): string {
+function demoBudgetBullet(survivor: string, budget: DemoBudget): string {
     if (budget === null) return ''
-    const subject = `apps/${survivor}/package.json's check:demo-size`
-    const redIs = 'When it goes red, scripts/check-demo-size.mjs says what to look at first.'
     const paragraph =
-        budget.kind === 'default'
-            ? `The demo size budget — ${subject} passes no number, so DEFAULT_BUDGET_BYTES in ` +
-              `scripts/check-demo-size.mjs is your budget. It is thin on purpose, so growth is a decision someone ` +
-              `makes. Re-set it to what your app measures plus the headroom you want, in its own commit. ${redIs}`
-            : `The demo size budget — ${subject} passes the static demo's byte budget, ${budget.bytes}. It is ` +
-              `yours now: the starter ships it roomy on purpose, sized for an app's own screens and not as a pacing ` +
-              `gate. Re-set it when you want a tighter gate (what your app measures plus the headroom you want, in ` +
-              `its own commit). ${redIs}` +
-              (showcaseGone
-                  ? " That script's header and DEFAULT_BUDGET_BYTES still describe the showcase you removed; only " +
-                    'the number you pass counts.'
-                  : '')
+        `The demo size budget — apps/${survivor}/package.json's check:demo-size passes the static demo's byte ` +
+        `budget, ${budget.bytes}. It is yours now.` +
+        (budget.hasNote
+            ? ` apps/${survivor}/DEMO-SIZE.md says what the number was set for, and is where you record each change ` +
+              'and why.'
+            : '') +
+        " scripts/check-demo-size.mjs is keel's, and an upstream merge will change it: re-set the number in " +
+        "package.json, never in the script. When it goes red, that script's header says what to look at first."
     return `\n${wrapBullet(paragraph)}`
 }
 
@@ -833,7 +822,6 @@ function reportUntouched(
     hasParams: boolean,
     hasStarterContent: boolean,
     demoBudget: DemoBudget,
-    showcaseGone: boolean,
 ): void {
     const params = hasParams
         ? `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
@@ -843,7 +831,7 @@ WHAT THIS DID NOT TOUCH — the parts that need judgement, not a rename:
 
   • Deployment parameters — ${params}
   • The cutover checklist — docs/cutover-checklist.md is yours: owners, dates, and the proof each
-    row owes. Nothing here closed a row.${demoBudgetBullet(survivor, demoBudget, showcaseGone)}
+    row owes. Nothing here closed a row.${demoBudgetBullet(survivor, demoBudget)}
   • The licence — this template is MIT; your product's licence is still yours to choose.
   • Git remotes, CI secrets, and infra account IDs.`)
     if (hasStarterContent) {
@@ -925,9 +913,6 @@ async function main(): Promise<void> {
 
     const apps = listApps()
     if (apps.length === 0) fail('no apps found under apps/')
-    // Before anything is renamed: a `--app showcase` rename moves the directory, and "is the showcase gone"
-    // must mean the same on a dry run, which moves nothing, and on the real one.
-    const showcaseAtStart = apps.includes(SHOWCASE)
 
     // Default target: the starter (the app the template tells you to keep), else the first app that
     // is not the demo, else whatever single app is left.
@@ -1029,7 +1014,6 @@ async function main(): Promise<void> {
         options.ejectShowcase || existsSync(abs(`apps/${survivorOnDisk}/config/params.ts`)),
         existsSync(abs(`apps/${survivorOnDisk}/src/seed`)),
         readDemoBudget(survivorOnDisk),
-        options.ejectShowcase || !showcaseAtStart,
     )
 }
 

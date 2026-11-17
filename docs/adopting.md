@@ -192,14 +192,14 @@ It prints this list when it finishes, because these are the parts that take judg
 - **The cutover checklist** — [cutover-checklist.md](cutover-checklist.md) is yours: owners, dates, and
   the proof each row owes.
 - **The demo size budget** — `apps/<app>/package.json`'s `check:demo-size` passes the static demo's byte
-  budget. It is yours now: the starter ships it roomy on purpose, sized for an app's own screens and not as
-  a pacing gate (it still fails on gross bloat). Re-set it when you want a tighter gate, to what your app
-  measures plus the headroom you want, in its own commit. If you renamed the showcase instead
-  (`--app showcase`), its script passes no number: `DEFAULT_BUDGET_BYTES` in `scripts/check-demo-size.mjs`
-  is your budget, and it is thin on purpose. After an eject, the header and
-  `DEFAULT_BUDGET_BYTES` of `scripts/check-demo-size.mjs` still describe the showcase and are left as
-  they are, since rewriting a history risks false sentences; only the number you pass counts. When it
-  goes red, that script's header says what to look at first.
+  budget. It is yours now. The starter ships it roomy on purpose, sized for an app's own screens and not as
+  a pacing gate (it still fails on gross bloat); re-set it when you want a tighter gate, to what your app
+  measures plus the headroom you want, in its own commit. `apps/<app>/DEMO-SIZE.md` beside it says what the
+  number was set for and how it got there, and is where you record each change and why.
+  `scripts/check-demo-size.mjs` is keel's and holds no number, so an upstream merge may change it and you
+  never edit it: re-set the number in `package.json`, never in the script. If you renamed the showcase
+  instead (`--app showcase`), its number is its own pace-setting one, thin on purpose. When it goes red,
+  that script's header says what to look at first.
 - **The licence** — this template is MIT, which means the product you build on it is yours with no
   copyleft obligation. Your own product's licence is still a decision you make; nothing here makes it
   for you.
@@ -385,8 +385,9 @@ simulates (people, mail, jobs, schedules, webhooks, notifications, agreements, a
 table that is 74 lines; the showcase's, with three entities plus actors and the assistant, is 669.
 Budget-gated per app (`pnpm check:demo-size`, each app passing its own byte budget). The starter's is
 the number you inherit, sized for YOUR growth (room to grow to the showcase's size), and it is yours to
-re-set in `apps/<app>/package.json`; the header of `scripts/check-demo-size.mjs` says what it guards and
-what to do when it goes red. The demo's build also drops every Mantine style rule no shipped component can
+re-set in `apps/<app>/package.json`, with the reason recorded in `apps/<app>/DEMO-SIZE.md` beside it; the
+header of `scripts/check-demo-size.mjs` (keel's, never yours to edit) says what it guards and what to do when
+it goes red. The demo's build also drops every Mantine style rule no shipped component can
 match (`scripts/vite-prune-mantine-css.ts`), so a Mantine component you add needs no CSS import. The same file is
 the ONLY door for your shell, too: the `nav`, `welcome` and `dashboard` it passes `DemoShell` are what
 the demo shows, so a navigation you build for the real app is absent from the twin until you pass it
