@@ -14,6 +14,7 @@ import { runWithTenant } from 'keel/db/with-tenant'
  */
 export const appRlsProofs: RlsProofSuite = async ({
     db,
+    appDb,
     expect,
     alphaTenantId,
     demoTenantId,
@@ -37,10 +38,10 @@ export const appRlsProofs: RlsProofSuite = async ({
         .execute()
 
     // read isolation, both directions, via UNFILTERED selects under RLS
-    const ours = await runWithTenant(db, alphaTenantId, (trx) => trx.selectFrom('items').selectAll().execute())
+    const ours = await runWithTenant(appDb, alphaTenantId, (trx) => trx.selectFrom('items').selectAll().execute())
     expect(ours.filter((r) => r.tenant_id === demoTenantId).length).toBe(0)
     expect(ours.filter((r) => r.tenant_id === alphaTenantId).length).toBe(2)
-    const theirs = await runWithTenant(db, demoTenantId, (trx) => trx.selectFrom('items').selectAll().execute())
+    const theirs = await runWithTenant(appDb, demoTenantId, (trx) => trx.selectFrom('items').selectAll().execute())
     expect(theirs.filter((r) => r.tenant_id === alphaTenantId).length).toBe(0)
     expect(theirs.filter((r) => r.tenant_id === demoTenantId).length).toBe(1)
 
@@ -48,7 +49,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // the org id is a real org — the tenant, not the org, is the RLS boundary.
     let writeRejected = false
     try {
-        await runWithTenant(db, alphaTenantId, (trx) =>
+        await runWithTenant(appDb, alphaTenantId, (trx) =>
             trx
                 .insertInto('items')
                 .values({
@@ -68,7 +69,7 @@ export const appRlsProofs: RlsProofSuite = async ({
     // item can never be erased even by a correctly-scoped caller.
     let deleteRejected = false
     try {
-        await db.transaction().execute(async (trx) => {
+        await appDb.transaction().execute(async (trx) => {
             await sql`SET LOCAL ROLE app_user`.execute(trx)
             await sql`SELECT set_config('app.current_tenant', ${alphaTenantId}, true)`.execute(trx)
             await sql`DELETE FROM items`.execute(trx)

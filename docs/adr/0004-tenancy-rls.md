@@ -156,3 +156,73 @@ id that covers every module in an app's `src/`, keel's screens and keel's fixtur
 test outside routes, screens and the fixture. Anything else that needs the raw client is a named exception
 in `eslint.config.mjs` with its reason; there are none today. As before, the ban is a fast, local reminder,
 and RLS in the database is the boundary.
+
+## Addendum — 2026-11-16 (later still): who may switch to `app_user`
+
+The Decision says every tenant-scoped transaction runs `SET LOCAL ROLE app_user`. It never said which
+role is allowed to, and on every engine this repo tested, the answer was "the superuser, which may switch
+to anything". That is not the role a deployment connects as.
+
+**The failure.** Migration 0001 creates `app_user` and grants it to nobody. Aurora's master user is not a
+superuser: AWS documents it as a member of `rds_superuser`, with `CREATEROLE` and `CREATEDB`. Since Postgres 16, a non-superuser that creates a role is granted ADMIN on it,
+but not SET (`createrole_self_grant` is empty by default). So the owner that ran every migration could
+not switch to the role it had created. Every `withTenant` failed closed with
+`permission denied to set role "app_user"`. Nothing leaked, but a real deployment could not serve a single
+tenant-scoped query. An independent reviewer reported it, relayed by the keel manager. The contract suite
+reproduced it on Postgres 18.4, with a fresh cluster where the owner created `app_user` itself. The rule
+is the same on Aurora's 16.10 (`infra/stack.ts`), and CI's postgres:16 contract job measures it on every
+run (below).
+
+**The fix: framework migration `0015_app_user_grant`.** It grants the MIGRATING role
+`app_user WITH SET TRUE, INHERIT FALSE`, and only if `pg_has_role(current_user, 'app_user', 'SET')` is
+false:
+
+- a superuser (CI's, pglite's) already passes that check and gets nothing;
+- a re-run gets nothing;
+- a role with no ADMIN on `app_user` fails the migration with the statement an operator must run instead.
+
+The grant takes SET because that is what `withTenant` uses. It takes INHERIT FALSE because the migrating
+role owns every table, so `app_user`'s privileges add nothing it needs, and inheriting them would quietly
+hand it every future grant to `app_user`. If the role already holds a membership it granted itself (an operator set
+`createrole_self_grant`), SET is added to that membership and its INHERIT is left alone.
+
+**Two databases on one cluster are the same problem twice.** Take staging and production on one Aurora
+cluster, migrated by different owners. `app_user` is cluster-wide, so only the owner that migrated first
+created it and holds ADMIN on it. The second owner has no membership at all: 0001 finds `app_user` and moves
+on, and 0015 cannot grant it the switch. 0015 then fails with the statement to run, and Kysely rolls back
+the whole run. A role holding ADMIN on `app_user` runs that statement, after which the second owner's
+re-run finds the switch already effective and migrates. The contract suite runs exactly this, executing the
+statement copied out of the error.
+
+**A separate application role is a different case.** The `db-role-not-superuser` cutover row asks for one.
+It also reads the RLS-free infra tables (`tenants`, `organizations`, `service_keys`) before any tenant is
+set, and only `app_user` holds SELECT on them. So it needs
+`GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE`. It cannot make that grant itself, since it did not
+create `app_user`: the role that created it (the migrating owner, whose 0001 ran first) or any role holding
+ADMIN on `app_user` must. It must own nothing. With INHERIT TRUE it holds exactly `app_user`'s
+privileges, and every tenant table it reaches outside `withTenant` is still bound by RLS, with no tenant
+set: zero rows, and no insert passes the `WITH CHECK`.
+
+**Postgres 16 or later is keel's minimum.** 0015 uses `pg_has_role(…, 'SET')` and `GRANT … WITH SET`,
+and both arrived in Postgres 16. Every server keel targets is 16 or later: Aurora 16.10 (`infra/stack.ts`),
+CI's postgres:16 contract job, pglite (Postgres 18.6) and the embedded Postgres 18.4 that a local
+`pnpm test:contract` starts. So keel states the minimum (`docs/adopting.md`, "Cutover") instead of
+branching on `server_version_num`. A branch for 15 would be code that no gate runs.
+
+**The gate: a non-superuser pass in `pnpm test:contract`** (`packages/keel/src/db/owner-pass.ts`, run
+from `packages/keel/src/adapters/real/db.contract.test.ts`).
+
+- A `LOGIN CREATEROLE CREATEDB NOSUPERUSER` owner creates its own database and runs the migrations.
+- Inside `withTenant` it must be `app_user`, in the tenant it asked for.
+- Then the whole composed proof suite runs with every role switch made by that owner. The proof context
+  gained `appDb` for this; seeding and the superuser negative control stay on `db`, unchanged.
+- The pass first MEASURES what this server gives a creator. The owner creates a throwaway role and reads
+  its own membership back: ADMIN, no INHERIT, no SET. CI's postgres:16 job asserts that on every run.
+- The pass runs TWICE in its file, so both of its branches run every time. The first run is on a fresh
+  server: a local run's embedded server is always one, and so is CI's service whenever this file runs
+  before the app's. There, the owner's own 0001 creates `app_user`, which is the genuine path. The second
+  run finds `app_user` already there (cluster-wide, as on any reused server), and grants the owner exactly
+  the measured creator membership.
+- Without 0015 the pass fails with the production error.
+- The pass reaches the server only through injected `admin` and `connect` handles, so another transport
+  (the Data API, #46) could run it. It does not yet.
