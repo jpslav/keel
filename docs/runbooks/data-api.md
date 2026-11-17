@@ -62,7 +62,17 @@ rds execute-statement --database "$DB" --transaction-id "$TX" \
 rds rollback-transaction --transaction-id "$TX"
 ```
 
-Pass when the second call returns the array `uuid`, `text`.
+Pass when the third call, the `SELECT`, returns the array `uuid`, `text`.
+
+Then check what those casts exist for: an untyped string parameter arrives as `varchar`, as the emulator
+binds it (`packages/keel/src/adapters/real/rds-data-emulator.ts`):
+
+```bash
+rds execute-statement --database "$DB" --sql "SELECT pg_typeof(:p)::text AS t" \
+  --parameters '[{"name":"p","value":{"stringValue":"x"}}]'
+```
+
+Pass when it returns `character varying`. If it does not, the emulator is stricter than AWS; correct it.
 
 Then check that a `:` inside a string literal or a comment is not read as a parameter. Keel's own SQL
 has none today, but the emulator assumes AWS's parser skips them, and nothing else has checked:
@@ -109,10 +119,23 @@ rds execute-statement --database "$DB" --sql "INSERT INTO tenants (slug, name) S
 ```
 
 This fails with a unique violation. Record the exception's name and its whole message, including whether
-it ends `; SQLState: 23505`. Also roll back a transaction id that has already ended, and record that
-exception's name and message: the dialect treats `TransactionNotFoundException`, or a message saying the
-transaction is not found, as already rolled back. The dialect handles both forms (`normalizeDatabaseError` in
+it ends `; SQLState: 23505`. The dialect handles both forms (`normalizeDatabaseError` in
 `packages/keel/src/adapters/real/rds-data-codec.ts`), but the row should say which one AWS sends.
+
+Also roll back a transaction id that has already ended, and record that exception's name and message: the
+dialect treats `TransactionNotFoundException`, or a message saying the transaction is not found, as already
+rolled back (`isTransactionGone` in `packages/keel/src/adapters/real/rds-data-dialect.ts`).
+
+Last, record the exception names for two requests the Data API should refuse before running anything:
+
+```bash
+rds execute-statement --database "$DB" --sql "SELECT 1 -- $(head -c 70000 /dev/zero | tr '\0' x)"
+rds execute-statement --database "$DB" --sql "SELECT 1 WHERE 1 = ANY(:xs)" \
+  --parameters '[{"name":"xs","value":{"arrayValue":{"longValues":[1]}}}]'
+```
+
+The emulator names both `ValidationException`, and the dialect takes that name to mean the request never
+reached the database, so a transaction it happened in stays usable. If AWS sends another name, change both.
 
 ## 5. The app on the transport
 
