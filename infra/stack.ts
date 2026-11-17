@@ -2,6 +2,7 @@ import path from 'node:path'
 import * as cdk from 'aws-cdk-lib'
 import type { Construct } from 'constructs'
 import { APP_SLUG } from '../apps/showcase/config/app'
+import { params } from '../apps/showcase/config/params'
 import { addTags, TAGS } from './lib/tags'
 
 const { aws_budgets, aws_cloudfront, aws_cloudfront_origins, aws_ec2, aws_lambda, aws_lambda_nodejs, aws_rds, aws_s3 } =
@@ -31,6 +32,14 @@ export class AppStack extends cdk.Stack {
         }
         const isProd = environment === 'Production'
         addTags(this, { ...TAGS, Environment: environment })
+
+        // This draft builds the `pg` network shape only (Lambdas in the VPC, a socket to Aurora). Refuse the
+        // opt-in Data API transport rather than deploy the pg shape under it with nothing wired for it.
+        if (params.database.transport !== 'pg') {
+            throw new Error(
+                `params.database.transport is '${params.database.transport}', but this infra draft builds only the 'pg' network shape`,
+            )
+        }
 
         // ---- networking -------------------------------------------------------------------
         // One NAT gateway so the in-VPC Lambda can reach the hosted auth/email/LLM services —
