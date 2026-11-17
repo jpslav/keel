@@ -2,7 +2,8 @@
 
 Multi-tenant web app foundation. Generic scaffold: hermetic local dev, ports and adapters, RLS tenancy.
 Built to be adopted as a template — `docs/adopting.md` is the adopter guide; keep it truthful.
-All architecture decisions are recorded and Accepted in `docs/adr/` — follow them, don't relitigate.
+Architecture decisions are recorded in `docs/adr/`. Follow the Accepted ones (0001–0013) and don't relitigate them;
+0014 is Proposed and changes nothing until it is accepted.
 The philosophy behind these rules — thin slices, ports/adapters, hermetic dev, demo mode, one-app default —
 is `docs/development-approach.md`; read it to understand the why, not just the what.
 Anything needing real credentials is a row in `docs/cutover-checklist.md`, never a blocker.

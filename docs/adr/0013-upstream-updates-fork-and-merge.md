@@ -166,3 +166,18 @@ edited or deleted a file upstream changed), and a directory holding one stray fi
 showcase is still strict about the showcase, and citations of the adopter's own app or of `packages/keel` stay
 strict everywhere. The rule lives in the file the gate and `init-app` share, so the rewriter and the gate
 cannot disagree about it. A doc that means the reader's own app should still say `apps/<app>/…`.
+
+## Addendum — 2026-11-17: proposed to be superseded by ADR-0014
+
+The first trigger for revisiting this ADR has fired: a second real app outside this repo. The SafeInsights
+sharing site (`safeinsights/pages`) adopted keel by fork this week.
+[ADR-0014](0014-distribution-as-versioned-packages.md), Proposed, would replace fork and merge with versioned
+packages, the scaffold included.
+
+Its measurement of that fork bears on this ADR's table of where conflicts land. `packages/keel` behaved as
+promised: Pages has no local edits to it, and every file that differs is an older keel version. The conflicts
+landed in the scaffold, which the table lists as "real conflicts". 65 of the 176 files outside `apps/`,
+`packages/` and the lockfile differ from every version keel has had, and each conflicts on any upstream change.
+
+Until ADR-0014 is accepted and Pages has switched, this ADR stands as written, and adopters keep taking upstream
+by merge.

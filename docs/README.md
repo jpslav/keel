@@ -23,7 +23,7 @@ ejected or renamed it, so a doc merged in from upstream cannot turn an adopter's
   removal, cutover
 - [development-approach.md](development-approach.md) — the engineering philosophy: thin slices,
   ports/adapters, hermetic dev, demo mode, the template/instance doctrine
-- [adr/](adr/) — the architecture decisions, all Accepted. Each body states the decision as it holds
+- [adr/](adr/) — the architecture decisions: 0001–0013 Accepted, 0014 Proposed. Each body states the decision as it holds
   today; from here an ADR is amended by appending a **dated addendum**, never by editing what it said
 - [auth-ui-playbook.md](auth-ui-playbook.md) — the recipe for adding auth capabilities (Clerk anatomy
   re-expressed in Mantine)

@@ -1778,3 +1778,21 @@ the panel is the element that carries it.
   `packages/seed` and rewrites the citation `` `packages/seed` `` to the surviving app's seed directory
   (`scripts/init-app.ts`, the `path citations` rewrite). `` `packages/seed/` ``, with the slash, is not that
   spelling: it passed the doc-path gate here, where the directory exists, and failed it in CI's adoption probe.
+
+## The package-model spike (2026-11-17, `docs/adr-package-model`)
+
+- **A workspace symlink hides every package-resolution question.** `node_modules/keel` is a link whose real path
+  is `packages/keel`, outside `node_modules`, so every tool treats keel as first-party source. Installed from a
+  packed tarball, keel really is in `node_modules`. esbuild and tsx then ignore tsconfig `paths` for its files, so
+  `@app-config/*` stopped resolving in both, while `tsc`, Turbopack, Vite and Vitest still applied their aliases.
+  To learn what a consumer gets, `pnpm pack` the package and install the tarball outside the workspace.
+- **A resolution config can point at the wrong seam and still build.** `infra/stack.ts` bundles the migrator with
+  the root tsconfig, whose `paths` send `@app-config/*` to keel's test fixture. The bundle built cleanly and held
+  the fixture's `dockets` migrations. When a build resolves the seam, assert what it resolved to (the app's own
+  migrations are in the bundle), not only that it built.
+- **Count a fork's divergence by blob, not by diff.** Asking whether each differing file's blob exists in keel's
+  object store separates "an older keel version" from "a local edit" without a merge base. Pages'
+  `packages/keel` had 45 differing files and 0 local edits.
+- **See the singleton check fail against the mistake it guards.** An unmet peer range did not produce two copies:
+  pnpm linked keel to the app's `react` and printed a warning. Moving `react` into keel's `dependencies` did
+  produce two, and the install was silent.

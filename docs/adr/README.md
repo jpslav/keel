@@ -1,8 +1,10 @@
 # Architecture Decision Records
 
-All thirteen decisions below are **Accepted** (approver: JP Slavinsky). They are the one-way doors — the
+Thirteen of the decisions below are **Accepted** (approver: JP Slavinsky). They are the one-way doors — the
 choices that shaped everything after them and are expensive to reverse — and they are not open for
 relitigation in routine work. If new information genuinely challenges one, raise it with the approver.
+[0014](0014-distribution-as-versioned-packages.md) is **Proposed**: it would supersede 0013, and it changes
+nothing until it is accepted.
 
 The operating philosophy these decisions serve (thin slices, ports and adapters, hermetic dev, demo mode,
 the one-app default) is in [../development-approach.md](../development-approach.md); the ADRs are the
@@ -36,3 +38,4 @@ authoritative.
 | [0011](0011-email-mailgun.md)                       | Email: Mailgun, react-email, the port as the catch-point         |
 | [0012](0012-framework-app-line-and-registration.md) | The framework/app line: registration through the app-config seam |
 | [0013](0013-upstream-updates-fork-and-merge.md)     | Upstream updates: publishable-shaped, distributed by fork/merge  |
+| [0014](0014-distribution-as-versioned-packages.md)  | Distribution: versioned packages, scaffold included (Proposed)   |
