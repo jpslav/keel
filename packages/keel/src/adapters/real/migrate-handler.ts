@@ -6,8 +6,9 @@ import { createRealDb } from './db'
  * contract tests use. Invoked by the CD pipeline before each release shifts traffic.
  *
  * ROLES. The credentials here are the migrator's, and migration 0015 grants that role the switch to
- * `app_user`. If the application connects as a DIFFERENT role, that role needs the switch too, granted by
- * this role:  GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE;
+ * `app_user`. If the application connects as a DIFFERENT role, that role needs the switch too. It cannot
+ * grant itself that; this role, which created `app_user` and so holds ADMIN on it, or any other role with
+ * ADMIN on `app_user`, runs:  GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE;
  * (the `db-role-not-superuser` row in docs/cutover-checklist.md; ADR-0004, 2026-11-16 addendum).
  * AUTHORED — CUTOVER (`cloud-accounts`).
  *

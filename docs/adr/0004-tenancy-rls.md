@@ -187,8 +187,9 @@ hand it every future grant to `app_user`.
 **A separate application role is a different case.** The `db-role-not-superuser` cutover row asks for one.
 It also reads the RLS-free infra tables (`tenants`, `organizations`, `service_keys`) before any tenant is
 set, and only `app_user` holds SELECT on them. So it needs
-`GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE`, run by a role with ADMIN on `app_user` (the
-migrator, which created it). It must own nothing. With INHERIT TRUE it holds exactly `app_user`'s
+`GRANT app_user TO <app role> WITH SET TRUE, INHERIT TRUE`. It cannot make that grant itself, since it did not
+create `app_user`: the role that created it (the migrating owner, whose 0001 ran first) or any role holding
+ADMIN on `app_user` must. It must own nothing. With INHERIT TRUE it holds exactly `app_user`'s
 privileges, and every tenant table it reaches outside `withTenant` is still bound by RLS, with no tenant
 set: zero rows, and no insert passes the `WITH CHECK`.
 
