@@ -44,8 +44,9 @@ part first.
   showcase: its rescue step (the harness, `params.ts`, three devDependencies) and the contract-config rewrites are gone, 66 lines
   fewer. The same test checks that every app's params have one shape (infra reads the same keys whichever app it is pointed
   at) and cite cutover rows that exist.
-- **Measured.** Before: 3 files, 37 tests, ~12 s. After: 4 files (showcase, starter, keel's two), 42 tests, ~10 s, on one embedded
-  server per file; and against one shared server, as CI runs it, all four pass in one run with each suite in its own database.
+- **Measured.** On main (3604aa1): 3 files, 40 tests, 6.7 s once warm. After: 4 files (showcase, starter, keel's two), 45 tests,
+  9.4 to 10.5 s, on one embedded server per file (the showcase's file went from 1 test to 3: it now runs the owner pass too);
+  against one shared server, as CI runs it, 3.8 s before and 5.4 to 6.1 s after, with each suite in its own database.
 
 **What the owner pass found:** nothing new in either app: both apps' own migrations migrate and switch roles under a non-superuser
 owner, which is what #53's pass proves for the framework's. It now runs for each of them.

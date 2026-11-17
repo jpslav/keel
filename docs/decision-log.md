@@ -2557,21 +2557,31 @@ every app plus keel's fixture, each in a database of its own.
   summary: the starter carries all of it before anyone ejects. 66 lines left the script and 7 were added.
 - **A gate that the next app cannot skip: `tests/tooling/app-scaffold.test.ts`.** An app with no `params.ts`,
   whose params have different keys from another app's (both directions), that cites a cutover row the checklist
-  does not have, or that has migrations and no `tests/contract` file calling `defineContractSuite(`, fails it.
+  does not have, that has migrations and no `tests/contract` file calling `defineContractSuite(` (a mention in a
+  comment is not a call), whose contract database is another app's (two slugs can fold to one name, and on CI's
+  one server their migrations would meet) or starts with `keel_` (keel's own fixture databases), fails it.
   `scaffoldProblems` is a pure function with synthetic negative tests, like `presetProblems`, and it names no
   app, so it travels with `tests/` to an adopter. Params shape parity is the cheap half of "every app's
   deployment parameters look alike", which the conformance kit will state properly.
+- **The helper's pools carry the real adapter's client error listener.** A connection the server ends is an
+  'error' event, and with no listener it is an uncaught exception that takes the whole run down instead of
+  failing the test using it. Probed both ways: with the listener a server-terminated idle connection and one
+  inside a transaction fail only that test; with it removed the run reports an unhandled 57P01.
 - **`apps/starter/config/params.ts` is the showcase's file, copied.** Same keys, same cutover rows. The
   checklist rows are the contract; a second value set that drifts is what the shape-parity gate catches.
 
 Seen failing, then restored: removing `ENABLE/FORCE ROW LEVEL SECURITY` from the starter's `1001_items.ts`
 turned all three starter contract tests red ("public.items is reachable by app_user"); deleting the
 `database` section of the starter's params, citing a row that does not exist, and removing the file each
-turned the scaffold gate red; removing `apps/starter/tests/contract` turned it red (two failures).
+turned the scaffold gate red; so did removing `apps/starter/tests/contract`, giving the starter the
+showcase's slug or a `keel-` one, and commenting out its `defineContractSuite(` call.
 
-Measured: `pnpm test:contract` was 3 files, 37 tests, about 12 s on main; it is 4 files, 42 tests, about 10 s,
-in the local (embedded) mode and in CI's mode (one server through `CONTRACT_DATABASE_URL`). The owner pass
-found nothing new in either app's migrations.
+Measured, `pnpm test:contract` with one embedded server per file: on main (3604aa1) 3 files and 40 tests, 6.7 s
+once warm (11 s on a cold first run); here 4 files and 45 tests, 9.4 to 10.5 s. The five extra tests are the
+starter's three and two in the showcase's file, which on main ran only the superuser proofs and now runs the
+owner pass twice as well. Against one shared server, as CI runs it (`CONTRACT_DATABASE_URL`): 3.8 s on main,
+5.4 to 6.1 s here, green twice running on the same live server. Covering every app costs about 3 s locally. The
+owner pass found nothing new in either app's migrations.
 
 Found by running the whole flow on an ejected copy (`init-app acme --eject-showcase`), not by reading: a
 scaffold-gate assertion that named `starter` (it fails once the app is renamed), the internal-module count in

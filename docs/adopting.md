@@ -268,10 +268,11 @@ the starter survives.
 
 `apps/starter` already owns the two things that are not the demo and that were once the showcase's alone: the **RLS
 contract suite** (`apps/<app>/tests/contract/`, which runs keel's composed proof suite on real Postgres, in a database
-of the app's own, once by a non-superuser owner as Aurora's master user is and once by a superuser: the anti-drift gate
-CI depends on) and **`apps/<app>/config/params.ts`**. So ejecting rescues nothing and deletes no gate:
+of the app's own, by a non-superuser owner as Aurora's master user is (twice: on a fresh server, and where `app_user`
+already exists) and by a superuser: the anti-drift gate CI depends on) and **`apps/<app>/config/params.ts`**. So ejecting rescues nothing and deletes no gate:
 `pnpm test:contract` runs your app's suite, and `tests/tooling/app-scaffold.test.ts` fails if an app registers
-migrations without one, or its params stop matching the shape `infra/` reads.
+migrations without one, or the apps' params carry different keys (`infra/` reads one app's, and needs the same keys
+from whichever it is pointed at).
 
 Five root scripts are dropped, because the starter does not ship the capabilities behind them:
 `dev:real`, `llm:record`, `ladle`, `build:demo`, `start:demo`. They come back with the thing they

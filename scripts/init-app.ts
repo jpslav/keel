@@ -792,7 +792,7 @@ function wrapBullet(paragraph: string, width = 100): string {
 }
 
 function reportUntouched(survivor: string, hasStarterContent: boolean, demoBudget: DemoBudget): void {
-    // Every app carries its own config/params.ts (tests/tooling/app-scaffold.test.ts holds it), so there is always one.
+    // Every app carries its own config/params.ts (tests/tooling/app-scaffold.test.ts fails an app without one), so the survivor has one.
     const params = `apps/${survivor}/config/params.ts. Every PLACEHOLDER_ value, and\n    sentry.org. Each maps to a row in docs/cutover-checklist.md.`
     console.log(`
 WHAT THIS DID NOT TOUCH — the parts that need judgement, not a rename:
