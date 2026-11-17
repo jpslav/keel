@@ -37,10 +37,10 @@ function synthesize(transport: Transport): { all: Record<string, Resource>; asse
 }
 
 /**
- * The code esbuild bundled for each Lambda the stack bundles, keyed by logical id: what NodejsFunction
- * produced during this synth, with the tsconfig the stack passes, not a re-creation of it. A Lambda whose
- * code is a ready-made asset (the server's placeholder zip, CDK's own providers) has no bundle and is
- * left out.
+ * The code staged for each Lambda whose asset has an `index.mjs` or `index.js`, keyed by logical id. For
+ * the migrator that is what NodejsFunction's esbuild produced during this synth, with the tsconfig the
+ * stack passes, not a re-creation of it. CDK's own provider handler ships a ready-made `index.js`, and is
+ * read and checked like any other. The server's placeholder asset has neither, so it is left out.
  */
 function bundles(all: Record<string, Resource>, assembly: string): Map<string, string> {
     const found = new Map<string, string>()
