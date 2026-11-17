@@ -1101,6 +1101,11 @@ describe("what counts as a handler's own path", () => {
             'route.js': `${AUTHORIZE}export async function POST() { function check() { authorize() } var check = () => {}; check() }`,
         })[0]
         expect(asVar?.handlers.map((h) => outcome(h))).toEqual(['open'])
+        // A var in a nested block is hoisted to the function, so it is the same name.
+        const hoisted = scanTree({
+            'route.js': `${AUTHORIZE}export async function POST(c) { function check() { authorize() } if (c) { var check = () => {} } check() }`,
+        })[0]
+        expect(hoisted?.handlers.map((h) => outcome(h))).toEqual(['open'])
     })
 
     it('a route.js handler declared twice in its scope is refused', () => {

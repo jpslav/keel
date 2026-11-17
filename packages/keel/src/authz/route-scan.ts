@@ -826,10 +826,12 @@ function isConst(decl: ts.VariableDeclaration): boolean {
 function isRedeclared(decl: ts.FunctionDeclaration): boolean {
     // Read from the syntax, not the binder: in a JS file the binder gives `function check` and `var check` separate
     // symbols, and an exported function its own export symbol, so neither shows as a second declaration there.
+    // The scope is the block that holds the declaration: a module is strict code, where a function declared in a
+    // block belongs to that block. A `var` anywhere inside it (outside nested functions) hoists past it and is the
+    // same name.
     const name = decl.name?.text
     if (name === undefined) return false
-    let scope: ts.Node = decl.parent
-    while (!ts.isSourceFile(scope) && !ts.isFunctionLike(scope)) scope = scope.parent
+    const scope: ts.Node = decl.parent
     let count = 0
     const walk = (node: ts.Node): void => {
         if (node !== scope && (ts.isFunctionLike(node) || ts.isClassLike(node))) {
