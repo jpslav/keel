@@ -1836,3 +1836,19 @@ the panel is the element that carries it.
   which set `paths` and `regexes` to allow one placeholder string, exempted every finding in that file,
   while its comment said "that one file AND that one string". It was found while scoping a second entry.
   Both now set `condition = "AND"`. Any new entry that pairs a path with a string needs it too.
+
+## A `pg` pool needs an error listener (2026-11-17, `fix/pg-pool-idle-error`)
+
+- **An idle connection the server ends is an event, not an exception you can catch.** pg-pool emits
+  `'error'` on the pool when an IDLE client's connection dies, and an EventEmitter with no `'error'`
+  listener throws. That is an uncaught exception in a Lambda between requests. Aurora ends idle
+  connections routinely: a Serverless v2 cluster pausing at min capacity 0, a failover, an idle timeout.
+  `createRealDb` (`packages/keel/src/adapters/real/db.ts`) had no listener. It now logs the code and
+  message with `console.warn` and lets the pool replace the client.
+- **Found through the test emulator first.** The Data API owner pass's teardown runs
+  `DROP DATABASE … WITH (FORCE)`, which ended an emulator pool's idle connection, and CI failed on the
+  unhandled error. The same shape was in the production adapter. The contract test now ends an idle
+  backend with `pg_terminate_backend` and expects the warning and a working next query. Before the
+  listener, it failed with the unhandled error.
+- The Data API transport has no such pool: it speaks HTTPS through the SDK, and an SDK failure rejects
+  the call that made it.

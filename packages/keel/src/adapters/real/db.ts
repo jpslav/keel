@@ -39,7 +39,27 @@ const pgTypes: CustomTypesConfig = {
  */
 export function createRealDb(databaseUrl: string): DbPort {
     const pool = new Pool({ connectionString: databaseUrl, max: 5, types: pgTypes })
+    pool.on('error', logIdleConnectionError)
     return dbPortFor(new Kysely<DB>({ dialect: new PostgresDialect({ pool }) }))
+}
+
+/**
+ * An IDLE pooled connection the server ended: Aurora does it when a Serverless v2 cluster pauses at
+ * min capacity 0, on a failover, and at an idle timeout. pg-pool reports that as an 'error' event on the
+ * pool and drops the client, and the next query opens a fresh one. With no listener the event is an
+ * uncaught exception, which crashes the Lambda between requests. So it is logged and nothing else: no
+ * query was running on that connection, and a connection that IS in use fails its own query as before.
+ *
+ * Logged with `console.warn`, which reaches CloudWatch in Lambda. keel has no logger port, and Sentry is
+ * loaded only when a DSN is configured (../sentry/init.ts), so the adapter does not import it. pg's error
+ * message and code (57P01 for "terminating connection due to administrator command") carry no
+ * credentials. The Data API transport has no such pool: it speaks HTTPS through the SDK, whose failures
+ * reject the call that made them.
+ */
+function logIdleConnectionError(error: Error & { code?: string }): void {
+    console.warn(
+        `keel db: an idle pooled connection ended (${error.code ?? 'no code'}: ${error.message}); the pool replaces it`,
+    )
 }
 
 /** One port shape for both transports: they differ in how SQL reaches Postgres, never in what it says. */

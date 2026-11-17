@@ -1,6 +1,6 @@
 import EmbeddedPostgres from 'embedded-postgres'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { randomUUID } from 'node:crypto'
@@ -222,6 +222,40 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
     test('the full RLS proof suite passes', async () => {
         await realDb.migrateToLatest()
         await runRlsProofs(realDb.getDb(), expect)
+    })
+
+    // Aurora ends idle connections (a Serverless v2 cluster pausing at min capacity 0, a failover, an idle
+    // timeout). pg-pool reports that as an 'error' event on the pool, and an event with no listener is an
+    // uncaught exception: it would crash the Lambda between requests. The adapter must log it and carry on.
+    test('an idle pooled connection the server ends is logged, not a crash, and the pool carries on', async () => {
+        const url = new URL(serverUrl)
+        url.pathname = `/${DATABASE}`
+        url.searchParams.set('application_name', 'keel_idle_probe')
+        const probe = createRealDb(url.toString())
+        const admin = connect({
+            database: new URL(serverUrl).pathname.slice(1) || 'postgres',
+            user: decodeURIComponent(new URL(serverUrl).username),
+            password: decodeURIComponent(new URL(serverUrl).password),
+        })
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        try {
+            // One query, and its connection goes back to the pool idle.
+            await sql`select 1`.execute(probe.getDb())
+            const ended = await sql<{ n: number }>`
+                SELECT count(*)::int AS n FROM (
+                    SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+                    WHERE application_name = 'keel_idle_probe' AND state = 'idle'
+                ) AS terminated`.execute(admin)
+            expect(ended.rows[0]!.n).toBe(1)
+            await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('57P01')))
+            // The pool drops the dead client and opens a new one for the next query.
+            const again = await sql<{ ok: number }>`select 1 as ok`.execute(probe.getDb())
+            expect(again.rows).toEqual([{ ok: 1 }])
+        } finally {
+            warn.mockRestore()
+            await probe.getDb().destroy()
+            await admin.destroy()
+        }
     })
 })
 
