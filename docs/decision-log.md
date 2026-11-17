@@ -2436,3 +2436,22 @@ The design is in ADR-0004's addendum of the same date.
 - **`KEEL_LINT_EXCEPTIONS_ROOT` points the loader at a scratch tree**, for the one test that runs the real config
   end to end without writing into this repo's `apps/`. It is read only under vitest, so a variable left in a shell
   cannot swap the exceptions; that guards against accidents and is not a boundary.
+
+## ADR-0014's open decisions, decided by JP (2026-11-17, `docs/adr-package-model`)
+
+ADR-0014 (Proposed) left seven decisions open. JP Slavinsky decided all seven on 2026-11-17, in a chat with the
+keel manager session, which relayed them to the session writing the ADR. The ADR records each with its reasons.
+
+- **D1, registry: public npm.** GitHub Packages was the alternative. It needs a classic personal access token to
+  install even a public package, on every adopter's machine and in their CI.
+- **D2, name: keel is renamed strake.** `keel` on npm is another project's active backend framework, and a
+  rename is cheapest before anything is published and before Pages switches. The naming rule was left to the
+  ADR. The framework is the unscoped `strake`, so apps import `strake/…` with no alias. Everything else,
+  including the never-published seam `@strake/app-config`, is under the `@strake` npm organization. The
+  alternative, unscoped tooling (`create-strake-app`, `eslint-plugin-strake`), was rejected because each
+  unscoped name is one more that someone else could publish first. ADRs 0001–0013, this log and
+  `docs/build-notes.md` keep saying keel, because they were true when written. Renaming the GitHub repository is
+  JP's action, after the rename step and before the first release candidate.
+- **D3, licence: unchanged**, MIT and "Copyright (c) 2026 JP Slavinsky".
+- **D4–D7, as the ADR recommended:** the showcase stays as the never-published reference app; Pages switches at
+  the first release candidate; strake's own packages are exempt from `minimumReleaseAge`; no backports during 0.x.
