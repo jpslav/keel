@@ -1805,3 +1805,19 @@ worth keeping.
   decides this, so it is not a new choice. It does not make `pnpm dev` offline: the dev overlay's version
   check, which next 16.2 already had, still fetches `next`'s dist-tags. Advisories now have to reach keel
   another way, through Dependabot security updates (currently off in the repository settings) or review.
+
+## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
+
+- **Three packages raised past their advisories, staying on their current majors.** `@sentry/nextjs`
+  `^10.75.2` (resolves 10.78.0) clears GHSA-mchm-gjx6-7h55, a critical middleware bypass through the
+  tunnel route. keel configures no `tunnelRoute`, but the version is raised anyway rather than relying on
+  that. `vitest` and `@vitest/coverage-v8` `^4.1.11` (resolve 4.1.12) clear GHSA-82fw-gwwq-j7x9.
+  `happy-dom` `^21.0.4` clears GHSA-5fpq-26gf-qwcr, GHSA-c8p4-j97h-3vg8 and GHSA-834v-8h66-3h79. The
+  last two have no fix on 20.x, so this is a major bump. 21.0.0's one breaking change turns off CSS-file
+  and iframe loading by default, its fix for the SSRF; no keel test configures happy-dom or loads either.
+  GitHub's advisory database lists nothing against any of the four resolved versions. Not taken: Sentry 11
+  and vitest 5 (new majors, no advisory requiring them).
+- **`withSentryConfig` stays imported from `@sentry/nextjs`.** Since 10.73.0 Sentry also exports it from
+  `@sentry/nextjs/config`, its v11 path, and the old import logs a deprecation warning once. The showcase
+  wraps its config with Sentry only when a DSN is set (cutover row `errors`), so nothing here exercises
+  the import. Moving it belongs with the Sentry 11 upgrade.
