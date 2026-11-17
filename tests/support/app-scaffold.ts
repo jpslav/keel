@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { contractDatabaseName } from './contract-postgres'
 
 /**
  * What every app in `apps/*` must carry to be a template an adopter can keep, checked the same way for all of them:
@@ -20,6 +21,18 @@ export interface AppFacts {
     hasMigrations: boolean
     /** The app's `tests/contract/*.test.ts` files that call `defineContractSuite`. */
     contractSuites: string[]
+    /** The database its contract suite uses (`contractDatabaseName` of its `config/app.ts` slug), or null with no slug. */
+    contractDatabase: string | null
+}
+
+/** The prefix of keel's own contract databases (`keel_contract`, `keel_data_api_contract`, `keel_data_api_lock`), which
+ *  no app's may start with: the framework's fixture runs on the same server. */
+const FRAMEWORK_DATABASE_PREFIX = 'keel_'
+
+/** Whether a source CALLS `defineContractSuite(`: a mention in a comment is not a call. */
+export function callsDefineContractSuite(source: string): boolean {
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    return code.includes('defineContractSuite(')
 }
 
 /** Every leaf of a value as a dotted path: `{ a: { b: 'x' } }` is `['a.b']`. */
@@ -78,6 +91,21 @@ export function scaffoldProblems(apps: readonly AppFacts[], rows: ReadonlySet<st
                 )
             }
         }
+        if (app.contractDatabase !== null) {
+            const sharing = apps.filter((other) => other !== app && other.contractDatabase === app.contractDatabase)
+            if (sharing.length > 0 && app.name < sharing[0]!.name) {
+                problems.push(
+                    `apps/${app.name} and apps/${sharing.map((other) => other.name).join(', apps/')}: contract database "${app.contractDatabase}" ` +
+                        'is the same for both (their slugs fold to one name), and two migration sets cannot share a database',
+                )
+            }
+            if (app.contractDatabase.startsWith(FRAMEWORK_DATABASE_PREFIX)) {
+                problems.push(
+                    `apps/${app.name}: contract database "${app.contractDatabase}" starts with "${FRAMEWORK_DATABASE_PREFIX}", ` +
+                        "which is keel's own fixture databases' prefix on the same server",
+                )
+            }
+        }
         if (app.hasMigrations && app.contractSuites.length === 0) {
             problems.push(
                 `apps/${app.name}: registers migrations but has no contract suite (a tests/contract/*.test.ts calling defineContractSuite), ` +
@@ -99,6 +127,10 @@ export async function readAppFacts(repoRoot: string, name: string): Promise<AppF
         const loaded = (await import(pathToFileURL(paramsFile).href)) as { params?: unknown }
         paramsKeys = leafPaths(loaded.params)
     }
+    const slugFile = path.join(dir, 'config', 'app.ts')
+    const slug = existsSync(slugFile)
+        ? ((await import(pathToFileURL(slugFile).href)) as { APP_SLUG?: unknown }).APP_SLUG
+        : undefined
     const migrations = path.join(dir, 'src', 'app-config', 'db', 'migrations')
     const contract = path.join(dir, 'tests', 'contract')
     return {
@@ -110,9 +142,10 @@ export async function readAppFacts(repoRoot: string, name: string): Promise<AppF
             ? readdirSync(contract).filter(
                   (file) =>
                       file.endsWith('.test.ts') &&
-                      readFileSync(path.join(contract, file), 'utf8').includes('defineContractSuite('),
+                      callsDefineContractSuite(readFileSync(path.join(contract, file), 'utf8')),
               )
             : [],
+        contractDatabase: typeof slug === 'string' ? contractDatabaseName(slug) : null,
     }
 }
 

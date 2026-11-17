@@ -6,6 +6,7 @@ import { contractApps } from '../support/contract-apps'
 import { contractDatabaseName } from '../support/contract-postgres'
 import {
     appNames,
+    callsDefineContractSuite,
     citedCutoverRows,
     cutoverRows,
     leafPaths,
@@ -63,14 +64,18 @@ describe('contractDatabaseName', () => {
 describe('scaffoldProblems fails when an app is missing what it must carry', () => {
     const rows = new Set(['cloud-accounts', 'auth-dev'])
     const params = ['aws.region', 'database.transport']
-    const app = (over: Partial<AppFacts>): AppFacts => ({
-        name: 'one',
-        paramsKeys: params,
-        paramsSource: '// cutover: cloud-accounts\n',
-        hasMigrations: true,
-        contractSuites: ['rls-contract.test.ts'],
-        ...over,
-    })
+    const app = (over: Partial<AppFacts>): AppFacts => {
+        const name = over.name ?? 'one'
+        return {
+            name,
+            paramsKeys: params,
+            paramsSource: '// cutover: cloud-accounts\n',
+            hasMigrations: true,
+            contractSuites: ['rls-contract.test.ts'],
+            contractDatabase: `${name}_contract`,
+            ...over,
+        }
+    }
 
     it('passes a complete app, and two apps of one shape', () => {
         expect(scaffoldProblems([app({})], rows)).toEqual([])
@@ -108,7 +113,47 @@ describe('scaffoldProblems fails when an app is missing what it must carry', () 
     })
 })
 
+describe('scaffoldProblems fails when two suites would share a database, or take keel’s', () => {
+    const rows = new Set<string>()
+    const app = (name: string, contractDatabase: string | null): AppFacts => ({
+        name,
+        paramsKeys: [],
+        paramsSource: '',
+        hasMigrations: false,
+        contractSuites: [],
+        contractDatabase,
+    })
+
+    it('flags two apps whose slugs fold to one database name, once', () => {
+        // `acme-corp` and `acme_corp` are two slugs and one database: on CI's one server their migrations would meet.
+        const same = contractDatabaseName('acme-corp')
+        expect(same).toBe(contractDatabaseName('acme_corp'))
+        expect(scaffoldProblems([app('acme-corp', same), app('acme_corp', same)], rows)).toEqual([
+            expect.stringMatching(
+                /apps\/acme-corp and apps\/acme_corp: contract database "acme_corp_contract" is the same/,
+            ),
+        ])
+    })
+
+    it('flags an app whose database would be keel’s own, and lets other names pass', () => {
+        expect(scaffoldProblems([app('keel-data-api', contractDatabaseName('keel-data-api'))], rows)).toEqual([
+            expect.stringMatching(
+                /apps\/keel-data-api: contract database "keel_data_api_contract" starts with "keel_"/,
+            ),
+        ])
+        expect(scaffoldProblems([app('one', 'one_contract'), app('two', 'two_contract')], rows)).toEqual([])
+    })
+})
+
 describe('the helpers behind it', () => {
+    it('callsDefineContractSuite counts a call and not a mention in a comment', () => {
+        expect(callsDefineContractSuite("defineContractSuite({ database: 'x' })")).toBe(true)
+        expect(
+            callsDefineContractSuite('// defineContractSuite(...) is what it calls\n/* defineContractSuite( */'),
+        ).toBe(false)
+        expect(callsDefineContractSuite('/**\n * defineContractSuite(\n */\nexport {}')).toBe(false)
+    })
+
     it('leafPaths reads every leaf of nested params, sorted', () => {
         expect(leafPaths({ b: { y: 'x', x: 'x' }, a: 'x' })).toEqual(['a', 'b.x', 'b.y'])
     })

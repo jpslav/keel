@@ -93,9 +93,15 @@ export async function startContractServer(label: string): Promise<ContractServer
         url.username = encodeURIComponent(login.user)
         url.password = encodeURIComponent(login.password)
         url.pathname = `/${login.database}`
-        const db = new Kysely<DB>({
-            dialect: new PostgresDialect({ pool: new Pool({ connectionString: url.toString(), max: 3 }) }),
-        })
+        const pool = new Pool({ connectionString: url.toString(), max: 3 })
+        // A server that ends a connection (a CI container's hiccup, an idle-session timeout) is an 'error' EVENT on
+        // that client, and an event with no listener is an uncaught exception: it would take the whole run down
+        // instead of failing the one test that was using the connection. The client's own listener covers it idle
+        // or checked out, as in the real adapter (keel/adapters/real/db.ts); the pool's re-emit of an idle one is
+        // already logged by it.
+        pool.on('connect', (client) => client.on('error', (error) => console.warn(`contract db: ${error.message}`)))
+        pool.on('error', () => undefined)
+        const db = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) })
         open.push(db)
         return db
     }
