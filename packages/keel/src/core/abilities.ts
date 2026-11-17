@@ -1,6 +1,7 @@
 import {
     appAbilityRules,
     appMachineAbilityRules,
+    nonSessionAdministration,
     type AppMachineCredentialKind,
     type AppPersonCredentialKind,
     type AppSubjectFields,
@@ -81,6 +82,29 @@ export type PersonCredentialKind = 'session' | 'inbound-email' | AppPersonCreden
  * the app registers on the seam (`AppMachineCredentialKind`, e.g. a CI OIDC token).
  */
 export type MachineCredentialKind = 'service-key' | AppMachineCredentialKind
+
+/**
+ * The framework subjects whose non-read actions are ADMINISTRATIVE: inviting and managing members,
+ * changing the org, registering and managing outbound webhook endpoints. A person may take them only
+ * through a stated SESSION, unless the app widens one to a non-session kind on the seam
+ * (`nonSessionAdministration`). Reads are not administrative.
+ *
+ * Not listed: service keys (no route mints one, and they are no ability subject), self-only subjects
+ * (User, Notification, NotificationPref, AgreementAcceptance: a person acting on their own things), the
+ * system-managed subjects (JobSchedule, WebhookDelivery, InboundEmail: denied to everyone), and Job (a
+ * product action).
+ */
+export const ADMINISTRATIVE_SUBJECTS = ['Membership', 'Org', 'WebhookEndpoint'] as const
+export type AdministrativeSubjectType = (typeof ADMINISTRATIVE_SUBJECTS)[number]
+
+/**
+ * The contract for the app's `nonSessionAdministration` (src/app-config/abilities.ts): for each
+ * administrative subject, the non-session person credential kinds that may administer it too. Empty, the
+ * default, means administration takes a browser session.
+ */
+export type NonSessionAdministration = {
+    readonly [Subject in AdministrativeSubjectType]?: readonly Exclude<PersonCredentialKind, 'session'>[]
+}
 
 /**
  * True when two kind unions share no member, checked in BOTH directions: `Extract<A, B>` alone misses a
@@ -282,6 +306,8 @@ export function defineAbilitiesFor(actor: Actor): Ability {
     // token), or who states none, never wields it, even acting in the staff org. The app's rules are
     // handed the same effective value.
     const session = actor.credential?.kind === 'session'
+    // Read at call time, like the app's machine rules (see the machine branch above).
+    const widening: NonSessionAdministration = nonSessionAdministration
     const person: AbilityActor =
         actor.manageAll && session
             ? { ...actor, manageAll: true, credential: { kind: 'session', id: actor.credential?.id ?? null } }
@@ -293,6 +319,14 @@ export function defineAbilitiesFor(actor: Actor): Ability {
         // membership is assumed non-restricted (nothing enforces it); if a restricted operator ever
         // becomes a real configuration, gate authoring verbs here first.
         if (person.manageAll) return true
+
+        // Administration takes a stated session, unless the app widened this subject to this credential.
+        // A refusal here is final; a pass falls through to the subject's own rule below.
+        if (action !== 'read' && (ADMINISTRATIVE_SUBJECTS as readonly string[]).includes(subject.type) && !session) {
+            const widenedTo: readonly string[] = widening[subject.type as AdministrativeSubjectType] ?? []
+            const kind = person.credential?.kind
+            if (kind === undefined || !widenedTo.includes(kind)) return false
+        }
 
         switch (subject.type) {
             case 'Job':

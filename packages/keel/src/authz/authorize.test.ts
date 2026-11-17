@@ -213,12 +213,16 @@ describe('abilityActorFromCredential (a person who arrived without a session)', 
     test('a demotion takes effect on the next call (nothing is cached in, or derived from, the credential)', async () => {
         const w = world({ 'fixture-lead': { role: 'admin', restricted: false } })
         const input = { userId: 'fixture-lead', org: depot, credential: badge }
+        // Webhook endpoints are the administrative subject the fixture lets a badge manage, so the admin
+        // role is what decides here.
         const asAdmin = await abilityActorFromCredential(w.auth, input)
-        expect(() => authorize(asAdmin!, 'create', { type: 'Membership', orgId: 'org-depot' })).not.toThrow()
+        expect(() => authorize(asAdmin!, 'create', { type: 'WebhookEndpoint', orgId: 'org-depot' })).not.toThrow()
 
         w.members.set('fixture-lead', { role: 'member', restricted: true })
         const demoted = await abilityActorFromCredential(w.auth, input)
-        expect(() => authorize(demoted!, 'create', { type: 'Membership', orgId: 'org-depot' })).toThrow(ForbiddenError)
+        expect(() => authorize(demoted!, 'create', { type: 'WebhookEndpoint', orgId: 'org-depot' })).toThrow(
+            ForbiddenError,
+        )
         expect(() => authorize(demoted!, 'create', { type: 'Docket', orgId: 'org-depot' })).toThrow(ForbiddenError)
     })
 
@@ -334,7 +338,7 @@ describe('authorize(actor, action, subject)', () => {
         expect(() => authorize(intake, 'update', { type: 'Job', orgId: 'org-depot' })).toThrow(ForbiddenError)
     })
 
-    test('a person holding a non-session credential is judged as their session would be, outside the staff org', () => {
+    test('a person holding a non-session credential is judged as their session would be on product subjects', () => {
         // The token's owner as abilityActorFromCredential builds them: the badge is the fixture's
         // personal-token shape. Ordinary rules answer exactly as for the same person's session.
         const owner = {
@@ -360,7 +364,7 @@ describe('authorize(actor, action, subject)', () => {
         expect(allowed(() => authorize(owner, 'create', { type: 'Membership', orgId: 'org-a' }))).toBe(false)
     })
 
-    test('...and differs from the session in exactly one place: acting in the staff org, only the session wields manage-all', () => {
+    test('...and differs from the session acting in the staff org: only the session wields manage-all', () => {
         const foreign = { type: 'Membership', orgId: 'org-c' } as const
         const session = user({ orgSlug: staffOrgSlug, role: 'admin' })
         expect(allowed(() => authorize(session, 'org-staff', 'manage', foreign))).toBe(true)

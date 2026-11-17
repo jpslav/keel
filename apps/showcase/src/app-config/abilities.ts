@@ -1,4 +1,4 @@
-import type { AbilityAction, AbilityActor, AbilitySubject } from 'keel/core/abilities'
+import type { AbilityAction, AbilityActor, AbilitySubject, NonSessionAdministration } from 'keel/core/abilities'
 import { canManageOrg } from 'keel/core/roles'
 
 /**
@@ -126,3 +126,10 @@ export function appAbilityRules(
 export function appMachineAbilityRules(): boolean {
     return false
 }
+
+/**
+ * The framework's administrative subjects (inviting members, changing the org, managing webhook
+ * endpoints) take a browser SESSION. Here an app may widen one of them to a non-session person
+ * credential. The desk widens none: nobody administers a team by email.
+ */
+export const nonSessionAdministration: NonSessionAdministration = {}

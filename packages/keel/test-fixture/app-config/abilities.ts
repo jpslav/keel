@@ -1,4 +1,10 @@
-import type { AbilityAction, AbilityActor, AbilitySubject, MachineActor } from 'keel/core/abilities'
+import type {
+    AbilityAction,
+    AbilityActor,
+    AbilitySubject,
+    MachineActor,
+    NonSessionAdministration,
+} from 'keel/core/abilities'
 
 /**
  * The APP's authorization extension (the seam side of keel/core/abilities.ts, ADR-0012). The framework
@@ -100,3 +106,10 @@ export function appMachineAbilityRules(
             return false
     }
 }
+
+/**
+ * The framework's administrative subjects take a browser SESSION, unless widened here. The fixture
+ * widens ONE, so keel's tests can show both sides: a badge (the personal-token shape) may manage webhook
+ * endpoints, but still may not invite members or change the org.
+ */
+export const nonSessionAdministration: NonSessionAdministration = { WebhookEndpoint: ['fixture-badge'] }

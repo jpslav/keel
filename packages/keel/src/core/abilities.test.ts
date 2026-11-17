@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import {
     type AbilityActor,
+    type Credential,
     type MachineActor,
     type MachineCredentialKind,
+    type PersonCredentialKind,
     defineAbilitiesFor,
     principalIdOf,
 } from './abilities'
@@ -235,6 +237,40 @@ describe('defineAbilitiesFor', () => {
                 actor({ role: 'admin', manageAll: true, credential: { kind: 'session', id: null } }),
             )
             expect(session.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(true)
+        })
+
+        test('administration takes a session, except where the app widened it to this kind', () => {
+            // Fixture: `nonSessionAdministration = { WebhookEndpoint: ['fixture-badge'] }`.
+            const admin = (credential?: Credential<PersonCredentialKind>) =>
+                defineAbilitiesFor(actor({ role: 'admin', credential }))
+            const session = admin({ kind: 'session', id: null })
+            const viaBadge = admin(badge)
+            const viaEmail = admin({ kind: 'inbound-email', id: 'email-1' })
+            const unstated = admin(undefined)
+            for (const [type, action] of [
+                ['Membership', 'create'],
+                ['Membership', 'manage'],
+                ['Org', 'update'],
+                ['WebhookEndpoint', 'create'],
+            ] as const) {
+                expect(session.can(action, { type, orgId: ORG_A }), `session ${action} ${type}`).toBe(true)
+                expect(viaEmail.can(action, { type, orgId: ORG_A }), `email ${action} ${type}`).toBe(false)
+                expect(unstated.can(action, { type, orgId: ORG_A }), `unstated ${action} ${type}`).toBe(false)
+                // The widened subject passes for the badge, and only that one.
+                expect(viaBadge.can(action, { type, orgId: ORG_A }), `badge ${action} ${type}`).toBe(
+                    type === 'WebhookEndpoint',
+                )
+            }
+            // Widening reaches the subject's OWN rule, it does not replace it: a badge-holding member is
+            // still no org manager.
+            expect(
+                defineAbilitiesFor(actor({ role: 'member', credential: badge })).can('create', {
+                    type: 'WebhookEndpoint',
+                    orgId: ORG_A,
+                }),
+            ).toBe(false)
+            // Reads are not administration.
+            expect(viaEmail.can('read', { type: 'Membership', orgId: ORG_A })).toBe(true)
         })
 
         test("the app's rules see the credential kind, which is where narrowing by kind lives", () => {
