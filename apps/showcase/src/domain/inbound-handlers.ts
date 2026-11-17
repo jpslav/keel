@@ -79,7 +79,7 @@ function ticketFromEmail(status: TicketStatus, auditAction: 'ticket.created') {
             subjectType: 'Ticket',
             subjectId: ticket.id,
         })
-        return { status: 'handled', actorUserId: sender.id, subjectId: ticket.id }
+        return { status: 'handled', ...auditActorOf(actor), subjectId: ticket.id }
     }
 }
 

@@ -70,10 +70,12 @@ export interface AuthPort {
     updateProfile(update: ProfileUpdate): Promise<AuthUser>
     listMembers(orgSlug: string): Promise<Membership[]>
     /**
-     * `userId`'s current standing in `orgSlug`, or null when they are not an ACTIVE member of it (never
-     * joined, removed, or only invited). Its caller is `abilityActorFromCredential`
-     * (keel/authz/authorize), which asks on every call from a person who arrived without a session, so
-     * removing a person from an org stops every credential they hold at once.
+     * `userId`'s current standing in `orgSlug`, or null when they have none: not an ACTIVE member of it
+     * (never joined, removed, or only invited), or barred from the app altogether. A banned account has
+     * no standing; a merely locked one keeps it, since anyone failing its sign-ins can lock it. The caller
+     * is `abilityActorFromCredential` (keel/authz/authorize), which asks on every call from a person who
+     * arrived without a session, so removing a person from an org stops every credential they hold at
+     * once.
      */
     getMember(orgSlug: string, userId: string): Promise<MemberStanding | null>
     /** Records the invitation (per-org); sending the notification email is the caller's job (email port). */

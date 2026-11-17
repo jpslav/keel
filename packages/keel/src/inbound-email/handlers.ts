@@ -1,3 +1,4 @@
+import type { Credential } from '../core/abilities'
 import type { AuthPort } from '../ports/auth'
 import type { DbPort } from '../ports/db'
 import { appInboundHandlers } from '@app-config/inbound-email'
@@ -39,7 +40,18 @@ export interface InboundContext {
  * name what the email produced (`as`, keel/core/presets.ts) for a later step to act on.
  */
 export type InboundHandlerResult =
-    { status: 'handled'; actorUserId: string; subjectId?: string } | { status: 'unmatched'; reason: string }
+    | {
+          status: 'handled'
+          actorUserId: string
+          /**
+           * The credential the actor acted with, for the intake's `inbound-email.received` row: the email
+           * itself when the handler matched a member (`auditActorOf(actor)` gives both fields). Omitted or
+           * null, the row records none, which is right for a synthetic or system actor.
+           */
+          credential?: Credential | null
+          subjectId?: string
+      }
+    | { status: 'unmatched'; reason: string }
 
 export type InboundHandler = (ctx: InboundContext) => Promise<InboundHandlerResult>
 

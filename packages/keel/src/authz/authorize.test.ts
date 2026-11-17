@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest'
 import type { AuthUser } from '../ports/auth'
 import { ForbiddenError } from '../ports/errors'
 import type { ServiceIdentity } from '../service-auth/verify'
+import type { AbilityActor } from '../core/abilities'
 import type { MemberStanding } from '../ports/auth'
 import {
     abilityActorFromCredential,
@@ -365,9 +366,14 @@ describe('authorize(actor, action, subject)', () => {
         expect(allowed(() => authorize(session, 'org-staff', 'manage', foreign))).toBe(true)
 
         // Even an actor that CLAIMS manageAll is denied when its credential is not a session, or unstated.
+        // Both shapes are type errors now (a possibly-true manageAll must state a session), so they are
+        // cast: the point is that the run time refuses them as well.
         const asSession = abilityActorFromUser(session, 'org-staff')
-        const viaBadge = { ...asSession, credential: { kind: 'fixture-badge', id: 'badge-7' } } as const
-        const unstated = { ...asSession, credential: undefined }
+        const viaBadge = {
+            ...asSession,
+            credential: { kind: 'fixture-badge', id: 'badge-7' },
+        } as unknown as AbilityActor
+        const unstated = { ...asSession, credential: undefined } as unknown as AbilityActor
         expect(asSession.manageAll).toBe(true)
         expect(allowed(() => authorize(viaBadge, 'manage', foreign))).toBe(false)
         expect(allowed(() => authorize(unstated, 'manage', foreign))).toBe(false)

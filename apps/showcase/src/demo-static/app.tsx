@@ -328,7 +328,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
             credential: { kind: 'session', id: null },
             userId: person.id,
             role: world.roleInOrg(person, activeOrgSlug),
-            restricted: person.restricted,
+            restricted: isRestricted(person.restricted, world.roleInOrg(person, activeOrgSlug)),
             activeOrgId: activeOrgSlug,
             // Staff seam: acting AS the desk-ops org activates manage-all, exactly like
             // abilityActorFromUser derives it server-side — genuine parity, no degrade.
@@ -430,7 +430,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
                 user={{
                     name: world.name,
                     role: world.roleInOrg(person, activeOrgSlug),
-                    restricted: person.restricted,
+                    restricted: isRestricted(person.restricted, world.roleInOrg(person, activeOrgSlug)),
                 }}
                 onAsk={async (question, onDelta) => {
                     world.logEvent('assistant_asked', { tenant: tenant.slug })

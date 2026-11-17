@@ -24,8 +24,12 @@ function machine(kind: MachineCredentialKind = 'service-key', overrides: Partial
 
 const ACTIONS = ['create', 'read', 'update', 'delete', 'manage'] as const
 
-/** A person actor; a SESSION unless the test says otherwise, since that is what the person rules assume. */
-function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
+/**
+ * A person actor; a SESSION unless the test says otherwise, since that is what the person rules assume.
+ * It takes any fields and CASTS, so a test can also build the shapes the type forbids (a possibly-true
+ * `manageAll` with no session credential) and prove the run time refuses them as well.
+ */
+function actor(overrides: { role: Role; [field: string]: unknown }): AbilityActor {
     return {
         credential: { kind: 'session', id: null },
         userId: 'user-1',
@@ -33,7 +37,7 @@ function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor 
         activeOrgId: ORG_A,
         manageAll: false,
         ...overrides,
-    }
+    } as AbilityActor
 }
 
 // The FRAMEWORK base subjects. An app's own subjects and their rules are
@@ -185,6 +189,24 @@ describe('defineAbilitiesFor', () => {
         const ability = defineAbilitiesFor(actor({ role: 'restricted', restricted: true }))
         expect(ability.cannot('create', { type: 'Job', orgId: ORG_A })).toBe(true)
         expect(ability.cannot('read', { type: 'Job', orgId: ORG_A })).toBe(false)
+    })
+
+    test('a value that is not a well-formed person is denied everything, rather than judged as one', () => {
+        // A machine that lost its `kind` (a cast, a value rehydrated from storage): judged as a person it
+        // had no role and an undefined `restricted`, and `!restricted` let it update dockets and create jobs.
+        const lostKind = {
+            credential: { kind: 'service-key', id: 'key-1' },
+            principalId: 'service-key:wharf',
+            activeOrgId: ORG_A,
+        } as unknown as AbilityActor
+        const asLost = defineAbilitiesFor(lostKind)
+        expect(asLost.can('update', { type: 'Docket', orgId: ORG_A })).toBe(false)
+        expect(asLost.can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
+        // ...and so is a person with a role the ladder does not have, or a `restricted` that is not a boolean.
+        for (const malformed of [actor({ role: 'owner' as Role }), actor({ role: 'member', restricted: 'no' })]) {
+            expect(defineAbilitiesFor(malformed).can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
+        }
+        expect(defineAbilitiesFor(actor({ role: 'member' })).can('create', { type: 'Job', orgId: ORG_A })).toBe(true)
     })
 
     // A PERSON who came through a credential other than a session (an inbound email, a personal token):

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { defineAbilitiesFor } from 'keel/core/abilities'
+import { isRestricted } from 'keel/core/roles'
 import type { Locale } from 'keel/core/locale'
 import { DemoShell } from 'keel/demo-static/shell'
 import { useDemoWorld } from 'keel/demo-static/world'
@@ -40,7 +41,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
             credential: { kind: 'session', id: null },
             userId: person.id,
             role: world.roleInOrg(person, activeOrgSlug),
-            restricted: person.restricted,
+            restricted: isRestricted(person.restricted, world.roleInOrg(person, activeOrgSlug)),
             activeOrgId: activeOrgSlug,
             // Acting AS the operator org activates manage-all, exactly like abilityActorFromUser does
             // server-side — genuine parity, no degrade.

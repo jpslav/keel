@@ -138,6 +138,11 @@ export const realAuth: AuthPort = {
         const membership = memberships.data.find((m) => m.publicUserData?.userId === userId)
         if (!membership) return null
         const user = await client.users.getUser(userId)
+        // A BANNED user has no standing: banning ends their sessions, but their memberships survive it,
+        // so without this check their tokens and their email would keep the role. `locked` is
+        // deliberately NOT checked: anyone can lock an account by failing its sign-ins, and treating that
+        // as "no standing" would hand an attacker a way to kill a victim's tokens.
+        if (user.banned) return null
         const metadata = (user.publicMetadata ?? {}) as AppPublicMetadata
         const role = roleFrom(membership.publicMetadata, 'guest')
         return { role, restricted: isRestricted(metadata.restricted, role) }

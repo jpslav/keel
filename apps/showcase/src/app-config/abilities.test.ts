@@ -10,8 +10,12 @@ import type { Role } from 'keel/core/roles'
 const ORG_A = 'org-a'
 const ORG_B = 'org-b'
 
-/** A person actor; a SESSION unless the test says otherwise (only a stated session wields manage-all). */
-function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
+/**
+ * A person actor; a SESSION unless the test says otherwise, since that is what the person rules assume.
+ * It takes any fields and CASTS, so a test can also build the shapes the type forbids (a possibly-true
+ * `manageAll` with no session credential) and prove the run time refuses them as well.
+ */
+function actor(overrides: { role: Role; [field: string]: unknown }): AbilityActor {
     return {
         credential: { kind: 'session', id: null },
         userId: 'user-1',
@@ -19,7 +23,7 @@ function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor 
         activeOrgId: ORG_A,
         manageAll: false,
         ...overrides,
-    }
+    } as AbilityActor
 }
 
 describe('app ability rules (via defineAbilitiesFor)', () => {

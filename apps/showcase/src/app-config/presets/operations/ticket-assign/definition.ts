@@ -1,6 +1,6 @@
 import { defineAbilitiesFor } from 'keel/core/abilities'
 import type { PresetOperationDefinition, PresetOperationOf } from 'keel/core/presets'
-import { isRole } from 'keel/core/roles'
+import { isRestricted, isRole } from 'keel/core/roles'
 import * as v from 'valibot'
 import { staffOrgSlug } from '../../../abilities'
 
@@ -47,7 +47,7 @@ export const ticketAssign: PresetOperationDefinition<'ticket.assign', TicketAssi
                 credential: { kind: 'session', id: null },
                 userId: actor.id,
                 role,
-                restricted: actor.restricted,
+                restricted: isRestricted(actor.restricted, role),
                 activeOrgId: args.org,
                 manageAll: args.org === staffOrgSlug,
             }).can('update', { type: 'Ticket', orgId: args.org })

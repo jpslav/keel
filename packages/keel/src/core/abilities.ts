@@ -6,7 +6,7 @@ import {
     type AppSubjectFields,
     type AppSubjectType,
 } from '@app-config/abilities'
-import { canManageOrg, type Role } from './roles'
+import { canManageOrg, isRole, type Role } from './roles'
 
 /**
  * The authorization model. PURE TypeScript — imports only ./roles and the app-config seam
@@ -110,21 +110,9 @@ export interface Credential<Kind extends string = PersonCredentialKind | Machine
     id: string | null
 }
 
-/**
- * A PERSON acting in one org: built from a session by `abilityActorFromUser`, or, for a person who
- * reached the app with another credential, by `abilityActorFromCredential`, which re-reads the person's
- * standing through the auth port on every call (both in ../authz/authorize.ts). `kind` and `credential`
- * are optional so every literal written before credentials existed still compiles and is still judged
- * by the person rules.
- */
-export interface AbilityActor {
+/** The fields every PERSON actor has, whichever credential brought them. */
+interface PersonActorFields {
     kind?: 'person'
-    /**
-     * How this person reached the app. Absent means NOT STATED, which is never read as a session: such an
-     * actor does not wield `manageAll`, and the audit trail records no credential for it. A literal that
-     * stands for a session says `{ kind: 'session', id: null }`, as `abilityActorFromUser` does.
-     */
-    credential?: Credential<PersonCredentialKind>
     userId: string
     /** Role in the ACTIVE org (mirrors AuthUser.role). */
     role: Role
@@ -132,17 +120,32 @@ export interface AbilityActor {
     restricted: boolean
     /** The org this actor is currently acting in — the anchor for every sameOrg check. */
     activeOrgId: string
-    /**
-     * The staff-org superpower, and it is LIVE: `abilityActorFromUser` (../authz/authorize.ts)
-     * sets it when the actor is ACTING AS the app's designated operator org (`staffOrgSlug` on the
-     * ADR-0012 seam). True short-circuits every per-subject rule below.
-     * It never crosses tenants: the rules it skips are already tenant-bounded, and every product query
-     * still runs inside withTenant (ADR-0004). It is a SESSION power: {@link defineAbilitiesFor} honours it
-     * only when `credential` is a session, so a person who came through any other credential, or who
-     * states none, never wields it, whatever this field says.
-     */
-    manageAll: boolean
 }
+
+/**
+ * A PERSON acting in one org: built from a session by `abilityActorFromUser`, or, for a person who
+ * reached the app with another credential, by `abilityActorFromCredential`, which re-reads the person's
+ * standing through the auth port on every call (both in ../authz/authorize.ts). `kind` and `credential`
+ * are optional, so a literal written before credentials existed still compiles where it can, and is still
+ * judged by the person rules.
+ *
+ * TWO SHAPES, so the one mistake that matters is a type error. An actor whose `manageAll` may be true
+ * must STATE a session credential, because only a stated session wields it ({@link defineAbilitiesFor}
+ * enforces that at run time too). Every other actor has `manageAll: false`:
+ * - `credential`: how this person reached the app. Absent means NOT STATED, which is never read as a
+ *   session: such an actor does not wield `manageAll`, takes no administrative action on a framework
+ *   subject, and records no credential in the audit trail. A literal that stands for a session says
+ *   `{ kind: 'session', id: null }`, as `abilityActorFromUser` does.
+ * - `manageAll`: the staff-org superpower, and it is LIVE. `abilityActorFromUser` sets it when the actor
+ *   is ACTING AS the app's designated operator org (`staffOrgSlug` on the ADR-0012 seam). True
+ *   short-circuits every per-subject rule below. It never crosses tenants: the rules it skips are already
+ *   tenant-bounded, and every product query still runs inside withTenant (ADR-0004).
+ */
+export type AbilityActor = PersonActorFields &
+    (
+        | { credential?: Credential<PersonCredentialKind>; manageAll: false }
+        | { credential: Credential<'session'>; manageAll: boolean }
+    )
 
 /**
  * A MACHINE acting in one org: a caller that is not a person — keel's own service keys, or a verifier
@@ -269,12 +272,20 @@ export function defineAbilitiesFor(actor: Actor): Ability {
                 : appMachineRules(machine, action, subject, { sameOrg })
         return { can: machineCan, cannot: (action, subject) => !machineCan(action, subject) }
     }
+    // Anything that is not a well-formed person is denied everything. A machine-shaped object that lost
+    // its `kind` (a cast, a value rehydrated from storage) would otherwise be judged as a person with no
+    // role, and `!restricted` holds for an undefined flag.
+    if (!isWellFormedPerson(actor)) return { can: () => false, cannot: () => true }
+
     // The staff superpower belongs to a SESSION acting as the operator org. Enforced here rather than
     // trusted to whoever built the actor: a person who came through any other credential (an email, a
     // token), or who states none, never wields it, even acting in the staff org. The app's rules are
     // handed the same effective value.
-    const manageAll = actor.manageAll && actor.credential?.kind === 'session'
-    const person: AbilityActor = { ...actor, manageAll }
+    const session = actor.credential?.kind === 'session'
+    const person: AbilityActor =
+        actor.manageAll && session
+            ? { ...actor, manageAll: true, credential: { kind: 'session', id: actor.credential?.id ?? null } }
+            : { ...actor, manageAll: false }
 
     function can(action: AbilityAction, subject: AbilitySubject): boolean {
         // The staff-org superpower. manageAll precedes
@@ -340,4 +351,26 @@ export function defineAbilitiesFor(actor: Actor): Ability {
         can,
         cannot: (action, subject) => !can(action, subject),
     }
+}
+
+/**
+ * The shape the person rules can judge: `kind` is 'person' or absent, `role` is a real role, and
+ * `restricted` is a boolean. The type promises this; the check is for values that arrive around it.
+ */
+function isWellFormedPerson(actor: AbilityActor): boolean {
+    const loose = actor as {
+        kind?: unknown
+        role?: unknown
+        restricted?: unknown
+        userId?: unknown
+        activeOrgId?: unknown
+    }
+    return (
+        (loose.kind === undefined || loose.kind === 'person') &&
+        typeof loose.role === 'string' &&
+        isRole(loose.role) &&
+        typeof loose.restricted === 'boolean' &&
+        typeof loose.userId === 'string' &&
+        typeof loose.activeOrgId === 'string'
+    )
 }

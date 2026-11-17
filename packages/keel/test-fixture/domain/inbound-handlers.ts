@@ -54,5 +54,5 @@ export const supportHandler = async (ctx: InboundContext): Promise<InboundHandle
         subjectType: 'Docket',
         subjectId: docket.id,
     })
-    return { status: 'handled', actorUserId: sender.id, subjectId: docket.id }
+    return { status: 'handled', ...auditActorOf(actor), subjectId: docket.id }
 }

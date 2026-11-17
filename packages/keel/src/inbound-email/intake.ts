@@ -1,3 +1,4 @@
+import type { Credential } from '../core/abilities'
 import { normalizeEmailAddress, normalizeInboundBody, parseInboundRecipient } from '../core/inbound-email'
 import { recordAuditEvent } from '../db/audit'
 import {
@@ -56,15 +57,22 @@ export interface IntakeOutcome {
     subjectId?: string | null
 }
 
-async function auditReceived(db: DbPort, org: ResolvedInboundOrg, emailId: string, actorUserId: string): Promise<void> {
+async function auditReceived(
+    db: DbPort,
+    org: ResolvedInboundOrg,
+    emailId: string,
+    actorUserId: string,
+    credential: Credential | null = null,
+): Promise<void> {
     await recordAuditEvent(db, {
         tenantId: org.tenantId,
         orgId: org.orgId,
         actorUserId,
-        // The email is a credential only for the member it was matched to. A row the SYSTEM actor writes
-        // (no handler, an unmatched or refused sender, a handler that threw) proved nobody's identity, and
-        // records none, like keel's other `system:*` writers.
-        credential: actorUserId === SYSTEM_ACTOR ? null : { kind: 'inbound-email', id: emailId },
+        // The credential is the one the HANDLER reports for the actor it matched (the email, for a member).
+        // Nothing is inferred from the actor id: a row the SYSTEM actor writes (no handler, an unmatched or
+        // refused sender, a handler that threw), or one for a synthetic actor a handler names, records
+        // none, like keel's other `system:*` writers.
+        credential,
         action: 'inbound-email.received',
         subjectType: 'InboundEmail',
         subjectId: emailId,
@@ -128,7 +136,7 @@ export async function intakeInboundEmail(db: DbPort, auth: AuthPort, input: Inta
         })
         if (result.status === 'handled') {
             await setInboundStatus(db, org.tenantId, id, { status: 'handled', handler: parsed.handler, error: null })
-            await auditReceived(db, org, id, result.actorUserId)
+            await auditReceived(db, org, id, result.actorUserId, result.credential ?? null)
             return { stored: true, id, status: 'handled', handler: parsed.handler, subjectId: result.subjectId ?? null }
         }
         await setInboundStatus(db, org.tenantId, id, {
