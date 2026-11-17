@@ -1729,3 +1729,30 @@ worth keeping.
 - **Recipes that predate this** (`e-sign.md`, `workspace-coder.md`) still put their ports in keel's tree.
   Each now says the app-owned alternative exists. Retargeting them fully is a follow-up
   (`.claude/future-tasks/retarget-vendor-recipes-app-owned.md`).
+
+## `init-app` says the demo size budget is the adopter's (2026-11-16, `fix/init-app-demo-budget`)
+
+- **"WHAT THIS DID NOT TOUCH" gains a bullet, after the cutover checklist.** It is the line the demo-size
+  headroom work proposed (`.claude/future-tasks/resolved/demo-size-budget-headroom-thin.md`), built from the
+  survivor's own `check:demo-size` script instead of fixed text, because what is true depends on it. The
+  starter passes a number, which is stated back as read from `package.json`; a survivor that passes none
+  (a renamed showcase) is told `DEFAULT_BUDGET_BYTES` is its budget and that it is thin on purpose; an app
+  without the script, or whose script is neither of those two shapes (a number then more shell, a quoted or
+  underscored number the script would reject), gets no bullet rather than a wrong one. `<slug>` is the survivor's directory name, as everywhere else in that
+  list. The "roomy on purpose" wording is only used where a number is passed, since that is the starter's.
+  The proposal's "room to grow to the showcase's size" is dropped: after an eject there is no showcase to
+  measure against.
+- **A note, not a rewrite, for `scripts/check-demo-size.mjs` after an eject.** Its header is two apps'
+  history plus a measurements table, and `DEFAULT_BUDGET_BYTES` (the showcase's) goes unused by a survivor
+  that passes its own number. `ejectShowcase` used to rewrite one phrase there ("the showcase's size" to "the reference
+  app's size"), which left line 2 saying the reference app measures 814660 bytes, a number nothing in an
+  ejected tree has. That rewrite is removed and the script is left exactly as the template has it. Rewriting
+  any of it is the false-sentence trap `.claude/future-tasks/eject-rewrites-prose-into-false-sentences.md`
+  describes, so the bullet says the header and the default describe the showcase you removed and only the
+  number you pass counts. The sentence appears only when the showcase is gone.
+- **Pinned in `tests/docs/adopter-identity.test.ts`.** The number is read back from the probe's own
+  `package.json`, so a change to the starter's script fails the test rather than leaving the output wrong; the
+  removal sentence is checked present after an eject and absent after a rename; the script must still carry
+  `DEFAULT_BUDGET_BYTES` and `WHEN IT GOES RED`; the no-number branch is reached by a `--dry-run` rename
+  of the showcase; a script that is neither shape gets no bullet; and a renamed showcase counts as still
+  there on a dry run and a real one alike. Each was watched failing against a deliberate break.
