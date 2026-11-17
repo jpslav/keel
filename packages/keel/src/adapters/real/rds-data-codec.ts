@@ -13,6 +13,12 @@ import type { ArrayValue, ColumnMetadata, Field, SqlParameter } from '@aws-sdk/c
  * `CAST(:name AS <that type>)`. That reproduces node-postgres's semantics instead of approximating them
  * with per-value guesses, and it is also what lets an array reach the server at all: the Data API
  * rejects array parameters, but an array literal cast to `uuid[]` is a string.
+ *
+ * The type in that CAST never carries a length, and a domain is replaced by the type it is built on.
+ * An explicit cast to `char(3)`, `bit(4)` or a domain over `varchar(3)` truncates or pads a value that
+ * does not fit, where node-postgres's untyped parameter is checked against the column on assignment and
+ * refused. Casting to the bare base type leaves that check to the same assignment, so a value that is too
+ * long fails the same way on both transports, and a domain's own CHECK still runs.
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -136,10 +142,23 @@ export function leadingKeyword(sql: string): string {
 /** The Data API names parameters; these are the names the rewritten SQL refers to. */
 const parameterName = (index: number): string => `kp${index}`
 
-/** `CAST(:kpN AS <type>)` — or the bare name when Postgres could not say (`unknown`). */
+/**
+ * `(CAST(:kpN AS <type>))` — or `(:kpN)` when Postgres could not say (`unknown`). Parenthesized, because a
+ * placeholder can follow a colon (`arr[1:$1]`), and `1:CAST(` would make the Data API read a parameter
+ * named `CAST`.
+ */
 export function castPlaceholder(index: number, type: string | undefined): string {
     const name = `:${parameterName(index)}`
-    return type && type !== 'unknown' ? `CAST(${name} AS ${type})` : name
+    return type && type !== 'unknown' ? `(CAST(${name} AS ${type}))` : `(${name})`
+}
+
+/**
+ * The statement to PREPARE when asking Postgres for `sql`'s parameter types. PREPARE refuses EXPLAIN, but
+ * an EXPLAIN's parameters are its statement's, numbered the same, so the prefix (and its options) is
+ * dropped for the question and kept for the statement itself.
+ */
+export function describableSql(sql: string): string {
+    return sql.replace(/^\s*explain\b(?:\s*\([^)]*\)|\s+(?:analyze|verbose)\b)*\s*/i, '')
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -201,7 +220,7 @@ export function unsupportedStatement(sql: string, inTransaction: boolean): strin
  * in the SQL), or as a NULL. Follows what node-postgres sends for the same JS value, so a value means
  * the same thing on both transports: a plain object is JSON, an array is a Postgres array literal, a byte
  * array is `\x` hex. A `Date` is the same instant, written in UTC where node-postgres writes local time
- * with an offset — identical for a `timestamptz` (keel's only time type); a `date` or `timestamp` target
+ * with an offset — identical for a `timestamptz` (keel's only instant type; its dates travel as strings); a `date` or `timestamp` target
  * would differ in a process not running in UTC, which Lambda is.
  */
 export function toSqlParameter(index: number, value: unknown): SqlParameter {

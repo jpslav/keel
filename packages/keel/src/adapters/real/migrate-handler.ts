@@ -11,7 +11,7 @@ import { createRealDb } from './db'
  * a dynamic import here too. On the Data API, Kysely's
  * Migrator runs every pending migration in ONE Data API transaction, as it does on `pg` (Postgres DDL
  * is transactional). Two limits follow, and both fail loudly rather than half-apply: the transaction
- * dies after an hour (or three idle minutes), and any single statement still running at 45 seconds is
+ * dies after an hour (AWS's BeginTransaction API reference) or three idle minutes, and any single statement still running at 45 seconds is
  * cancelled. A migration that cannot fit — a long backfill, an index on a large table — runs from inside
  * the VPC on the `pg` transport instead.
  *

@@ -1866,3 +1866,18 @@ worth keeping.
   the RDS Data SDK, which only an adapters directory may import. Test-only modules in `src/` have
   precedent in `rls-proof-runner.ts`. Nothing in an app or a deployment imports it, and knip would report
   it if nothing did.
+- **Review rounds 1 and 2 (Opus) found the same shape twice, so it was swept rather than run a third time.**
+  An explicit CAST truncates or pads where node-postgres's untyped parameter is refused: first
+  `char(n)`/`bit(n)`, whose inferred type printed as `character`/`bit` (length 1), then domains over
+  `char`/`varchar`/`bit`. The sweep found the divergence only in length-bearing types: inferred base types
+  carry no length, and a domain is the only other way a length reaches the cast. So the dialect now walks
+  each domain down to its base type and prints it with `format_type(…, -1)`. The parity battery covers
+  `char(3)`, `bit(4)`, `char(3)[]` and two domains, and a too-long domain value is refused on both
+  transports.
+- **The same rounds found two transaction-state bugs, both fixed and pinned.** A transaction Postgres had
+  aborted (a caught statement error) was reported as committed; it now throws Kysely's
+  `AbortedTransactionError`, as the `pg` driver does. And a raw `ROLLBACK TO SAVEPOINT`, the recovery
+  available inside `withTenant`, did not count as recovery.
+- **Declined: invalidating the type cache.** A statement that fails inside a transaction has already
+  aborted it, so a retry with fresh types could only help outside one. It is an accepted limit (ADR-0002
+  addendum): deploys replace processes.

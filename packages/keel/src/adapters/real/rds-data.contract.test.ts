@@ -363,11 +363,15 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
 
     test('every column type keel uses is written and read back exactly as through the pg transport', async () => {
         await sql`drop table if exists data_api_parity`.execute(viaPg.getDb())
+        await sql`drop domain if exists data_api_code3`.execute(viaPg.getDb())
+        await sql`drop domain if exists data_api_short`.execute(viaPg.getDb())
+        await sql`create domain data_api_code3 as char(3)`.execute(viaPg.getDb())
+        await sql`create domain data_api_short as varchar(3) check (value <> 'bad')`.execute(viaPg.getDb())
         await sql`
             create table data_api_parity (
                 k text primary key, u uuid, t text, j jsonb, ja jsonb, ts timestamptz, d date, da date[],
                 ta text[], ua uuid[], i int4, big int8, n numeric, f float8, b boolean, by bytea, nothing uuid,
-                ch char(3), bi bit(4), cha char(3)[]
+                ch char(3), bi bit(4), cha char(3)[], dc data_api_code3, ds data_api_short
             )`.execute(viaPg.getDb())
         const values = {
             u: '6f1f4f6e-6b1a-4c1e-9d4b-3a1f2c3d4e5f',
@@ -391,12 +395,15 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             ch: 'abc',
             bi: '1010',
             cha: ['xyz', 'ab'],
+            // ...and these two, through a domain: an explicit cast to a domain truncates too
+            dc: 'abc',
+            ds: 'xyz',
         }
         const insert = (port: DbPort, k: string) =>
             sql`insert into data_api_parity values (${k}, ${values.u}, ${values.t}, ${values.j}, ${values.ja},
                 ${values.ts}, ${values.d}, ${values.da}, ${values.ta}, ${values.ua}, ${values.i}, ${values.big},
                 ${values.n}, ${values.f}, ${values.b}, ${values.by}, ${values.nothing}, ${values.ch}, ${values.bi},
-                ${values.cha})`.execute(port.getDb())
+                ${values.cha}, ${values.dc}, ${values.ds})`.execute(port.getDb())
         await insert(dataApi, 'written-via-data-api')
         await insert(viaPg, 'written-via-pg')
 
@@ -415,6 +422,89 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         const withoutKey = (row: Record<string, unknown>) =>
             Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'k'))
         expect(withoutKey(fromPg[0]!)).toEqual(withoutKey(fromPg[1]!))
+    })
+
+    test('a value too long for a domain is refused on both transports, never truncated', async () => {
+        // data_api_parity and its domains exist: the parity test above created them.
+        for (const [label, port] of [
+            ['pg', viaPg],
+            ['data-api', dataApi],
+        ] as const) {
+            for (const [column, value] of [
+                ['dc', 'abcd'],
+                ['ds', 'wxyz'],
+                ['ds', 'bad'],
+            ] as const) {
+                const outcome =
+                    await sql`insert into data_api_parity (k, ${sql.ref(column)}) values (${`${label}-${column}-${value}`}, ${value})`
+                        .execute(port.getDb())
+                        .then(
+                            () => 'stored',
+                            () => 'refused',
+                        )
+                expect(outcome, `${label}: ${column} = '${value}'`).toBe('refused')
+            }
+        }
+    })
+
+    test('a raw ROLLBACK TO SAVEPOINT recovers a transaction, as on pg — the only way inside withTenant', async () => {
+        for (const [label, port] of [
+            ['pg', viaPg],
+            ['data-api', dataApi],
+        ] as const) {
+            const slug = `raw-savepoint-${label}-${Date.now()}`
+            await port
+                .getDb()
+                .transaction()
+                .execute(async (trx) => {
+                    await trx.insertInto('tenants').values({ slug, name: 'first' }).execute()
+                    await sql`savepoint before_duplicate`.execute(trx)
+                    await trx
+                        .insertInto('tenants')
+                        .values({ slug, name: 'duplicate' })
+                        .execute()
+                        .catch(() => undefined)
+                    await sql`rollback to savepoint before_duplicate`.execute(trx)
+                    await trx
+                        .insertInto('tenants')
+                        .values({ slug: `${slug}-after`, name: 'after' })
+                        .execute()
+                })
+            const rows = await db()
+                .selectFrom('tenants')
+                .select('slug')
+                .where('slug', 'in', [slug, `${slug}-after`])
+                .orderBy('slug')
+                .execute()
+            expect(
+                rows.map((r) => r.slug),
+                label,
+            ).toEqual([slug, `${slug}-after`])
+        }
+    })
+
+    test('a statement refused before any call leaves the transaction usable, so it commits', async () => {
+        const slug = `refused-then-commit-${Date.now()}`
+        await db()
+            .transaction()
+            .execute(async (trx) => {
+                await trx.insertInto('tenants').values({ slug, name: 'kept' }).execute()
+                await sql`COMMIT`.execute(trx).catch((error: unknown) => {
+                    expect(error).toBeInstanceOf(RdsDataUnsupportedError)
+                })
+                // ...nor does one the Data API itself refuses before running it (SQL over 64 KiB)
+                await sql`select 1 -- ${sql.raw('x'.repeat(70_000))}`.execute(trx).catch((error: unknown) => {
+                    expect((error as Error).name).toBe('ValidationException')
+                })
+            })
+        const rows = await db().selectFrom('tenants').select('name').where('slug', '=', slug).execute()
+        expect(rows).toEqual([{ name: 'kept' }])
+    })
+
+    test('a parameter after a colon (an array slice) reads as it does on pg', async () => {
+        const slice = (port: DbPort) => sql<{ s: number[] }>`select (array[1, 2, 3])[1:${2}] as s`.execute(port.getDb())
+        expect((await slice(dataApi)).rows).toEqual((await slice(viaPg)).rows)
+        expect((await slice(dataApi)).rows).toEqual([{ s: [1, 2] }])
     })
 
     // ---- negative controls: the emulator is strict, so the dialect's casts are what made the above pass ----

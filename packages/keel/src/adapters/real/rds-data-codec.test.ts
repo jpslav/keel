@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
     castPlaceholder,
     decodeField,
+    describableSql,
     leadingKeyword,
     normalizeDatabaseError,
     RdsDataDatabaseError,
@@ -35,10 +36,21 @@ describe('rewritePlaceholders: only real `$n` placeholders are rewritten', () =>
         expect(mark(sql)).toBe(expected)
     })
 
-    it('casts to the type Postgres inferred, or leaves an unknown bare', () => {
-        expect(castPlaceholder(3, 'timestamp with time zone')).toBe('CAST(:kp3 AS timestamp with time zone)')
-        expect(castPlaceholder(1, 'unknown')).toBe(':kp1')
-        expect(castPlaceholder(1, undefined)).toBe(':kp1')
+    it('casts to the type Postgres inferred, or leaves an unknown bare — parenthesized either way', () => {
+        expect(castPlaceholder(3, 'timestamp with time zone')).toBe('(CAST(:kp3 AS timestamp with time zone))')
+        expect(castPlaceholder(1, 'unknown')).toBe('(:kp1)')
+        expect(castPlaceholder(1, undefined)).toBe('(:kp1)')
+        // after a colon (an array slice) the parentheses are what stop `:CAST` reading as a parameter name
+        expect(rewritePlaceholders('select a[1:$1]', (n) => castPlaceholder(n, 'integer'))).toBe(
+            'select a[1:(CAST(:kp1 AS integer))]',
+        )
+    })
+
+    it('describes an EXPLAIN by its statement, whose parameters are the same', () => {
+        expect(describableSql('explain select * from t where id = $1')).toBe('select * from t where id = $1')
+        expect(describableSql('EXPLAIN (FORMAT JSON, ANALYZE) select $1')).toBe('select $1')
+        expect(describableSql('explain analyze verbose select $1')).toBe('select $1')
+        expect(describableSql('select explain from t where x = $1')).toBe('select explain from t where x = $1')
     })
 })
 

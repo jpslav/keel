@@ -9,7 +9,7 @@ import type { StoragePort } from '../../ports/storage'
 import { fakeAnalytics } from '../fake/analytics'
 import { createRealAnalytics } from './analytics'
 import { realAuth } from './auth'
-import { databaseTransport, type DatabaseTransport } from './database-transport'
+import { DATABASE_ENV, databaseTransport } from './database-transport'
 import { createRealDb } from './db'
 import { createRealEmail } from './email'
 import { createRealJobs } from './jobs'
@@ -41,12 +41,6 @@ const REQUIRED_ENV: Record<string, string> = {
     // Inbound: the key Mailgun signs inbound-route webhooks with — verified by the
     // /api/webhooks/email route (packages/keel/src/service-auth/mailgun.ts). Read at request time, not here.
     MAILGUN_WEBHOOK_SIGNING_KEY: 'email-inbound',
-}
-
-/** The database variables each transport requires (./database-transport.ts says how one is chosen). */
-const DATABASE_ENV: Record<DatabaseTransport, Record<string, string>> = {
-    pg: { DATABASE_URL: 'cloud-accounts' },
-    'data-api': { DATABASE_CLUSTER_ARN: 'data-api', DATABASE_SECRET_ARN: 'data-api', DATABASE_NAME: 'data-api' },
 }
 
 export function assertRealEnv(): void {

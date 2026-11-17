@@ -132,7 +132,12 @@ untyped, so Postgres infers `$1` from context. The Data API cannot do that: an u
 shape once per process and reads Postgres's own inference from `pg_prepared_statements.parameter_types`.
 It then sends every value as a string inside an explicit `CAST(:name AS <type>)`. That reproduces
 node-postgres's semantics rather than approximating them. It is also how arrays get through at all: the
-Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. A warm process pays
+Data API rejects array parameters, but an array literal cast to `uuid[]` is a string. The type in the cast
+never carries a length, and a domain is replaced by the type it is built on. An explicit cast to `char(3)`,
+`bit(4)` or a domain over `varchar(3)` truncates or pads a value that does not fit, where node-postgres's
+untyped parameter is checked on assignment and refused. Casting to the bare base type leaves that check to
+the same assignment, so a too-long value fails the same way on both transports, and a domain's CHECK
+still runs. A warm process pays
 nothing extra. A new SQL shape costs three extra calls inside a transaction (PREPARE, the read, DEALLOCATE)
 and five outside one, which also needs its own short transaction.
 
@@ -157,7 +162,8 @@ AWS's own limits surface as errors, never as truncation:
 
 - a 1 MiB response cap;
 - a 45-second call timeout;
-- a transaction that ends after three idle minutes or one hour;
+- a transaction that ends after three idle minutes or one hour (the `BeginTransaction` API reference;
+  the doc comment in `@aws-sdk/client-rds-data` 3.1169.0 still says 24 hours);
 - SQL of at most 65,536 characters;
 - a paused cluster that takes more than about 15 seconds to resume, which the dialect stops retrying.
 
@@ -185,6 +191,10 @@ lock. Nothing in
 `pnpm dev` changes: dev, the e2e suite and the static demo still run on pglite fakes. The emulator is a
 contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
 emulators".
+
+**One limit is accepted rather than closed.** The inferred types are cached for the life of the process.
+A migration that changes a parameter's type while an old process keeps serving would be answered with the
+old type. Deploys replace processes, so after an out-of-band schema change, restart the app.
 
 **Not proven, and owed by the `data-api` cutover row:**
 
