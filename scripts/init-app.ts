@@ -362,13 +362,16 @@ function renameApp(current: Identity, slug: string, displayName: string): void {
     rewrite('vitest.contract.config.ts', [[`'${dir}'`, `'${slug}'`]], 'contract app')
     // tsconfig.json deliberately needs NO rewrite: no path in it names an app. `@app-config/*`
     // points at packages/keel/test-fixture, and there is no `@/*` entry to repoint.
-    // config/params too: infra/app.ts reads `params.database.transport` to pick the network shape.
+    // config/params too: infra/app.ts reads `params.database.transport` to pick the network shape. And
+    // the app's tsconfig, which the stack bundles its Lambdas with (`APP_TSCONFIG`): it is what points
+    // `@app-config/*` at this app's seam, so the migrator ships this app's migrations.
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
         rewrite(
             file,
             [
                 [`apps/${dir}/config/app`, `apps/${slug}/config/app`],
                 [`apps/${dir}/config/params`, `apps/${slug}/config/params`],
+                [`apps/${dir}/tsconfig.json`, `apps/${slug}/tsconfig.json`],
             ],
             'app config imports',
         )
@@ -525,12 +528,14 @@ function ejectShowcase(survivor: string, onDisk: string): void {
     // tsconfig.json needs no rewrite here either — see the rename path. Its `@app-config/*` pointing
     // at packages/keel/test-fixture is what keeps `tsc` green through an eject.
     // config/params moved to the survivor above (rescueFromShowcase), so the stack's import follows it.
+    // So does the tsconfig the stack bundles with: the survivor's seam, and so its migrations.
     for (const file of ['infra/app.ts', 'infra/stack.ts', 'infra/lib/tags.ts']) {
         rewrite(
             file,
             [
                 [`apps/${SHOWCASE}/config/app`, `apps/${survivor}/config/app`],
                 [`apps/${SHOWCASE}/config/params`, `apps/${survivor}/config/params`],
+                [`apps/${SHOWCASE}/tsconfig.json`, `apps/${survivor}/tsconfig.json`],
             ],
             'app config imports',
         )

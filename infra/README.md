@@ -43,6 +43,12 @@ action such as `*` and any `NotAction`. No role may attach an AWS-managed policy
 execution policies, whose contents the check cannot read. On `data-api` the database's security group
 admits nothing.
 
+It reads what each bundled Lambda really holds, too: the bundles that synth's own esbuild produced with the
+tsconfig the stack passes. No bundle may hold code from `packages/keel/test-fixture`, and the migrator's
+must carry every one of the app's own migrations. The stack bundles with the APP's tsconfig
+(`APP_TSCONFIG` in `stack.ts`). The root `tsconfig.json` points `@app-config/*` at keel's test fixture,
+and a migrator bundled with it would ship the fixture's migrations instead of the app's.
+
 ## Deploys — checks in CI, deploys in your own pipeline
 
 `.github/workflows/checks.yml` runs checks only; there is deliberately no GitHub Actions CD here,

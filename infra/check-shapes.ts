@@ -1,10 +1,12 @@
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import path from 'node:path'
 import * as cdk from 'aws-cdk-lib'
 import { Template } from 'aws-cdk-lib/assertions'
 // The runtime's own list of what each transport requires — the contract this stack must satisfy. Read
 // from the module that enforces it at boot, by path (infra resolves nothing through the `keel` alias),
 // so renaming a variable on either side fails here instead of at the first deploy.
 import { DATABASE_ENV } from '../packages/keel/src/adapters/real/database-transport'
-import { AppStack } from './stack'
+import { APP_TSCONFIG, AppStack } from './stack'
 
 /**
  * BOTH network shapes, synthesized and checked — `pnpm synth` runs this after `cdk synth`, and CI runs
@@ -21,11 +23,37 @@ const check = (ok: boolean, message: string) => {
     if (!ok) problems.push(message)
 }
 
-function resources(transport: Transport): Record<string, Resource> {
+/** A shape's template, and the directory its synth staged assets in (bundles included). */
+function synthesize(transport: Transport): { all: Record<string, Resource>; assembly: string } {
     const app = new cdk.App({ context: { environment: 'Staging' } })
     const stack = new AppStack(app, `ShapeCheck-${transport}`, { databaseTransport: transport })
-    return Template.fromStack(stack).toJSON().Resources as Record<string, Resource>
+    const all = Template.fromStack(stack).toJSON().Resources as Record<string, Resource>
+    return { all, assembly: app.synth().directory }
 }
+
+/**
+ * The code esbuild bundled for each Lambda the stack bundles, keyed by logical id: what NodejsFunction
+ * produced during this synth, with the tsconfig the stack passes, not a re-creation of it. A Lambda whose
+ * code is a ready-made asset (the server's placeholder zip, CDK's own providers) has no bundle and is
+ * left out.
+ */
+function bundles(all: Record<string, Resource>, assembly: string): Map<string, string> {
+    const found = new Map<string, string>()
+    for (const [id, r] of Object.entries(all)) {
+        if (r.Type !== 'AWS::Lambda::Function') continue
+        const key = (r.Properties?.Code as { S3Key?: unknown } | undefined)?.S3Key
+        if (typeof key !== 'string') continue
+        const staged = path.join(assembly, `asset.${key.replace(/\.zip$/, '')}`)
+        const entry = ['index.mjs', 'index.js'].map((file) => path.join(staged, file)).find((file) => existsSync(file))
+        if (entry) found.set(id, readFileSync(entry, 'utf8'))
+    }
+    return found
+}
+
+/** The app's own migrations, by registry name: the files beside the app seam's migration index. */
+const APP_MIGRATIONS = readdirSync(path.join(path.dirname(APP_TSCONFIG), 'src/app-config/db/migrations'))
+    .filter((file) => /^\d+_.+\.ts$/.test(file))
+    .map((file) => file.replace(/\.ts$/, ''))
 
 function lambda(all: Record<string, Resource>, name: 'Server' | 'Migrator') {
     const found = Object.entries(all).find(
@@ -140,7 +168,7 @@ function namesOnly(statement: Statement, ids: readonly string[]): boolean {
 }
 
 for (const transport of ['pg', 'data-api'] as const) {
-    const all = resources(transport)
+    const { all, assembly } = synthesize(transport)
     const label = (what: string) => `[${transport}] ${what}`
     const [clusterId, clusterResource] = Object.entries(all).find(([, r]) => r.Type === 'AWS::RDS::DBCluster')!
     const cluster = clusterResource.Properties ?? {}
@@ -162,6 +190,22 @@ for (const transport of ['pg', 'data-api'] as const) {
         unreadable.length === 0,
         label(`no role attaches an AWS-managed policy the check cannot read: ${unreadable.join('; ')}`),
     )
+
+    // What each bundled Lambda really contains. The tsconfig it is built with decides where
+    // `@app-config/*` resolves: to the app's seam, never to keel's test fixture.
+    const built = bundles(all, assembly)
+    for (const [id, code] of built) {
+        check(!code.includes('test-fixture'), label(`${id}'s bundle holds no code from packages/keel/test-fixture`))
+    }
+    const migratorCode = [...built].find(([id]) => id.startsWith('Migrator'))?.[1]
+    check(migratorCode !== undefined, label('the migrator is bundled by this synth'))
+    for (const name of APP_MIGRATIONS) {
+        check(
+            migratorCode?.includes(`"${name}"`) === true,
+            label(`the migrator's bundle carries the app's migration ${name}`),
+        )
+    }
+    rmSync(assembly, { recursive: true, force: true })
 
     if (transport === 'data-api') {
         for (const name of Object.keys(DATABASE_ENV['data-api'])) {
