@@ -10,7 +10,7 @@
 // THIS FILE IS KEEL'S, and an upstream merge (ADR-0013) may change it, so nothing in it is ever yours to edit.
 // To change an app's number, re-set it in that app's package.json and record what changed and why in
 // apps/<app>/DEMO-SIZE.md beside it, in its own commit: what grew, by how much, and how much headroom you left
-// on purpose. Each app's DEMO-SIZE.md also says what its number is for.
+// on purpose. (The starter ships one, saying what its number is for and how it got there.)
 //
 // WHEN IT GOES RED: find what grew before raising anything. `pnpm build:demo-static` prints, per app, how
 // much stylesheet the pruning removed; the JS is where features land. Build the previous commit in a

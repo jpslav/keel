@@ -217,8 +217,15 @@ export function resolves(path: string, root = '.'): boolean {
  * merge (ADR-0013) later brings in NEW text that names them again, and the gate went red on a citation
  * nobody in the adopter's repo wrote, the first time a recipe cited the starter's sign-in page.
  *
- * So a citation under `apps/showcase/` or `apps/starter/` whose app directory is not in this tree is a
- * reference to keel's own app, which cannot be checked here and is not this repo's to fix. It resolves.
+ * So a citation under `apps/showcase/` or `apps/starter/` whose app is not in this tree is a reference to
+ * keel's own app, which cannot be checked here and is not this repo's to fix. It resolves.
+ *
+ * "In this tree" means the app's `package.json` exists, NOT that its directory does. A merge adds any new
+ * file upstream puts under `apps/showcase/` even after you deleted the app (git reports a conflict for a
+ * file you deleted and upstream edited, and silently resurrects one that is new), so a directory holding a
+ * single stray file would otherwise switch this rule off and turn the gate red on the next doc. A local
+ * `apps/starter/node_modules` left behind by a rename does the same. The package manifest is what makes it an
+ * app, and a stray file cannot fake it.
  * Everything else stays strict: the adopter's own app (`apps/console/…`), a path in `packages/keel`, and
  * either reference app for as long as it is present. The reference apps are a closed list on purpose:
  * `init-app` reserves `showcase` as an app slug, and an adopter who keeps the name `starter` has the
@@ -231,5 +238,5 @@ const REFERENCE_APP = /^apps\/(showcase|starter)(?:\/|$)/
 
 function namesAbsentReferenceApp(path: string, root: string): boolean {
     const app = REFERENCE_APP.exec(path)?.[1]
-    return app !== undefined && !existsSync(join(root, 'apps', app))
+    return app !== undefined && !existsSync(join(root, 'apps', app, 'package.json'))
 }

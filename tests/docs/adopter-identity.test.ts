@@ -511,7 +511,7 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
             expect(readProbe('scripts/check-demo-size.mjs')).toContain('WHEN IT GOES RED')
         })
 
-        it("states a renamed showcase's own number and its own DEMO-SIZE.md, not the starter's", () => {
+        it("states a renamed showcase's own number, and does not point at a DEMO-SIZE.md it has not got", () => {
             // --dry-run on an untouched copy, renaming the showcase: its script now passes 840000 like any app.
             const result = spawnInitApp(pristineDir, ['demo', '--app', 'showcase', '--dry-run'])
             expect(result.status, result.stderr).toBe(0)
@@ -523,7 +523,8 @@ describe.runIf(isTemplate)('TEMPLATE: `pnpm init-app` scrubs the maintainer iden
             expect(flat(result.stdout)).toContain(
                 `apps/demo/package.json's check:demo-size passes the static demo's byte budget, ${budget}.`,
             )
-            expect(flat(result.stdout)).toContain('apps/demo/DEMO-SIZE.md says')
+            expect(flat(result.stdout)).not.toContain('DEMO-SIZE.md')
+            expect(flat(result.stdout)).toContain('re-set the number in package.json, never in the script')
         })
 
         it('says nothing, rather than guess, when the script is not the shape the template ships', () => {

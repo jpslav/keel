@@ -159,8 +159,10 @@ copy, and every later doc naming either app would have done the same. `init-app`
 runs once, and the merge brings new text after it has.
 
 `resolves` in `tests/docs/doc-set.ts` now treats a citation under `apps/showcase/` or `apps/starter/` as a
-reference to keel's own app whenever that app's directory is absent, and checks it like any other wherever the
-app exists. So the template's CI still fails on a broken one, a tree that renamed the starter but kept the
+reference to keel's own app whenever that app is not in the tree, and checks it like any other wherever the
+app exists. "In the tree" means the app's `package.json`, not its directory, because a merge brings back any new
+file upstream adds under `apps/showcase/` even after you deleted the app (it conflicts only when you also
+edited or deleted a file upstream changed), and a directory holding one stray file must not switch the rule off. So the template's CI still fails on a broken one, a tree that renamed the starter but kept the
 showcase is still strict about the showcase, and citations of the adopter's own app or of `packages/keel` stay
 strict everywhere. The rule lives in the file the gate and `init-app` share, so the rewriter and the gate
 cannot disagree about it. A doc that means the reader's own app should still say `apps/<app>/…`.

@@ -199,7 +199,8 @@ It prints this list when it finishes, because these are the parts that take judg
   app by its template name, and that history is keel's and stays as written.
   `scripts/check-demo-size.mjs` is keel's and holds no number, so an upstream merge may change it and you
   never edit it: re-set the number in `package.json`, never in the script. If you renamed the showcase
-  instead (`--app showcase`), its number is its own pace-setting one, thin on purpose. When it goes red,
+  instead (`--app showcase`), its number is its own pace-setting one, thin on purpose, and it has no
+  `DEMO-SIZE.md`: keel keeps the showcase's history in `docs/decision-log.md`. When it goes red,
   that script's header says what to look at first.
 - **The licence** — this template is MIT, which means the product you build on it is yours with no
   copyleft obligation. Your own product's licence is still a decision you make; nothing here makes it

@@ -144,18 +144,36 @@ describe('generalizeAppCitations', () => {
  * and the point is that the template is strict while an adopted tree is not strict about keel's two apps.
  */
 describe('resolves', () => {
-    function tree(...dirs: string[]): string {
+    /** A tree under a fresh root. `files` are created with their parents; `dirs` are empty directories. */
+    function tree(files: string[], dirs: string[] = []): string {
         const root = makeTestTmpDir('doc-set-resolves-')
         for (const dir of dirs) mkdirSync(path.join(root, dir), { recursive: true })
+        for (const file of files) {
+            mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+            writeFileSync(path.join(root, file), '')
+        }
         return root
     }
-    const template = () => tree('apps/showcase/src/app-config', 'apps/starter/src', 'packages/keel/src')
-    const adopted = () => tree('apps/console/src', 'packages/keel/src') // ejected, starter renamed
-    const renamedOnly = () => tree('apps/showcase/src', 'apps/console/src', 'packages/keel/src')
+    // `only-in-temp` exists in these trees and nowhere else, so a lookup that ignored `root` and read the
+    // process's own working directory (the real repo) would answer differently.
+    const template = () =>
+        tree(
+            ['apps/showcase/package.json', 'apps/starter/package.json'],
+            ['apps/showcase/src/only-in-temp', 'apps/starter/src', 'packages/keel/src'],
+        )
+    const adopted = () => tree(['apps/console/package.json'], ['apps/console/src', 'packages/keel/src']) // ejected, starter renamed
+    const renamedOnly = () =>
+        tree(['apps/showcase/package.json', 'apps/console/package.json'], ['apps/showcase/src', 'packages/keel/src'])
+
+    it('reads the tree it is given, not the working directory', () => {
+        expect(resolves('apps/showcase/src/only-in-temp', template())).toBe(true)
+        expect(resolves('apps/showcase/src/only-in-temp', adopted()), "absent app: keel's").toBe(true)
+        expect(resolves('packages/keel/src/only-in-temp', template())).toBe(false)
+        expect(resolves('scripts', template()), 'a directory of the real repo that is not in the temp tree').toBe(false)
+    })
 
     it('is strict in the template: a broken citation of either reference app fails', () => {
         const root = template()
-        expect(resolves('apps/showcase/src/app-config', root)).toBe(true)
         expect(resolves('apps/showcase/src/no-such-dir', root)).toBe(false)
         expect(resolves('apps/starter/src/no-such-dir', root)).toBe(false)
         expect(resolves('apps/showcase', root)).toBe(true)
@@ -184,8 +202,20 @@ describe('resolves', () => {
     })
 
     it('keeps checking an app called starter that the adopter kept', () => {
-        const root = tree('apps/starter/src', 'packages/keel/src') // `pnpm init-app starter --eject-showcase`
+        const root = tree(['apps/starter/package.json'], ['apps/starter/src', 'packages/keel/src']) // `init-app starter --eject-showcase`
         expect(resolves('apps/starter/src/no-such-dir', root)).toBe(false)
+    })
+
+    it('is not fooled by what a merge leaves behind where the app used to be', () => {
+        // An upstream merge adds every NEW file under apps/showcase/ back, even after you deleted the app; a
+        // local rename leaves apps/starter/node_modules. Neither makes the directory an app again.
+        const root = tree(
+            ['apps/console/package.json', 'apps/showcase/DEMO-SIZE.md', 'apps/showcase/tests/e2e/new.spec.ts'],
+            ['apps/starter/node_modules/left-behind', 'packages/keel/src'],
+        )
+        expect(resolves('apps/showcase/src/domain/db/tickets.ts', root)).toBe(true)
+        expect(resolves('apps/showcase/src/app-config', root)).toBe(true)
+        expect(resolves('apps/starter/src/app/[locale]/signin/page.tsx', root)).toBe(true)
     })
 
     it('agrees with the rewriter: init-app does not generalize a citation the gate accepts', () => {

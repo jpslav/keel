@@ -1415,7 +1415,10 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   merge, because the merge brought a doc that named `apps/starter`, and `init-app` had already finished. The
   adoption probe (`pnpm init-app …` then `pnpm verify`) cannot see this class. A test of an adoption-time
   tool needs a second step that plays an upstream merge into the adopted tree, which is what the identity
-  suite now does with a new doc laid into its real adopted probe trees.
+  suite now does with a new doc laid into its real adopted probe trees. And the first version of the rule keyed
+  "the app is absent" on its directory, which the next merge falsifies: git silently brings back every NEW file
+  upstream adds under a directory you deleted, so a directory with one stray file looked like the app. Key on
+  what makes it the app (its `package.json`), and test the resurrected-directory state, not only the clean one.
 - **A number kept in a shared script is an "edit the shared file" instruction in disguise.** The demo size
   script's default was the showcase's budget, and its header said to record changes there. Nothing about it
   looked like an instruction to edit a keel-owned file until an adopter tried to follow it. Ask of any value
