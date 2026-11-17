@@ -1964,6 +1964,39 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
       that is written down, not built.
     - The 1 MiB response cap meeting a page of unbounded text is an accepted limit.
 
+## The Data API network shape in the infra draft (2026-11-16, `feat/rds-data-api-infra`)
+
+- **The stack takes `params.database.transport`, passed in by `infra/app.ts`.** It does not read its own
+  CDK context. One value decides both what the app's runtime does and what network it gets, so the two
+  cannot disagree. It is a prop rather than an import inside the stack so that `infra/check-shapes.ts`
+  can build both shapes.
+- **On `data-api`, the VPC still exists, but holds only the database.** The subnets are isolated, with
+  no NAT gateway and no internet gateway. A cluster has to live in a VPC. Nothing else in the stack needs
+  a route out of one once the Lambdas run outside it.
+- **The `pg` shape stays the default.** The Data API transport is proven only through its emulator until
+  its cutover row closes, and a socket is faster per statement. Its limits (45 seconds per call, 1 MiB
+  per response, an hour per transaction) are the app's limits on that shape.
+- **CDK's `grantDataApiAccess`, not a hand-written policy.** It grants exactly the five `rds-data`
+  actions on the cluster's ARN, plus read on its secret, as the synthesized `data-api` shape shows.
+  `BatchExecuteStatement` is among them although the dialect never sends it; it allows nothing that
+  `ExecuteStatement` does not. The `data-api-access` cutover row checks the deployed policy, and that a
+  role without it is refused.
+- **Both shapes are checked by a gate.** `pnpm --filter infra synth`, which CI runs, now also runs
+  `infra/check-shapes.ts`. It found what review found missing: nothing built the `data-api` shape, and
+  nothing tied its environment to `DATABASE_ENV` in `packages/keel/src/adapters/real/database-transport.ts`.
+  knip needs no entry for it: it reads the `synth` script.
+- **The gate checks the way in, not only the wiring** (the independent cold review, 2026-11-17). It passed
+  with `secretsmanager:GetSecretValue` on `*` and the database port open to `0.0.0.0/0`. Now every
+  Secrets Manager grant must name the cluster's own secret alone, on both shapes; every `rds-data` grant
+  must name this cluster alone; and on `data-api` the database's security group must admit nothing. The
+  grants are read from every IAM policy, managed policy and role's inline policy in the stack, after the
+  mechanical re-check showed a second stack secret, a managed policy and an inline policy slipping past an
+  earlier version. The review's re-check then showed `Action: "*"` on `Resource: "*"` passing, because
+  statements were picked by the text `rds-data:` or `secretsmanager:`. Now a statement counts if it can
+  grant the service at all: a wildcard action that reaches it, or any `NotAction`. Since the contents of an
+  AWS-managed policy cannot be read from the template, a role may attach only the two Lambda execution
+  policies. Each check was seen red by a mutation of the stack.
+
 ## Security patches the October group did not cover (2026-11-17, `deps/security-patches-2026-11`)
 
 - **Three packages raised past their advisories, staying on their current majors.** `@sentry/nextjs`

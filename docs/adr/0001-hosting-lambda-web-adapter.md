@@ -59,3 +59,63 @@ a dedicated infrastructure repo is a supported end state: `infra/` imports exact
   standing cost, named in the stack and gated by `recurring-cost`.
 - The deploy shape is rehearsable before any account exists: `pnpm build:demo && pnpm start:demo` runs
   the identical standalone artifact locally against fake adapters (`docs/runbooks/deploy.md`).
+
+## Addendum (2026-11-16): the Lambdas outside the VPC, as a deployment choice
+
+The Decision's network shape stays the default: both Lambdas inside the VPC, and one NAT gateway for their
+egress. The app's `params.database.transport` now chooses between two shapes (`infra/stack.ts`):
+
+- **`pg` (default):** unchanged. The cluster synthesizes exactly as before, and both Lambdas now say
+  `DATABASE_TRANSPORT=pg` explicitly.
+- **`data-api` (opt-in):** the RDS Data API transport, from ADR-0002's addendum of the same date.
+    - Only the Aurora cluster lives in the VPC, in isolated subnets with no NAT gateway and no internet
+      gateway.
+    - The server and migrator Lambdas run outside any VPC and reach Aurora through the RDS Data API, which
+      the cluster enables.
+    - IAM is the whole boundary. Each function gets the Data API actions on this one cluster's ARN and read
+      on its secret (CDK's `grantDataApiAccess`), and nothing else database-related.
+
+**What it buys:**
+
+- no NAT gateway, the standing cost the Consequences named;
+- no VPC attachment for the Lambdas;
+- no database credential in the function's configuration, because the Data API reads the secret itself.
+  The `db-credential-not-in-env` cutover row therefore does not arise on this shape.
+
+**What it costs:**
+
+- Every SQL statement is an HTTPS round trip. A `withTenant` is at least BeginTransaction, one setup
+  statement, the queries, and Commit.
+- The Data API's limits apply to the app and to its migrations: 1 MiB responses, 45 seconds per call,
+  one hour per transaction (AWS's `BeginTransaction` API reference; the doc comment in the installed
+  `@aws-sdk/client-rds-data` 3.1169.0 still says 24 hours).
+- Anyone holding both the IAM grant and the secret can run SQL as the database user, so the grant is
+  scoped to the one cluster. That user is the cluster's master user, as on `pg` today. Closing
+  `db-role-not-superuser` on this shape means a second, non-superuser secret, and a hand-written grant
+  on that secret instead of CDK's.
+
+**Why the VPC path stays the default:**
+
+- The Data API transport is proven only through an emulator until the `data-api` cutover row closes.
+- A socket has lower latency per statement.
+- A migration or query that cannot fit the Data API's limits needs the socket.
+
+**Decide before the first deploy.** On an existing stack a switch does not replace anything: the new
+subnets' CIDRs overlap the old ones, so the update fails and rolls back. Changing shape means a new
+stack and a restore from a snapshot.
+
+`pnpm --filter infra synth` now runs `infra/check-shapes.ts` after `cdk synth`. It builds BOTH shapes and
+checks each against the runtime's own list of required variables, so the opt-in shape is built by a gate
+even though the app's params choose `pg`. It was also run offline by hand for both shapes. The `data-api` shape has:
+
+- no NAT gateway, no internet gateway, and two isolated subnets;
+- the cluster's HTTP endpoint enabled;
+- both Lambdas without VPC configuration;
+- the `rds-data` and secret-read grants scoped as above.
+
+The `pg` shape keeps its NAT gateway, its subnets, its in-VPC Lambdas and its secret-read grants. It now
+sets `DATABASE_TRANSPORT=pg` explicitly on both Lambdas, and its cluster is unchanged. The cutover row
+`data-api-access` proves the deployed shape.
+
+The Decision's "`infra/` imports exactly one thing from the app" no longer holds: it imports two,
+`config/app` and, for `params.database.transport`, `config/params` (`infra/app.ts`).

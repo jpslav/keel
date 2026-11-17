@@ -14,9 +14,34 @@ proves the shape compiles offline before anyone has an AWS account.
 - `pnpm --filter infra synth` is the verification bar: green, offline, zero credentials
   (environment-agnostic stack, no lookups).
 - **Nothing here deploys until** (see `docs/cutover-checklist.md`): `cloud-accounts` fills
-  `apps/showcase/config/params.ts` · `recurring-cost` — Aurora, the NAT gateway, and CloudFront need
-  explicit approval. Not a checklist row, but do it first: if your organisation ships its own CDK
+  `apps/showcase/config/params.ts` · `recurring-cost` — Aurora, the NAT gateway (on the `pg` shape), and
+  CloudFront need explicit approval. Not a checklist row, but do it first: if your organisation ships its own CDK
   construct library, replace `lib/tags.ts` and the IAM/secrets/monitoring drafts with it.
+
+## Two network shapes — decide before the first deploy
+
+`params.database.transport` in the app's `config/params.ts` picks one (ADR-0001 and ADR-0002, addenda
+2026-11-16). On an existing stack a switch does not replace anything: it fails on overlapping subnet
+CIDRs and rolls back. Changing shape later means a new stack and a snapshot restore.
+
+- **`pg` (default):** both Lambdas inside the VPC, reaching Aurora over a socket. One NAT gateway carries
+  their egress.
+- **`data-api` (opt-in):**
+    - only the cluster lives in the VPC, in isolated subnets with no NAT gateway;
+    - both Lambdas run outside it and reach Aurora through the RDS Data API, authorised by IAM alone;
+    - the function configuration holds no database credential.
+
+    Cutover rows `data-api` (the transport, proven live by `docs/runbooks/data-api.md`) and
+    `data-api-access` (this shape, deployed) close it.
+
+`pnpm --filter infra synth` builds both shapes offline: `cdk synth` builds the one the params choose, then
+`check-shapes.ts` builds both and checks each against the runtime's list of required variables. It also
+checks the way in. In every IAM policy, managed policy and role's inline policy the stack defines, each
+statement that can grant a Secrets Manager action names the cluster's own secret alone, and each that can
+grant an `rds-data` action names this cluster alone. A statement that "can grant" includes a wildcard
+action such as `*` and any `NotAction`. No role may attach an AWS-managed policy other than the two Lambda
+execution policies, whose contents the check cannot read. On `data-api` the database's security group
+admits nothing.
 
 ## Deploys — checks in CI, deploys in your own pipeline
 
