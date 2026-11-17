@@ -539,6 +539,56 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
 
     // ---- negative controls: the emulator is strict, so the dialect's casts are what made the above pass ----
 
+    test('a statement that would end withTenant’s transaction from inside it is refused, and the tenant holds', async () => {
+        // A leading `;` once hid COMMIT from the guard, and a second statement after a `;` was never looked
+        // at: either ran COMMIT, and what followed ran as the secret's user with no tenant while the dialect
+        // still took it for the tenant's transaction.
+        const [tenant] = await db()
+            .insertInto('tenants')
+            .values({ slug: `multi-${Date.now()}`, name: 'multistatement' })
+            .returning('id')
+            .execute()
+        const after = await dataApi.withTenant(tenant!.id, async (trx) => {
+            for (const statement of [';commit', 'select 1; commit', 'select 1 ; ; commit -- trailing']) {
+                await expect(sql.raw(statement).execute(trx), statement).rejects.toBeInstanceOf(RdsDataUnsupportedError)
+            }
+            const seen = await sql<{ role: string; tenant: string }>`
+                select current_user as role, current_setting('app.current_tenant', true) as tenant`.execute(trx)
+            return seen.rows[0]
+        })
+        expect(after).toEqual({ role: 'app_user', tenant: tenant!.id })
+        // One statement with a trailing `;` (and a comment after it) is still one statement.
+        const one = await sql<{ n: number }>`select 1 as n; -- done`.execute(db())
+        expect(one.rows).toEqual([{ n: 1 }])
+    })
+
+    test('a colon inside an E-string or a nested comment is not a parameter, as on pg', async () => {
+        const text = String.raw`select E'it\'s :not_a_parameter' as a /* outer /* inner :nor_this */ :nor_that */`
+        for (const [label, port] of [
+            ['pg', viaPg],
+            ['data-api', dataApi],
+        ] as const) {
+            const result = await sql.raw<{ a: string }>(text).execute(port.getDb())
+            expect(result.rows, label).toEqual([{ a: "it's :not_a_parameter" }])
+        }
+    })
+
+    test('control: the emulator refuses more than one statement in a call, before running any of it', async () => {
+        const slug = `multi-control-${Date.now()}`
+        await expect(
+            emulator.send(
+                new ExecuteStatementCommand({
+                    resourceArn: RESOURCE_ARN,
+                    secretArn: SECRET_ARN,
+                    database: DATABASE,
+                    sql: `insert into tenants (slug, name) values ('${slug}', 'first'); select 1`,
+                }),
+            ),
+        ).rejects.toMatchObject({ name: 'ValidationException' })
+        const rows = await db().selectFrom('tenants').select('id').where('slug', '=', slug).execute()
+        expect(rows).toEqual([])
+    })
+
     test('control: the emulator rejects an untyped string compared with a uuid, as Aurora does', async () => {
         await expect(
             emulator.send(

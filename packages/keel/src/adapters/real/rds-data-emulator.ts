@@ -11,6 +11,7 @@ import {
     type SqlParameter,
 } from '@aws-sdk/client-rds-data'
 import { Pool, type PoolClient } from 'pg'
+import { isMultistatement, sqlSegments } from './rds-data-codec'
 import type { RdsDataClientLike, RdsDataCommand } from './rds-data-dialect'
 
 /**
@@ -122,6 +123,9 @@ export class RdsDataEmulator implements RdsDataClientLike {
         const sql = input.sql ?? ''
         this.calls.push({ operation: 'ExecuteStatement', transactionId: input.transactionId, sql })
         if (sql.length > 65536) throw awsError('ValidationException', 'sql must be at most 65536 characters')
+        // Refused before anything runs. The name and wording are this emulator's; step 4 of
+        // docs/runbooks/data-api.md records what AWS sends.
+        if (isMultistatement(sql)) throw awsError('ValidationException', "Multistatements aren't supported.")
         if (input.formatRecordsAs === 'JSON') throw new Error('the emulator does not implement formatRecordsAs JSON')
         const parameters = input.parameters ?? []
         if (parameters.some((p) => p.value?.arrayValue !== undefined)) {
@@ -208,44 +212,27 @@ function awsError(name: string, message: string, cause?: unknown): Error {
 }
 
 /**
- * `:name` placeholders to `$n`, outside strings, quoted identifiers, comments and dollar quotes, and
- * never the second colon of a `::` cast. Each is bound the way the Data API binds it: an untyped string
- * as `varchar`, a typeHint as its type, a long as `int8` — which is what makes a missing cast fail here.
+ * `:name` placeholders to `$n`, in code only — not in strings, E-strings, quoted identifiers, nested
+ * comments or dollar quotes, by the dialect's own scanner (`sqlSegments`), so the two cannot disagree —
+ * and never the second colon of a `::` cast. Each is bound the way the Data API binds it: an untyped
+ * string as `varchar`, a typeHint as its type, a long as `int8` — which is what makes a missing cast fail
+ * here.
  */
 function toPositional(sql: string, parameters: readonly SqlParameter[]): { text: string; values: unknown[] } {
     const byName = new Map(parameters.map((p) => [p.name, p]))
     const order: string[] = []
-    let text = ''
-    let i = 0
-    while (i < sql.length) {
-        const ch = sql[i]!
-        const rest = sql.slice(i)
-        const skip =
-            /^--[^\n]*/.exec(rest) ??
-            /^\/\*[\s\S]*?\*\//.exec(rest) ??
-            /^'(?:[^']|'')*'/.exec(rest) ??
-            /^"(?:[^"]|"")*"/.exec(rest) ??
-            /^(\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$)[\s\S]*?\1/.exec(rest) ??
-            /^::/.exec(rest)
-        if (skip) {
-            text += skip[0]
-            i += skip[0].length
-            continue
-        }
-        const named = ch === ':' ? /^:([A-Za-z_][A-Za-z0-9_]*)/.exec(rest) : null
-        if (named) {
-            const name = named[1]!
-            const parameter = byName.get(name)
-            if (!parameter) throw awsError('ValidationException', `No value specified for parameter ${name}`)
-            let index = order.indexOf(name)
-            if (index === -1) index = order.push(name) - 1
-            text += `($${index + 1}${bindType(parameter)})`
-            i += named[0].length
-            continue
-        }
-        text += ch
-        i += 1
+    const bind = (_: string, name: string): string => {
+        const parameter = byName.get(name)
+        if (!parameter) throw awsError('ValidationException', `No value specified for parameter ${name}`)
+        let index = order.indexOf(name)
+        if (index === -1) index = order.push(name) - 1
+        return `($${index + 1}${bindType(parameter)})`
     }
+    const text = sqlSegments(sql)
+        .map((segment) =>
+            segment.code ? segment.text.replace(/(?<!:):([A-Za-z_][A-Za-z0-9_]*)/g, bind) : segment.text,
+        )
+        .join('')
     const values = order.map((name) => bindValue(byName.get(name)!))
     return { text, values }
 }

@@ -3,6 +3,7 @@ import {
     castPlaceholder,
     decodeField,
     describableSql,
+    isMultistatement,
     leadingKeyword,
     normalizeDatabaseError,
     RdsDataDatabaseError,
@@ -66,9 +67,35 @@ describe('leadingKeyword', () => {
         ['  SELECT 1', 'select'],
         ['-- note\n/* block */ (select 1)', 'select'],
         ['with x as (select 1) insert into t select * from x', 'with'],
+        [';commit', 'commit'],
+        [' ; ;(commit)', 'commit'],
         ['', ''],
     ])('%j -> %s', (sql, keyword) => {
         expect(leadingKeyword(sql)).toBe(keyword)
+    })
+})
+
+describe('isMultistatement: a `;` in code with more SQL after it', () => {
+    it.each([
+        ['select 1', false],
+        ['select 1;', false],
+        ['select 1 ; ; -- done\n/* really */', false],
+        ["select ';' as a, E'\\';' as b, \"x;y\" as c -- ; commit", false],
+        ['do $$ begin perform 1; perform 2; end $$', false],
+        ['do $body$ begin perform 1; end $body$;', false],
+        ['select 1 /* outer /* inner ; */ ; */', false],
+        [';commit', true],
+        ['select 1; commit', true],
+        ["select 1; 'x'", true],
+        ['do $$ begin perform 1; end $$; commit', true],
+    ])('%j -> %s', (sql, expected) => {
+        expect(isMultistatement(sql)).toBe(expected)
+    })
+
+    it('is refused by the guard, in a transaction or not', () => {
+        expect(unsupportedStatement('select 1; select 2', true)).toMatch(/more than one statement/)
+        expect(unsupportedStatement('select 1; select 2', false)).toMatch(/more than one statement/)
+        expect(unsupportedStatement('select 1;', true)).toBeNull()
     })
 })
 
