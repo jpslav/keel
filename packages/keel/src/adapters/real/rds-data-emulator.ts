@@ -50,13 +50,20 @@ export class RdsDataEmulator implements RdsDataClientLike {
     readonly #pool: Pool
     readonly #database: string
     readonly #transactions = new Map<string, PoolClient>()
+    readonly #reset: boolean
     #typeNames: Map<number, string> | undefined
 
-    constructor(connectionString: string) {
+    /**
+     * `resetConnections: false` and `maxConnections: 1` are for ONE kind of test only: proving that state
+     * is transaction-local in its own right, which the documented reset would otherwise hide by wiping it
+     * anyway. They make the emulator less like AWS, never more lenient about what reaches the database.
+     */
+    constructor(connectionString: string, options: { resetConnections?: boolean; maxConnections?: number } = {}) {
         this.#database = decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, ''))
+        this.#reset = options.resetConnections ?? true
         this.#pool = new Pool({
             connectionString,
-            max: 8,
+            max: options.maxConnections ?? 8,
             // The Data API returns timestamptz in UTC; a UTC session makes Postgres print it that way.
             options: '-c TimeZone=UTC',
             // Raw text for every type: the emulator does its own typing, as the Data API does.
@@ -81,15 +88,19 @@ export class RdsDataEmulator implements RdsDataClientLike {
             this.calls.push({ operation: commit ? 'CommitTransaction' : 'RollbackTransaction', transactionId })
             if (!client) throw awsError('TransactionNotFoundException', `Transaction ${transactionId} is not found`)
             this.#transactions.delete(transactionId)
+            let ended
             try {
-                await client.query(commit ? 'COMMIT' : 'ROLLBACK')
+                ended = await client.query(commit ? 'COMMIT' : 'ROLLBACK')
             } catch (error) {
                 // A commit can fail (a deferred constraint); it comes back like any statement's error.
                 throw awsError('DatabaseErrorException', `ERROR: ${(error as Error).message}`, error)
             } finally {
                 await this.#release(client)
             }
-            return { transactionStatus: commit ? 'Transaction Committed' : 'Rollback Complete' }
+            // Postgres answers COMMIT on an aborted transaction with ROLLBACK; report what actually happened.
+            return {
+                transactionStatus: commit && ended.command === 'COMMIT' ? 'Transaction Committed' : 'Rollback Complete',
+            }
         }
         if (command instanceof ExecuteStatementCommand) return this.#execute(command)
         throw new Error('the emulator handles BeginTransaction, ExecuteStatement, Commit and Rollback only')
@@ -130,7 +141,7 @@ export class RdsDataEmulator implements RdsDataClientLike {
         }
 
         try {
-            const typeNames = await this.#types()
+            const typeNames = await this.#types(client)
             let result
             try {
                 result = await client.query({ text, values, rowMode: 'array' })
@@ -166,7 +177,7 @@ export class RdsDataEmulator implements RdsDataClientLike {
     /** `DISCARD ALL` before a connection goes back to the pool — the reset AWS documents. */
     async #release(client: PoolClient): Promise<void> {
         try {
-            await client.query('DISCARD ALL')
+            if (this.#reset) await client.query('DISCARD ALL')
             client.release()
         } catch (error) {
             client.release(error as Error)
@@ -180,11 +191,10 @@ export class RdsDataEmulator implements RdsDataClientLike {
     }
 
     /** `pg_type.typname` by oid, which is what PgJDBC reports as a column's type name (`_text` for text[]). */
-    async #types(): Promise<Map<number, string>> {
+    // On the connection already held — with `maxConnections: 1` a second checkout would wait forever.
+    async #types(client: PoolClient): Promise<Map<number, string>> {
         if (!this.#typeNames) {
-            const { rows } = await this.#pool.query<{ oid: string; typname: string }>(
-                'SELECT oid, typname FROM pg_type',
-            )
+            const { rows } = await client.query<{ oid: string; typname: string }>('SELECT oid, typname FROM pg_type')
             this.#typeNames = new Map(rows.map((row) => [Number(row.oid), row.typname]))
         }
         return this.#typeNames

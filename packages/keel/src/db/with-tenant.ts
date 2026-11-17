@@ -5,7 +5,7 @@ import type { DB } from './schema'
  * The tenant scope helper every db transport shares (proven in spikes/kysely-pglite; ADR-0004).
  *
  * ONE statement sets both halves of the scope, transaction-locally: `set_config('role', 'app_user', true)`
- * is `SET LOCAL ROLE app_user` (same GUC, same membership check) and the tenant id goes through
+ * is `SET LOCAL ROLE app_user` (same GUC, same check that the session user is a member) and the tenant id goes through
  * set_config() as a real parameter — never string interpolation. One statement rather than two because
  * on the RDS Data API every statement is its own HTTPS call (ADR-0004, addendum 2026-11-16); on `pg` and
  * pglite it is simply one round trip fewer. Transaction-scoped, so it is safe under pooling, required

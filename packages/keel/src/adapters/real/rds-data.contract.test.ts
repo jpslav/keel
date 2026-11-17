@@ -1,6 +1,7 @@
 import { ExecuteStatementCommand } from '@aws-sdk/client-rds-data'
 import EmbeddedPostgres from 'embedded-postgres'
-import { sql, type Kysely } from 'kysely'
+import { AbortedTransactionError, sql, type Kysely } from 'kysely'
+import { Migrator } from 'kysely/migration'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { portFor } from '../../../../../scripts/ports.mjs'
 import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
@@ -260,6 +261,90 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         expect((error as RdsDataDatabaseError).constraint).toBe('data_api_deferred_k')
     })
 
+    test('a transaction whose statement failed is reported as aborted, not committed, as on pg', async () => {
+        for (const [label, port] of [
+            ['pg', viaPg],
+            ['data-api', dataApi],
+        ] as const) {
+            const slug = `aborted-${label}-${Date.now()}`
+            const outcome = await port
+                .getDb()
+                .transaction()
+                .execute(async (trx) => {
+                    await trx.insertInto('tenants').values({ slug, name: 'lost' }).execute()
+                    // caught and carried on: Postgres has aborted the transaction all the same
+                    await trx
+                        .insertInto('tenants')
+                        .values({ slug, name: 'duplicate' })
+                        .execute()
+                        .catch(() => undefined)
+                })
+                .then(
+                    () => 'reported as committed',
+                    (e: unknown) => e,
+                )
+            expect(outcome, label).toBeInstanceOf(AbortedTransactionError)
+            const rows = await db().selectFrom('tenants').select('id').where('slug', '=', slug).execute()
+            expect(rows, label).toEqual([])
+        }
+    })
+
+    test('rolling back to a savepoint recovers the transaction, and the rest of it commits', async () => {
+        const slug = `savepoint-${Date.now()}`
+        const trx = await db().startTransaction().execute()
+        await trx.insertInto('tenants').values({ slug, name: 'kept' }).execute()
+        const atSavepoint = await trx.savepoint('before_duplicate').execute()
+        await atSavepoint
+            .insertInto('tenants')
+            .values({ slug, name: 'duplicate' })
+            .execute()
+            .catch(() => undefined)
+        const recovered = await atSavepoint.rollbackToSavepoint('before_duplicate').execute()
+        await recovered.commit().execute()
+        const rows = await db().selectFrom('tenants').select('name').where('slug', '=', slug).execute()
+        expect(rows).toEqual([{ name: 'kept' }])
+    })
+
+    test('withTenant’s role and tenant are transaction-local in their own right, not only reset away', async () => {
+        // One connection, never reset: whatever outlives a transaction would be seen by the next call. The
+        // documented DISCARD ALL would hide a session-level set_config, so this run turns it off.
+        const sticky = new RdsDataEmulator(databaseUrl(DATABASE), { resetConnections: false, maxConnections: 1 })
+        const port = createRealDataApiDb({
+            resourceArn: RESOURCE_ARN,
+            secretArn: SECRET_ARN,
+            database: DATABASE,
+            client: sticky,
+        })
+        try {
+            const [tenant] = await port
+                .getDb()
+                .insertInto('tenants')
+                .values({ slug: `sticky-${Date.now()}`, name: 'sticky' })
+                .returning('id')
+                .execute()
+            await port.withTenant(tenant!.id, async (trx) => {
+                await sql`select 1`.execute(trx)
+            })
+            const after = await sql<{ role: string; tenant: string | null }>`
+                select current_user as role, current_setting('app.current_tenant', true) as tenant`.execute(
+                port.getDb(),
+            )
+            expect(after.rows[0]!.role).not.toBe('app_user')
+            expect(['', null]).toContain(after.rows[0]!.tenant)
+        } finally {
+            await port.getDb().destroy()
+            await sticky.close()
+        }
+    })
+
+    test('a Migrator handed the plain db is refused rather than run with a lock that is gone at once', async () => {
+        const { error } = await new Migrator({
+            db: db(),
+            provider: { getMigrations: async () => ({}) },
+        }).migrateToLatest()
+        expect(error).toBeInstanceOf(RdsDataUnsupportedError)
+    })
+
     test('a unique violation carries code 23505 and its constraint, as node-postgres errors do', async () => {
         const slug = `dup-${Date.now()}`
         await db().insertInto('tenants').values({ slug, name: 'first' }).execute()
@@ -281,7 +366,8 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
         await sql`
             create table data_api_parity (
                 k text primary key, u uuid, t text, j jsonb, ja jsonb, ts timestamptz, d date, da date[],
-                ta text[], ua uuid[], i int4, big int8, n numeric, f float8, b boolean, by bytea, nothing uuid
+                ta text[], ua uuid[], i int4, big int8, n numeric, f float8, b boolean, by bytea, nothing uuid,
+                ch char(3), bi bit(4), cha char(3)[]
             )`.execute(viaPg.getDb())
         const values = {
             u: '6f1f4f6e-6b1a-4c1e-9d4b-3a1f2c3d4e5f',
@@ -300,20 +386,25 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             b: true,
             by: Buffer.from([0, 1, 2, 255]),
             nothing: null,
+            // Postgres prints the inferred type of these as `character` and `bit`, which a CAST reads as
+            // length 1: these three catch a value silently truncated on the way in.
+            ch: 'abc',
+            bi: '1010',
+            cha: ['xyz', 'ab'],
         }
         const insert = (port: DbPort, k: string) =>
             sql`insert into data_api_parity values (${k}, ${values.u}, ${values.t}, ${values.j}, ${values.ja},
                 ${values.ts}, ${values.d}, ${values.da}, ${values.ta}, ${values.ua}, ${values.i}, ${values.big},
-                ${values.n}, ${values.f}, ${values.b}, ${values.by}, ${values.nothing})`.execute(port.getDb())
+                ${values.n}, ${values.f}, ${values.b}, ${values.by}, ${values.nothing}, ${values.ch}, ${values.bi},
+                ${values.cha})`.execute(port.getDb())
         await insert(dataApi, 'written-via-data-api')
         await insert(viaPg, 'written-via-pg')
 
         const read = (port: DbPort) =>
             sql<Record<string, unknown>>`
                 select *, (select count(*) from data_api_parity) as total
-                from data_api_parity where u = ${values.u} and t = any(${[values.t, 'other']}) order by k`.execute(
-                port.getDb(),
-            )
+                from data_api_parity where u = ${values.u} and t = any(${[values.t, 'other']}) and ch = ${values.ch}
+                order by k`.execute(port.getDb())
         const fromDataApi = (await read(dataApi)).rows
         const fromPg = (await read(viaPg)).rows
         // READS: both transports return the same two rows identically.

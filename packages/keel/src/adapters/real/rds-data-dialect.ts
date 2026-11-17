@@ -8,6 +8,7 @@ import {
     type ExecuteStatementCommandOutput,
 } from '@aws-sdk/client-rds-data'
 import {
+    AbortedTransactionError,
     CompiledQuery,
     PostgresAdapter,
     sql,
@@ -100,6 +101,13 @@ const MIGRATION_LOCK_ID = '3853314791062309107'
 class RdsDataPostgresAdapter extends PostgresAdapter {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- kysely's DialectAdapter signature
     override async acquireMigrationLock(db: Kysely<any>): Promise<void> {
+        // Outside a transaction a transaction-scoped lock autocommits and is gone at once, so a Migrator
+        // handed the plain db (an adopter's own migrate-down script, say) would run unlocked. Refuse it.
+        if (!db.isTransaction) {
+            throw new RdsDataUnsupportedError(
+                'run the Migrator inside one transaction on the Data API (the db port’s migrateToLatest does), or its lock is released at once',
+            )
+        }
         await lockMigrations(db)
     }
 
@@ -124,7 +132,7 @@ const TYPE_CACHE_LIMIT = 2000
 /**
  * A paused Aurora Serverless v2 (min capacity 0, as keel's non-production stack runs) answers the first
  * call with DatabaseResumingException: the request was cancelled, not run, so retrying it is safe. Every
- * other failure is NOT retried — the SDK's own retries are off (`maxAttempts: 1` in ./db.ts) because AWS
+ * other failure is NOT retried — the SDK's own retries are off (`maxAttempts: 1` in ./db-data-api.ts) because AWS
  * warns that a retried statement whose first attempt actually finished can write twice.
  */
 const RESUME_DELAYS_MS = [1000, 2000, 4000, 8000]
@@ -151,6 +159,7 @@ class RdsDataDriver implements Driver {
         )) as BeginTransactionCommandOutput
         if (!begun.transactionId) throw new Error('RDS Data API: BeginTransaction returned no transaction id')
         conn.transactionId = begun.transactionId
+        conn.failed = false
         // BeginTransaction takes no isolation level or access mode; Postgres accepts them as the
         // transaction's first statement instead. If that fails, Kysely never learns the transaction began
         // and will not roll it back — so this does, rather than strand it for the three idle minutes.
@@ -180,6 +189,14 @@ class RdsDataDriver implements Driver {
         const conn = asConnection(connection)
         const transactionId = conn.transactionId
         if (!transactionId) throw new Error('RDS Data API: no transaction is open on this connection')
+        // A statement failed and the caller carried on (it caught the error). Postgres has aborted the
+        // transaction, and a COMMIT would quietly roll it back — node-postgres sees that as a ROLLBACK tag
+        // and Kysely's pg driver throws. The Data API's answer to such a commit is unknown, so this does not
+        // ask it: it rolls back and throws the same error the pg driver does.
+        if (conn.failed) {
+            await this.rollbackTransaction(conn)
+            throw new AbortedTransactionError()
+        }
         const { resourceArn, secretArn } = this.config
         await this.call(new CommitTransactionCommand({ resourceArn, secretArn, transactionId }))
         conn.transactionId = undefined
@@ -208,6 +225,8 @@ class RdsDataDriver implements Driver {
 
     async rollbackToSavepoint(connection: DatabaseConnection, name: string): Promise<void> {
         await connection.executeQuery(CompiledQuery.raw(`rollback to savepoint ${quoteIdent(name)}`))
+        // Rolling back to a savepoint is how Postgres recovers an aborted transaction.
+        asConnection(connection).failed = false
     }
 
     async releaseSavepoint(connection: DatabaseConnection, name: string): Promise<void> {
@@ -268,7 +287,9 @@ class RdsDataDriver implements Driver {
         const describe = async (txId: string): Promise<readonly string[]> => {
             await this.statement(`PREPARE ${name} AS ${sql}`, txId)
             const out = await this.statement(
-                `SELECT parameter_types::text[] AS types FROM pg_prepared_statements WHERE name = '${name}'`,
+                // format_type(t, -1), not t::text: regtype prints `character` and `bit`, which a CAST reads as
+                // char(1) and bit(1) and silently truncates to; format_type gives `bpchar` and `"bit"`.
+                `SELECT array(SELECT format_type(t, -1) FROM unnest(parameter_types) WITH ORDINALITY AS u(t, i) ORDER BY i) AS types FROM pg_prepared_statements WHERE name = '${name}'`,
                 txId,
             )
             await this.statement(`DEALLOCATE ${name}`, txId)
@@ -342,11 +363,19 @@ class RdsDataDriver implements Driver {
 
 class RdsDataConnection implements DatabaseConnection {
     transactionId: string | undefined
+    /** A statement in the open transaction failed after reaching the database (see commitTransaction). */
+    failed = false
 
     constructor(private readonly driver: RdsDataDriver) {}
 
     async executeQuery<R>(compiledQuery: CompiledQuery): Promise<QueryResult<R>> {
-        return (await this.driver.execute(compiledQuery, this.transactionId)) as QueryResult<R>
+        try {
+            return (await this.driver.execute(compiledQuery, this.transactionId)) as QueryResult<R>
+        } catch (error) {
+            // Refused before any call was made: the transaction is untouched.
+            if (this.transactionId && !(error instanceof RdsDataUnsupportedError)) this.failed = true
+            throw error
+        }
     }
 
     // eslint-disable-next-line require-yield -- an async generator that refuses before its first chunk
