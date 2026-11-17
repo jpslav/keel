@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * The RDS Data API transport is OPT-IN (ADR-0002, addendum 2026-11-16): a `pg` deployment must never load
  * its SDK, so the transport sits behind a dynamic import in createRealPorts. These tests watch the module
  * loads themselves — a counter in each mock factory, which runs only when the module is actually imported —
- * rather than trusting the import statement to say so. Each test also proves the counters can move: the
- * data-api case must see both modules load.
+ * rather than trusting the import statement to say so. The data-api case proves the counters can move: it
+ * must see both modules load.
  *
  * The other real adapters are stubbed: they are not what is being tested, and constructing them would
  * reach for vendor SDKs this test has no reason to load. `./db` is the real one (a pg Pool connects

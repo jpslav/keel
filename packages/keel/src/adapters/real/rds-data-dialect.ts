@@ -61,10 +61,10 @@ export interface RdsDataDialectConfig {
  * Statements outside a transaction are independent HTTPS calls, each autocommitted, and the Data API
  * resets the session (`DISCARD ALL`) between them — so session state exists only inside a transaction,
  * which is the one place keel ever sets it (`runWithTenant`'s one statement setting `role` and
- * `app.current_tenant`, both with `set_config(…, true)`). What it cannot do fails loudly
- * (./rds-data-codec.ts, `unsupportedStatement`): streaming, transaction control in SQL, session state
- * outside a transaction (session-level advisory locks included — which is why the migrator runs in one
- * transaction, ./db-data-api.ts).
+ * `app.current_tenant`, both with `set_config(…, true)`). What it cannot do fails loudly: streaming
+ * (`RdsDataConnection.streamQuery` below), and (./rds-data-codec.ts, `unsupportedStatement`) transaction
+ * control in SQL and session state outside a transaction (session-level advisory locks included — which is
+ * why the migrator runs in one transaction, ./db-data-api.ts).
  *
  * AUTHORED — CUTOVER (`data-api`): proven against real Postgres through a strict emulator
  * (./rds-data-emulator.ts, `pnpm test:contract`); never run against the Data API itself.
@@ -184,7 +184,9 @@ class RdsDataDriver implements Driver {
      * replace the commit's own error, whose `code` callers act on. Two defences, either one sufficient:
      * the id is cleared only after a successful commit (so the rollback finds the transaction, and a
      * "gone" answer is swallowed), and a rollback with no id is a no-op. The contract suite's deferred-
-     * constraint case goes red only with both removed, which is the bug they replaced.
+     * constraint case goes red only when both are undone as the bug they replaced had it: the id cleared
+     * before the commit, AND a rollback with no id that throws. Merely deleting the no-op leaves it green,
+     * because the emulator answers a rollback with no id as TransactionNotFoundException, which is swallowed.
      */
     async commitTransaction(connection: DatabaseConnection): Promise<void> {
         const conn = asConnection(connection)
@@ -382,7 +384,9 @@ class RdsDataConnection implements DatabaseConnection {
     /**
      * A statement in the open transaction failed, so Postgres has likely aborted it (see commitTransaction).
      * Not set for a refusal made before any call, nor for the Data API's own request validation, neither of
-     * which reaches the database. Cleared by a successful `ROLLBACK TO SAVEPOINT`, Postgres's way back.
+     * which reaches the database. That validation error is recognised by the name `ValidationException`,
+     * which the emulator uses and the SDK does not model; step 4 of docs/runbooks/data-api.md records the
+     * name AWS actually sends. Cleared by a successful `ROLLBACK TO SAVEPOINT`, Postgres's way back.
      */
     failed = false
 

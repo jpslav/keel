@@ -1891,7 +1891,8 @@ primitive (S3 `CopyObject` server-side; a file copy in the fake), so it passes t
   stays the default, and the Data API is chosen per deployment.
 - **The switch is `DATABASE_TRANSPORT=pg|data-api`.** Each app records it as `params.database.transport`
   in its `config/params.ts`. It is never inferred from which variables are set, and an unknown value
-  throws. Only when `data-api` is chosen do its three variables replace `DATABASE_URL` in `REQUIRED_ENV`.
+  throws. `DATABASE_URL` left `REQUIRED_ENV`: each transport's variables come from `DATABASE_ENV`
+  (`packages/keel/src/adapters/real/database-transport.ts`), so only on `data-api` do its three replace it.
   "Transport" rather than "driver": both paths are Kysely over Postgres, and what differs is how the SQL
   travels.
 - **Loaded only when chosen.** `db-data-api.ts` is reached by dynamic import alone, so a `pg` deployment

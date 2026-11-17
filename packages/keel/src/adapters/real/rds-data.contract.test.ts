@@ -16,7 +16,7 @@ import { RdsDataEmulator, type EmulatedCall } from './rds-data-emulator'
 /**
  * keel's proofs THROUGH the RDS Data API driver (ADR-0002, addendum 2026-11-16): the dialect in
  * ./rds-data-dialect.ts, talking to ./rds-data-emulator.ts, which runs every call on real Postgres with
- * the Data API's documented semantics — and its strictness, which is what the two negative controls at
+ * the Data API's documented semantics — and its strictness, which is what the four negative controls at
  * the bottom prove. What this cannot prove is AWS's own wire format; the `data-api` cutover row does that.
  *
  * Its own database, `keel_data_api_contract`, migrated THROUGH the dialect (so the migrator's
@@ -420,7 +420,8 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             ch: 'abc',
             bi: '1010',
             cha: ['xyz', 'ab'],
-            // ...and these two, through a domain: an explicit cast to a domain truncates too
+            // ...and these two, through a domain walked down to that same base type. They fit, so they do not
+            // catch the walk itself going missing: the too-long test below does.
             dc: 'abc',
             ds: 'xyz',
         }
@@ -519,7 +520,9 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
                 await sql`COMMIT`.execute(trx).catch((error: unknown) => {
                     expect(error).toBeInstanceOf(RdsDataUnsupportedError)
                 })
-                // ...nor does one the Data API itself refuses before running it (SQL over 64 KiB)
+                // ...nor does one the Data API itself refuses before running it (SQL over 65,536
+                // characters; the error's name is the emulator's assumption, checked by step 4 of
+                // docs/runbooks/data-api.md)
                 await sql`select 1 -- ${sql.raw('x'.repeat(70_000))}`.execute(trx).catch((error: unknown) => {
                     expect((error as Error).name).toBe('ValidationException')
                 })
