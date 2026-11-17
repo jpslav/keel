@@ -176,6 +176,6 @@ round trip fewer.
 
 The same proofs hold on all three engines. Pointing the first `set_config` at a different parameter name
 was watched turning the pglite RLS suite red, so the role really is set by it. The proofs' own
-fail-closed case and their privilege-layer cases (the append-only tables, `service_keys`) still write
-`SET LOCAL ROLE` directly; that form stays valid, and those cases are about the policies and grants, not
-about `runWithTenant`.
+fail-closed case and their privilege-layer cases (the append-only tables, `service_keys`, and DELETE on
+`agreements`) still write `SET LOCAL ROLE` directly; that form stays valid, and those cases are about
+the policies and grants, not about `runWithTenant`.
