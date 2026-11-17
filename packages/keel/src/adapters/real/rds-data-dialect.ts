@@ -57,8 +57,8 @@ export interface RdsDataDialectConfig {
  * A "connection" is a handle with an optional transaction id; there is no socket and nothing to pool.
  * Statements outside a transaction are independent HTTPS calls, each autocommitted, and the Data API
  * resets the session (`DISCARD ALL`) between them — so session state exists only inside a transaction,
- * which is the one place keel ever sets it (`runWithTenant`'s `SET LOCAL ROLE` and
- * `set_config(…, true)`). What it cannot do fails loudly (./rds-data-codec.ts, `unsupportedStatement`):
+ * which is the one place keel ever sets it (`runWithTenant`'s one statement setting `role` and
+ * `app.current_tenant`, both with `set_config(…, true)`). What it cannot do fails loudly (./rds-data-codec.ts, `unsupportedStatement`):
  * streaming, transaction control in SQL, session state outside a transaction.
  *
  * AUTHORED — CUTOVER (`data-api`): proven against real Postgres through a strict emulator

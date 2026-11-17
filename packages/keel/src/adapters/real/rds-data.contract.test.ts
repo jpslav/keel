@@ -7,7 +7,8 @@ import { makeTestTmpDir } from '../../../../../tests/support/tmp-dir'
 import { runRlsProofs } from '../../db/rls-proof-runner'
 import type { DB } from '../../db/schema'
 import type { DbPort } from '../../ports/db'
-import { createRealDataApiDb, createRealDb } from './db'
+import { createRealDb } from './db'
+import { createRealDataApiDb } from './db-data-api'
 import { RdsDataDatabaseError, RdsDataUnsupportedError } from './rds-data-codec'
 import { RdsDataEmulator } from './rds-data-emulator'
 
@@ -59,7 +60,12 @@ beforeAll(async () => {
     const url = new URL(serverUrl)
     url.pathname = `/${DATABASE}`
     emulator = new RdsDataEmulator(url.toString())
-    dataApi = createRealDataApiDb({ resourceArn: RESOURCE_ARN, secretArn: SECRET_ARN, database: DATABASE, client: emulator })
+    dataApi = createRealDataApiDb({
+        resourceArn: RESOURCE_ARN,
+        secretArn: SECRET_ARN,
+        database: DATABASE,
+        client: emulator,
+    })
     await dataApi.migrateToLatest()
     migrationCalls = emulator.calls.map((call) => call.operation)
     viaPg = createRealDb(url.toString())
@@ -98,6 +104,8 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             .returning('id')
             .execute()
         let seen: { role: string; tenant: string }[] = []
+        // Warm the dialect's parameter-type cache, so what is counted below is withTenant's own cost.
+        await dataApi.withTenant(tenant!.id, async () => undefined)
         const calls = await callsDuring(async () => {
             seen = await dataApi.withTenant(tenant!.id, async (trx) => {
                 const first = await sql<{
@@ -115,10 +123,21 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             { role: 'app_user', tenant: tenant!.id },
             { role: 'app_user', tenant: tenant!.id },
         ])
-        const transactionIds = new Set(calls.filter((c) => c.operation === 'ExecuteStatement').map((c) => c.transactionId))
+        const transactionIds = new Set(
+            calls.filter((c) => c.operation === 'ExecuteStatement').map((c) => c.transactionId),
+        )
         expect(calls[0]!.operation).toBe('BeginTransaction')
         expect(calls.at(-1)!.operation).toBe('CommitTransaction')
         expect([...transactionIds]).toEqual([calls[0]!.transactionId])
+        // Begin, ONE statement setting both the role and the tenant, the two selects, Commit: every Data API
+        // statement is an HTTPS call, so the setup is one call, not two (with-tenant.ts).
+        expect(calls.map((c) => c.operation)).toEqual([
+            'BeginTransaction',
+            'ExecuteStatement',
+            'ExecuteStatement',
+            'ExecuteStatement',
+            'CommitTransaction',
+        ])
 
         // ...and none of it outlives the transaction: the next call is back to the migration user,
         // with no tenant set (an unset custom GUC reads as NULL, or '' once a session has ever set it).
@@ -191,7 +210,10 @@ describe('keel on the RDS Data API driver (contract, through the emulator)', () 
             .insertInto('tenants')
             .values({ slug, name: 'second' })
             .execute()
-            .then(() => null, (e: unknown) => e)
+            .then(
+                () => null,
+                (e: unknown) => e,
+            )
         expect(error).toBeInstanceOf(RdsDataDatabaseError)
         expect((error as RdsDataDatabaseError).code).toBe('23505')
         expect((error as RdsDataDatabaseError).constraint).toBe('tenants_slug_key')

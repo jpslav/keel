@@ -9,7 +9,7 @@ import type { StoragePort } from '../../ports/storage'
 import { fakeAnalytics } from '../fake/analytics'
 import { createRealAnalytics } from './analytics'
 import { realAuth } from './auth'
-import { createRealDataApiDb, createRealDb } from './db'
+import { createRealDb } from './db'
 import { createRealEmail } from './email'
 import { createRealJobs } from './jobs'
 import { createRealLlm } from './llm'
@@ -43,31 +43,33 @@ const REQUIRED_ENV: Record<string, string> = {
 }
 
 /**
- * How the app reaches Postgres — an explicit switch, never inferred from which variables happen to be
- * set (a deployment that half-configures the Data API must fail, not quietly fall back to `pg`).
+ * How the app reaches Postgres: DATABASE_TRANSPORT, the deployment parameter each app records as
+ * `params.database.transport` in its `config/params.ts` (the infra stack sets the variable from it). An
+ * explicit switch, never inferred from which variables happen to be set — a deployment that
+ * half-configures the Data API must fail, not quietly fall back to `pg`.
  *
  * - `pg` (the default): node-postgres over a socket, from a Lambda inside the database's VPC.
- * - `data-api`: the RDS Data API over HTTPS, from a Lambda outside any VPC (ADR-0002, addendum
- *   2026-11-16). Its variables replace DATABASE_URL.
+ * - `data-api` (opt-in): the RDS Data API over HTTPS, from a Lambda outside any VPC (ADR-0002, addendum
+ *   2026-11-16). Its three variables replace DATABASE_URL, and its module is imported only when chosen.
  */
-const DATABASE_DRIVERS = ['pg', 'data-api'] as const
-type DatabaseDriver = (typeof DATABASE_DRIVERS)[number]
+const DATABASE_TRANSPORTS = ['pg', 'data-api'] as const
+type DatabaseTransport = (typeof DATABASE_TRANSPORTS)[number]
 
-const DATABASE_ENV: Record<DatabaseDriver, Record<string, string>> = {
+const DATABASE_ENV: Record<DatabaseTransport, Record<string, string>> = {
     pg: { DATABASE_URL: 'cloud-accounts' },
     'data-api': { DATABASE_CLUSTER_ARN: 'data-api', DATABASE_SECRET_ARN: 'data-api', DATABASE_NAME: 'data-api' },
 }
 
-function databaseDriver(): DatabaseDriver {
-    const value = process.env.DATABASE_DRIVER ?? 'pg'
-    if (!(DATABASE_DRIVERS as readonly string[]).includes(value)) {
-        throw new Error(`DATABASE_DRIVER must be one of ${DATABASE_DRIVERS.join(', ')} (got "${value}")`)
+function databaseTransport(): DatabaseTransport {
+    const value = process.env.DATABASE_TRANSPORT ?? 'pg'
+    if (!(DATABASE_TRANSPORTS as readonly string[]).includes(value)) {
+        throw new Error(`DATABASE_TRANSPORT must be one of ${DATABASE_TRANSPORTS.join(', ')} (got "${value}")`)
     }
-    return value as DatabaseDriver
+    return value as DatabaseTransport
 }
 
 export function assertRealEnv(): void {
-    const required = { ...REQUIRED_ENV, ...DATABASE_ENV[databaseDriver()] }
+    const required = { ...REQUIRED_ENV, ...DATABASE_ENV[databaseTransport()] }
     const missing = Object.keys(required).filter((name) => !process.env[name])
     if (missing.length > 0) {
         const rows = [...new Set(missing.map((name) => required[name]))]
@@ -78,20 +80,22 @@ export function assertRealEnv(): void {
     }
 }
 
-export function createRealPorts(): RealPorts {
+export async function createRealPorts(): Promise<RealPorts> {
     assertRealEnv()
     const env = process.env as Record<string, string>
+    // The Data API transport is a dynamic import, so a `pg` deployment never loads the RDS Data SDK.
+    const db =
+        databaseTransport() === 'data-api'
+            ? (await import('./db-data-api')).createRealDataApiDb({
+                  resourceArn: env.DATABASE_CLUSTER_ARN,
+                  secretArn: env.DATABASE_SECRET_ARN,
+                  database: env.DATABASE_NAME,
+                  region: env.AWS_REGION,
+              })
+            : createRealDb(env.DATABASE_URL)
     return {
         auth: realAuth,
-        db:
-            databaseDriver() === 'data-api'
-                ? createRealDataApiDb({
-                      resourceArn: env.DATABASE_CLUSTER_ARN,
-                      secretArn: env.DATABASE_SECRET_ARN,
-                      database: env.DATABASE_NAME,
-                      region: env.AWS_REGION,
-                  })
-                : createRealDb(env.DATABASE_URL),
+        db,
         storage: createRealStorage(env.STORAGE_BUCKET, env.AWS_REGION),
         llm: createRealLlm(env.ANTHROPIC_API_KEY),
         email: createRealEmail(env.MAILGUN_DOMAIN, env.MAILGUN_API_KEY, env.EMAIL_FROM),

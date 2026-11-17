@@ -1408,7 +1408,7 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
   what fails it, so read a sudden size failure as a server import first (ADR-0012 says the same about seam
   registries).
 
-## The RDS Data API driver (2026-11-16, `feat/rds-data-api-dialect`)
+## The RDS Data API transport (2026-11-16, `feat/rds-data-api-dialect`)
 
 - **An untyped string parameter is `varchar` on the real Data API.** So `uuid_column = :id` fails on
   Aurora with "operator does not exist: uuid = character varying" unless the SQL casts or the parameter
@@ -1433,3 +1433,8 @@ v.strictObject(...) }` keeps valibot in every bundle that imports the module for
 - **A rollback that finds its transaction gone has already happened.** The Data API rolls back on its
   own after three idle minutes. Treating `TransactionNotFoundException` on rollback as success keeps the
   error that caused the rollback from being replaced by one about the rollback.
+- **A hoisted `vi.mock` factory runs once per file, not once per `vi.resetModules()`.** A test that
+  counts module loads with a counter in the factory sees only the FIRST load in the file. Every later
+  "this never loads" assertion then passes vacuously, depending on test order. Register counting mocks
+  with `vi.doMock` in `beforeEach`, after the reset, and prove it by mutation in both test orders (as
+  `packages/keel/src/adapters/real/index.test.ts` was).

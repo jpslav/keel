@@ -71,19 +71,35 @@ rejected by `WITH CHECK`; and scoped writes visible. Two of its findings are loa
    mean zero rows rather than an error. Getting that backwards turns a fail-closed design into a
    500-on-every-request design, and only a real transaction sequence reveals it.
 
-## Addendum (2026-11-16): a second real driver, the RDS Data API
+## Addendum (2026-11-16): an opt-in second transport, the RDS Data API
 
-Production can now reach Aurora two ways, chosen per deployment by `DATABASE_DRIVER`: `pg` (the default,
-node-postgres over a socket from a Lambda inside the database's VPC) or `data-api` (the Amazon RDS Data
-API over HTTPS, from a Lambda outside any VPC and with no NAT gateway). Both are behind the same `db` port
-and run the same migrations, `withTenant` and RLS policies. The trigger was an adopter's decision to run
-its console Lambda outside any VPC. Reaching Postgres from such a Lambda is a general shape of this
-template's hosting (ADR-0001), not one app's, so the driver is keel's:
-`packages/keel/src/adapters/real/rds-data-dialect.ts`, built through `createRealDataApiDb`.
+Production can now reach Aurora two ways, chosen per deployment by `DATABASE_TRANSPORT`. Each app records
+the choice as `params.database.transport` in its `config/params.ts`, and the deployment sets the variable
+from it.
 
-**Tenant context through the Data API — what is known, and how.** `runWithTenant` sets `SET LOCAL ROLE
-app_user` and `set_config('app.current_tenant', $1, true)`, then runs the caller's queries. Through the Data
-API those are separate `ExecuteStatement` calls sharing one `transactionId`.
+- **`pg`, the default:** node-postgres over a socket, from a Lambda inside the database's VPC.
+- **`data-api`, opt-in:** the Amazon RDS Data API over HTTPS, from a Lambda outside any VPC and with no
+  NAT gateway.
+
+Both sit behind the same `db` port and run the same migrations, the same `withTenant` and the same RLS
+policies. The trigger was an adopter running its console Lambda outside any VPC.
+
+**JP's decision (2026-11-16): the Data API transport lives in keel, as an opt-in.** The reason: tenant
+isolation through any transport is keel's to prove, so the proof belongs beside the policies it relies
+on, not in an adopter's fork. Being opt-in means three things:
+
+- **`pg` stays the default.** An unknown transport fails rather than falling back to it.
+- **The transport is loaded only when chosen.** `packages/keel/src/adapters/real/db-data-api.ts` is
+  reached only by dynamic import, from `createRealPorts` and the migrator. So a `pg` deployment never
+  loads the RDS Data SDK, which `packages/keel/src/adapters/real/index.test.ts` proves by watching the
+  module loads.
+- **Dev never reaches it.** `pnpm dev` and the static demo never import the real adapters at all.
+
+The SDK sits inside the vendor fence.
+
+**Tenant context through the Data API — what is known, and how.** `runWithTenant` sets the role and the
+tenant transaction-locally, then runs the caller's queries. Through the Data API every statement is a
+separate `ExecuteStatement` call, all sharing one `transactionId`.
 
 - **AWS documents** that the Data API pools connections and resets each one with `DISCARD ALL` before
   reusing it (Aurora User Guide, "Session management with Amazon RDS Data API"). So nothing session-level
@@ -96,8 +112,12 @@ API those are separate `ExecuteStatement` calls sharing one `transactionId`.
   until COMMIT or ROLLBACK, and `DISCARD ALL` cannot run inside a transaction block.
 
 So the settings `withTenant` relies on persist across every statement of one Data API transaction, and
-are gone after it. That is documented and inferred, **not yet observed on a live cluster**. The cutover
-row `data-api` is the exact procedure that proves it.
+are gone after it. That is documented and inferred, **not yet observed on a live cluster**.
+`docs/runbooks/data-api.md` is the exact procedure that proves it; it closes the `data-api` cutover row.
+
+Because each statement is a round trip, `withTenant` now sets the role and the tenant in ONE statement:
+`set_config('role', 'app_user', true)`, which is `SET LOCAL ROLE`, beside the tenant's `set_config`.
+ADR-0004's addendum of the same date records that change. Setup is one round trip on every transport.
 
 **The dialect is hand-written, as the pglite one is.** The community `kysely-data-api` (MIT, last
 published March 2025) declares `kysely ^0.27` against keel's 0.29. More decisively, it sends parameters
@@ -145,7 +165,7 @@ and it is deliberately strict:
 - errors carry no SQLSTATE.
 
 Two negative controls prove that strictness, so the dialect's casts are what make the proofs pass. A
-battery reads every column type keel uses through both drivers and requires identical rows. Nothing in
+battery reads every column type keel uses through both transports and requires identical rows. Nothing in
 `pnpm dev` changes: dev, the e2e suite and the static demo still run on pglite fakes. The emulator is a
 contract-test instrument, not a fake, in the sense of `docs/development-approach.md`'s "Fakes over
 emulators".
