@@ -404,7 +404,7 @@ second tenant from the proof runner, not from an app's seed, so an app deployed 
 seed one and keep the guarantee for its own tables (ADR [0004](adr/0004-tenancy-rls.md), addendum of
 2026-11-16); what it gives up is seeing isolation by using the app. Multi-tenant shaped, single-tenant
 operated. See ADR [0004](adr/0004-tenancy-rls.md); the one enforced path is `db.withTenant()`
-(raw `getDb()` in request paths is lint-banned).
+(raw `getDb()` is lint-banned across `apps/*/src`, keel's screens and keel's fixture, deny-by-default).
 
 **Teams — the in-tenant layer, one door in.** A tenant stays the ambient, separately-branded site — never
 user-switchable in product UI. Inside it, an org (product copy: "team") is the collaboration grouping a
