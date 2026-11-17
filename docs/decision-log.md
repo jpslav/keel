@@ -2678,8 +2678,8 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
   that it not be overly defined, so the letters have no official expansion, in the docs or anywhere else. The
   names: `sssb` (the framework), `create-sssb`, `@sssb/tools` (its CLI is `sssb`), `@sssb/eslint-plugin`,
   `@sssb/cdk` (the `SssbApp` construct), the seam `@sssb/app-config` (a local link only, never published), and
-  the repository `safeinsights/sssb`. Checked on 2026-11-17: those names are unpublished, the registry has no
-  `sssb` organization, and npm's search finds nothing similar. On GitHub a few small, unrelated repositories use
+  the repository `safeinsights/sssb`. Checked on 2026-11-17: those names are unpublished, the registry had no `sssb` organization until
+  `safeinsights-bot` created it that day, and npm's search finds nothing similar. On GitHub a few small, unrelated repositories use
   the letters, some of them watchers for SSSB, the Stockholm student-housing foundation: a different field, and
   a low risk.
 - **D3 revised, the same day: copyright assigned to Rice University.** JP transfers keel's copyright to SafeInsights,
@@ -2692,5 +2692,6 @@ keel manager session, which relayed them to the session writing the ADR. The ADR
   starts as a copy of the full git history, so every commit and author is kept. The rename is its first PR. PR
   numbers restart there, so the doctrine docs qualify old references (`jpslav/keel#54`), and each dated record
   gets an appended entry saying which repository its earlier numbers refer to. Rewriting the records' numbers
-  was the alternative, and it was rejected because the records are append-only. The npm organization is created
-  by the SafeInsights npm account, with JP as co-owner. In-flight `jpslav/keel` PRs land before the copy.
+  was the alternative, and it was rejected because the records are append-only. The npm organization `sssb` was created by the `safeinsights-bot` npm account, its sole owner for now, since JP
+  has no personal npm account (CanopyCMS is set up the same way). That single owner is recorded as a known risk,
+  and adding a second, human owner is an account action for when a maintainer has an npm account. In-flight `jpslav/keel` PRs land before the copy.
