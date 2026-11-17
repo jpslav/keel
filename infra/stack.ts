@@ -7,6 +7,16 @@ import { addTags, TAGS } from './lib/tags'
 const { aws_budgets, aws_cloudfront, aws_cloudfront_origins, aws_ec2, aws_lambda, aws_lambda_nodejs, aws_rds, aws_s3 } =
     cdk
 
+/**
+ * The tsconfig every bundled Lambda is built with: the APP's. Its `@app-config/*` is what points the
+ * framework's migration registry at the app's own migrations. The root tsconfig points that alias at
+ * keel's test fixture (packages/keel/test-fixture), which is right for keel's own tests and wrong for a
+ * deploy: bundled with it, the migrator shipped the fixture's migrations and none of the app's.
+ * ./check-shapes.ts reads the bundles a synth produces and fails on that. `pnpm init-app` repoints the
+ * path along with the stack's other app imports.
+ */
+export const APP_TSCONFIG = path.join(__dirname, '../apps/showcase/tsconfig.json')
+
 const ENVIRONMENTS = ['Staging', 'Production'] as const
 type Environment = (typeof ENVIRONMENTS)[number]
 
@@ -202,7 +212,7 @@ export class AppStack extends cdk.Stack {
             // variables as the server (the handler follows DATABASE_TRANSPORT too).
             environment: dataApi ? databaseEnv : { DATABASE_TRANSPORT: 'pg', DB_SECRET_ARN: db.secret!.secretArn },
             bundling: {
-                tsconfig: path.join(__dirname, '../tsconfig.json'),
+                tsconfig: APP_TSCONFIG,
                 format: aws_lambda_nodejs.OutputFormat.ESM,
                 // pg's optional native/cloudflare shims must stay external or esbuild chokes
                 externalModules: ['@aws-sdk/*', 'pg-native', 'cloudflare:sockets'],

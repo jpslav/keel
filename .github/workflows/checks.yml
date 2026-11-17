@@ -261,6 +261,12 @@ jobs:
               env:
                   NEXT_TELEMETRY_DISABLED: '1'
                   E2E_BUILD: '1'
+            # `pnpm verify` does not synth the infra. After init-app's rewrites the stack must still
+            # bundle the migrator with the surviving app's tsconfig, and the shape check reads that bundle
+            # for the app's migrations (infra/check-shapes.ts).
+            - name: pnpm --filter infra synth
+              run: pnpm --filter infra synth
+              working-directory: ${{ env.PROBE_DIR }}
             - uses: actions/upload-artifact@v7
               if: failure()
               with:
