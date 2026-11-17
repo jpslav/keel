@@ -18,8 +18,8 @@ import { runWithTenant } from './with-tenant'
  * role "app_user"`. No gate could see it, because every gate was a superuser.
  *
  * How it is built, so another transport can run it. The pass only ever reaches the server through
- * `connect`: the default contract run hands it pooled `pg` connections, and the Data API transport
- * (#46) can hand it its own. A transport that needs a different admin handle supplies that too.
+ * `admin` and `connect`: the default contract run hands it pooled `pg` connections, and a Data API
+ * transport (#46) could hand it its own. It does not yet.
  */
 
 /** A login to one database. */

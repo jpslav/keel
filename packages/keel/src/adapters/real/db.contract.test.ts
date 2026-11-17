@@ -78,9 +78,10 @@ function connect(login: { database: string; user: string; password: string }) {
 }
 
 describe('keel fixture seam on real Postgres, through the real adapter (contract)', () => {
-    // FIRST, deliberately (vitest runs a file's tests in order): on the fresh embedded server a local run
-    // starts, nothing has created `app_user` yet, so the owner creates it itself. On a server another pass
-    // already used (CI's shared service), the pass takes the measured path instead (owner-pass.ts).
+    // FIRST, deliberately (vitest runs a file's tests in order): on a fresh server, which a local run's
+    // embedded one always is and CI's service is when this file runs before the app's, nothing has created
+    // `app_user` yet, so the owner creates it itself. The next test runs the pass again on the same server,
+    // which takes the branch a reused server takes (owner-pass.ts).
     // The pass every other one cannot be: a NON-SUPERUSER owner, as Aurora's master user is, runs the
     // migrations and makes every role switch in the proofs (packages/keel/src/db/owner-pass.ts).
     test('a non-superuser owner migrates, and switches to app_user inside withTenant', async () => {
@@ -91,6 +92,37 @@ describe('keel fixture seam on real Postgres, through the real adapter (contract
             password: decodeURIComponent(server.password),
         })
         try {
+            await runOwnerPass(
+                {
+                    admin,
+                    superuser: {
+                        user: decodeURIComponent(server.username),
+                        password: decodeURIComponent(server.password),
+                    },
+                    maintenanceDatabase: server.pathname.slice(1) || 'postgres',
+                    connect,
+                },
+                expect,
+            )
+        } finally {
+            await admin.destroy()
+        }
+    })
+
+    // ...and again, now that the first owner's migration has created `app_user`: the branch a reused
+    // server takes, where the owner is granted the creator's measured membership instead.
+    test('a non-superuser owner migrates where app_user already exists, and switches too', async () => {
+        const server = new URL(serverUrl)
+        const admin = connect({
+            database: server.pathname.slice(1) || 'postgres',
+            user: decodeURIComponent(server.username),
+            password: decodeURIComponent(server.password),
+        })
+        try {
+            const existing = await sql<{
+                n: number
+            }>`SELECT count(*)::int AS n FROM pg_roles WHERE rolname = 'app_user'`.execute(admin)
+            expect(existing.rows[0]!.n).toBe(1)
             await runOwnerPass(
                 {
                     admin,
@@ -170,7 +202,8 @@ describe('migration 0015 on real Postgres', () => {
             await roleDb.transaction().execute(async (trx) => {
                 await sql`SET LOCAL ROLE app_user`.execute(trx)
             })
-            // Run again: nothing changes.
+            // Run again: the memberships stay as they are. (The superuser case below is what pins the guard:
+            // a re-run here would take the self-grant branch and change nothing even without it.)
             await grantAppUser(roleDb)
             expect(await membershipsOf(admin, role)).toEqual(rows)
         })
@@ -197,20 +230,30 @@ describe('migration 0015 on real Postgres', () => {
     })
 
     test('a superuser is granted nothing: it can already switch', async () => {
+        // A FRESH superuser, not `postgres`: an earlier test in this file has already migrated as
+        // `postgres`, so whatever 0015 would grant it would already be there to compare against.
         const server = new URL(serverUrl)
         const admin = connect({
             user: decodeURIComponent(server.username),
             password: decodeURIComponent(server.password),
             database: DATABASE,
         })
+        const superRole = `keel_0015_su_${Date.now()}`
+        const password = randomUUID()
         try {
             await sql`DO $$ BEGIN CREATE ROLE app_user NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`.execute(
                 admin,
             )
-            const before = await membershipsOf(admin, decodeURIComponent(server.username))
-            await grantAppUser(admin)
-            expect(await membershipsOf(admin, decodeURIComponent(server.username))).toEqual(before)
+            await sql`CREATE ROLE ${sql.id(superRole)} LOGIN SUPERUSER PASSWORD ${sql.lit(password)}`.execute(admin)
+            const superDb = connect({ user: superRole, password, database: DATABASE })
+            try {
+                await grantAppUser(superDb)
+            } finally {
+                await superDb.destroy()
+            }
+            expect(await membershipsOf(admin, superRole)).toEqual([])
         } finally {
+            await sql`DROP ROLE IF EXISTS ${sql.id(superRole)}`.execute(admin).catch(() => undefined)
             await admin.destroy()
         }
     })
