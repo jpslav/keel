@@ -815,9 +815,8 @@ function reassignedSymbols(sf: ts.SourceFile, checker: ts.TypeChecker): Set<ts.S
                     if (symbol) out.add(symbol)
                 } else if (ts.isSpreadAssignment(property)) mark(property.expression)
             }
-        } else if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-            mark(e.left) // a default inside a destructuring target: `[POST = x] = …`
         }
+        // A default inside a target (`[POST = x] = …`) is an assignment expression itself; the walk marks it.
     }
     const walk = (node: ts.Node): void => {
         if (

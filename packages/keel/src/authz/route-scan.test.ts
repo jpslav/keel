@@ -1180,6 +1180,7 @@ describe('the facts a gate is judged on', () => {
         ).toBe(true)
         // Not first, not exiting, not this condition.
         expect(gate('const x = 1\nif (!isSimulated) return new Response(x)')).toBe(false)
+        expect(gate('await db.wipe()\nif (!isSimulated) return new Response(null)')).toBe(false)
         expect(gate('if (!isSimulated) console.log(1)')).toBe(false)
         expect(gate('if (isSimulated === false) return new Response(null)')).toBe(false)
         expect(gate('if (!other) return new Response(null)', `${SIM}import { other } from 'k'\n`)).toBe(false)
@@ -1265,6 +1266,10 @@ describe('the facts a gate is judged on', () => {
         expect(gate('if (!isSimulated) return Response.json(o.x)', `${SIM}const o = { x: 1 }\n`)).toBe(false)
         expect(gate('if (!isSimulated) return new Response(`a${1}`)')).toBe(false)
         expect(gate('if (!isSimulated) return Response.json(!1)')).toBe(false)
+        // A sign on a name runs its valueOf.
+        expect(
+            gate('if (!isSimulated) return Response.json({ n: -o })', `${SIM}const o = { valueOf: () => 1 }\n`),
+        ).toBe(false)
         // Literals of every kind, nested, are fine; so is JSON.stringify of one.
         expect(
             gate(
