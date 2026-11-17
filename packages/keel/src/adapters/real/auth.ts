@@ -1,7 +1,16 @@
+import { isClerkAPIResponseError } from '@clerk/nextjs/errors'
 import { auth, clerkClient, currentUser } from '@clerk/nextjs/server'
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../../core/locale'
-import { isRole, type Role } from '../../core/roles'
-import type { AuthPort, AuthUser, InviteInput, Membership, OrgRef, ProfileUpdate } from '../../ports/auth'
+import { isRestricted, isRole, type Role } from '../../core/roles'
+import type {
+    AuthPort,
+    AuthUser,
+    InviteInput,
+    Membership,
+    MemberStanding,
+    OrgRef,
+    ProfileUpdate,
+} from '../../ports/auth'
 import { AuthRequiredError, ForbiddenError } from '../../ports/errors'
 
 /**
@@ -53,16 +62,17 @@ export const realAuth: AuthPort = {
             memberships.data.find((m) => (m.organization.slug ?? m.organization.id) === currentOrgSlug) ??
             memberships.data[0]
 
+        const role = roleFrom(active?.publicMetadata, 'guest')
         return {
             id: userId,
             name: user.fullName ?? user.primaryEmailAddress?.emailAddress ?? userId,
             email: user.primaryEmailAddress?.emailAddress ?? '',
-            role: roleFrom(active?.publicMetadata, 'guest'),
+            role,
             locale,
             // Ambient site claim — never the active org's business.
             tenantSlug: metadata.tenantSlug ?? '',
             orgSlug: active ? (active.organization.slug ?? active.organization.id) : '',
-            restricted: metadata.restricted ?? false,
+            restricted: isRestricted(metadata.restricted, role),
         }
     },
 
@@ -106,6 +116,36 @@ export const realAuth: AuthPort = {
         const user = await this.getCurrentUser()
         if (!user) throw new AuthRequiredError()
         return user
+    },
+
+    async getMember(orgSlug: string, userId: string): Promise<MemberStanding | null> {
+        // The two facts getCurrentUser reads, for a user who is not the caller: the role from the org
+        // membership, and `restricted` from the user's metadata and that role (isRestricted). The
+        // membership is looked up on the ORG, filtered to this user, so a person in many orgs is never cut
+        // off by a page size. No such org, or no membership, means no standing: null, as the port says,
+        // never a 404 thrown through to the caller.
+        const client = await clerkClient()
+        let memberships
+        try {
+            const organizationId = await organizationIdForSlug(orgSlug)
+            memberships = await client.organizations.getOrganizationMembershipList({ organizationId, userId: [userId] })
+        } catch (error) {
+            if (isClerkAPIResponseError(error) && error.status === 404) return null
+            throw error
+        }
+        // Matched on the user, not taken as the first row: if the filter were ever ignored, the first row
+        // would be someone else's membership, and their role.
+        const membership = memberships.data.find((m) => m.publicUserData?.userId === userId)
+        if (!membership) return null
+        const user = await client.users.getUser(userId)
+        // A BANNED user has no standing: banning ends their sessions, but their memberships survive it,
+        // so without this check their tokens and their email would keep the role. `locked` is
+        // deliberately NOT checked: anyone can lock an account by failing its sign-ins, and treating that
+        // as "no standing" would hand an attacker a way to kill a victim's tokens.
+        if (user.banned) return null
+        const metadata = (user.publicMetadata ?? {}) as AppPublicMetadata
+        const role = roleFrom(membership.publicMetadata, 'guest')
+        return { role, restricted: isRestricted(metadata.restricted, role) }
     },
 
     async listMembers(orgSlug: string): Promise<Membership[]> {

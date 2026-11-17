@@ -76,6 +76,7 @@ describe('mintServiceToken', () => {
         )
         expect(identity).toEqual({
             kind: 'org-service',
+            keyId: expect.any(String),
             tenantId: minted.tenantId,
             tenantSlug: 'lakeside',
             orgId: minted.orgId,

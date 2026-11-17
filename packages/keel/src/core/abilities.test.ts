@@ -1,19 +1,45 @@
 import { describe, expect, test } from 'vitest'
-import { type AbilityActor, defineAbilitiesFor } from './abilities'
+import {
+    type AbilityActor,
+    type Credential,
+    type MachineActor,
+    type MachineCredentialKind,
+    type PersonCredentialKind,
+    defineAbilitiesFor,
+    principalIdOf,
+} from './abilities'
 import type { Role } from './roles'
 
 // Low-entropy, readable fixture ids only (gitleaks): no hex runs, no UUIDs.
 const ORG_A = 'org-a'
 const ORG_B = 'org-b'
 
-function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
+function machine(kind: MachineCredentialKind = 'service-key', overrides: Partial<MachineActor> = {}): MachineActor {
     return {
+        kind: 'machine',
+        credential: { kind, id: 'key-1' },
+        principalId: `${kind}:wharf`,
+        activeOrgId: ORG_A,
+        ...overrides,
+    }
+}
+
+const ACTIONS = ['create', 'read', 'update', 'delete', 'manage'] as const
+
+/**
+ * A person actor; a SESSION unless the test says otherwise, since that is what the person rules assume.
+ * It takes any fields and CASTS, so a test can also build the shapes the type forbids (a possibly-true
+ * `manageAll` with no session credential) and prove the run time refuses them as well.
+ */
+function actor(overrides: { role: Role; [field: string]: unknown }): AbilityActor {
+    return {
+        credential: { kind: 'session', id: null },
         userId: 'user-1',
         restricted: false,
         activeOrgId: ORG_A,
         manageAll: false,
         ...overrides,
-    }
+    } as AbilityActor
 }
 
 // The FRAMEWORK base subjects. An app's own subjects and their rules are
@@ -165,5 +191,255 @@ describe('defineAbilitiesFor', () => {
         const ability = defineAbilitiesFor(actor({ role: 'restricted', restricted: true }))
         expect(ability.cannot('create', { type: 'Job', orgId: ORG_A })).toBe(true)
         expect(ability.cannot('read', { type: 'Job', orgId: ORG_A })).toBe(false)
+    })
+
+    test('a value that is not a well-formed person is denied everything, rather than judged as one', () => {
+        // A machine that lost its `kind` (a cast, a value rehydrated from storage): judged as a person it
+        // had no role and an undefined `restricted`, and `!restricted` let it update dockets and create jobs.
+        const lostKind = {
+            credential: { kind: 'service-key', id: 'key-1' },
+            principalId: 'service-key:wharf',
+            activeOrgId: ORG_A,
+        } as unknown as AbilityActor
+        const asLost = defineAbilitiesFor(lostKind)
+        expect(asLost.can('update', { type: 'Docket', orgId: ORG_A })).toBe(false)
+        expect(asLost.can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
+        // ...and so is a person with a role the ladder does not have, or a `restricted` that is not a boolean.
+        // `0` and not a truthy string: a truthy `restricted` is refused by `!restricted` anyway, so only a
+        // FALSY non-boolean shows the shape check itself is what refuses it.
+        for (const malformed of [actor({ role: 'owner' as Role }), actor({ role: 'member', restricted: 0 })]) {
+            expect(defineAbilitiesFor(malformed).can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
+        }
+        expect(defineAbilitiesFor(actor({ role: 'member' })).can('create', { type: 'Job', orgId: ORG_A })).toBe(true)
+    })
+
+    test('an actor whose fields live on a prototype is judged by those fields, not by an empty copy of it', () => {
+        // A restricted admin, three ways. The plain object is refused authoring; the same person as a
+        // class with getters, or built with Object.create, must be refused too. A spread copies own
+        // enumerable fields only, so judging `{ ...actor }` saw neither `restricted` nor `userId`.
+        const fields = {
+            credential: { kind: 'session', id: null },
+            userId: 'user-1',
+            role: 'admin',
+            restricted: true,
+            activeOrgId: ORG_A,
+            manageAll: false,
+        } as const
+        class Getters {
+            get credential() {
+                return fields.credential
+            }
+            get userId() {
+                return fields.userId
+            }
+            get role() {
+                return fields.role
+            }
+            get restricted() {
+                return fields.restricted
+            }
+            get activeOrgId() {
+                return fields.activeOrgId
+            }
+            get manageAll() {
+                return fields.manageAll
+            }
+        }
+        const shapes: [string, AbilityActor][] = [
+            ['plain', { ...fields }],
+            ['class with getters', new Getters()],
+            ['Object.create', Object.create(fields) as AbilityActor],
+        ]
+        for (const [name, shape] of shapes) {
+            const ability = defineAbilitiesFor(shape)
+            expect(ability.can('create', { type: 'Job', orgId: ORG_A }), `${name}: create Job`).toBe(false)
+            expect(ability.can('create', { type: 'Docket', orgId: ORG_A }), `${name}: create Docket`).toBe(false)
+            // Self-only, with no ownerId: an undefined owner must not equal an unread userId.
+            expect(ability.can('update', { type: 'User' }), `${name}: update User, no owner`).toBe(false)
+            // ...and each is still the person it is: reading its own team's jobs is allowed.
+            expect(ability.can('read', { type: 'Job', orgId: ORG_A }), `${name}: read Job`).toBe(true)
+        }
+    })
+
+    // A PERSON who came through a credential other than a session (an inbound email, a personal token):
+    // the same rules as a session, except that the staff superpower is a session's alone, and
+    // administration takes a session unless the app widens it.
+    describe('a person with a non-session credential', () => {
+        const badge = { kind: 'fixture-badge', id: 'badge-1' } as const
+
+        test('is judged by the same person rules as a session', () => {
+            const ability = defineAbilitiesFor(actor({ role: 'member', credential: badge }))
+            expect(ability.can('create', { type: 'Job', orgId: ORG_A })).toBe(true)
+            expect(ability.can('create', { type: 'Membership', orgId: ORG_A })).toBe(false)
+            expect(ability.can('update', { type: 'User', ownerId: 'user-1' })).toBe(true)
+        })
+
+        test("never wields manageAll, whatever the actor says: it is a STATED session's power, enforced here", () => {
+            for (const credential of [badge, { kind: 'inbound-email', id: 'email-1' }] as const) {
+                const ability = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential }))
+                expect(ability.can('manage', { type: 'Membership', orgId: ORG_B }), credential.kind).toBe(false)
+                expect(ability.can('update', { type: 'User', ownerId: 'user-2' }), credential.kind).toBe(false)
+            }
+            // A literal that states NO credential is not read as a session either.
+            const unstated = defineAbilitiesFor(actor({ role: 'admin', manageAll: true, credential: undefined }))
+            expect(unstated.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(false)
+            // The control: the same actor stating a session credential does wield it.
+            const session = defineAbilitiesFor(
+                actor({ role: 'admin', manageAll: true, credential: { kind: 'session', id: null } }),
+            )
+            expect(session.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(true)
+        })
+
+        test('administration takes a session, except where the app widened it to this kind', () => {
+            // Fixture: `nonSessionAdministration = { WebhookEndpoint: ['fixture-badge'] }`.
+            const admin = (credential?: Credential<PersonCredentialKind>) =>
+                defineAbilitiesFor(actor({ role: 'admin', credential }))
+            const session = admin({ kind: 'session', id: null })
+            const viaBadge = admin(badge)
+            const viaEmail = admin({ kind: 'inbound-email', id: 'email-1' })
+            const unstated = admin(undefined)
+            for (const [type, action] of [
+                ['Membership', 'create'],
+                ['Membership', 'manage'],
+                ['Org', 'update'],
+                ['WebhookEndpoint', 'create'],
+            ] as const) {
+                expect(session.can(action, { type, orgId: ORG_A }), `session ${action} ${type}`).toBe(true)
+                expect(viaEmail.can(action, { type, orgId: ORG_A }), `email ${action} ${type}`).toBe(false)
+                expect(unstated.can(action, { type, orgId: ORG_A }), `unstated ${action} ${type}`).toBe(false)
+                // The widened subject passes for the badge, and only that one.
+                expect(viaBadge.can(action, { type, orgId: ORG_A }), `badge ${action} ${type}`).toBe(
+                    type === 'WebhookEndpoint',
+                )
+            }
+            // Widening reaches the subject's OWN rule, it does not replace it: a badge-holding member is
+            // still no org manager.
+            expect(
+                defineAbilitiesFor(actor({ role: 'member', credential: badge })).can('create', {
+                    type: 'WebhookEndpoint',
+                    orgId: ORG_A,
+                }),
+            ).toBe(false)
+            // Reads are not administration.
+            expect(viaEmail.can('read', { type: 'Membership', orgId: ORG_A })).toBe(true)
+        })
+
+        test('accepting terms takes a session: a legal act a person makes in a browser', () => {
+            const own = { type: 'AgreementAcceptance', ownerId: 'user-1' } as const
+            const as = (credential?: Credential<PersonCredentialKind>) =>
+                defineAbilitiesFor(actor({ role: 'member', credential }))
+            expect(as({ kind: 'session', id: null }).can('create', own)).toBe(true)
+            expect(as(badge).can('create', own)).toBe(false)
+            expect(as({ kind: 'inbound-email', id: 'email-1' }).can('create', own)).toBe(false)
+            expect(as(undefined).can('create', own)).toBe(false)
+            // Reading one's own acceptance is not the act.
+            expect(as(badge).can('read', own)).toBe(true)
+        })
+
+        test("the app's rules see the credential kind, which is where narrowing by kind lives", () => {
+            // The fixture's Docket rule: delete takes a session; a badge may file and edit, not remove.
+            const viaBadge = defineAbilitiesFor(actor({ role: 'member', credential: badge }))
+            const viaSession = defineAbilitiesFor(actor({ role: 'member', credential: { kind: 'session', id: null } }))
+            expect(viaBadge.can('create', { type: 'Docket', orgId: ORG_A })).toBe(true)
+            expect(viaBadge.can('delete', { type: 'Docket', orgId: ORG_A })).toBe(false)
+            expect(viaSession.can('delete', { type: 'Docket', orgId: ORG_A })).toBe(true)
+        })
+    })
+
+    // MACHINE actors: judged by a separate, deny-by-default table — the framework's for base subjects,
+    // the seam's appMachineAbilityRules for the app's own. Under the fixture seam that grants exactly
+    // one thing: a `fixture-intake` machine may create a Docket in its own org.
+    describe('machine actors', () => {
+        test("a service-key machine may read and update (report status on) its own org's jobs, nothing more", () => {
+            const ability = defineAbilitiesFor(machine())
+            expect(ability.can('read', { type: 'Job', orgId: ORG_A })).toBe(true)
+            expect(ability.can('update', { type: 'Job', orgId: ORG_A })).toBe(true)
+            for (const action of ['create', 'delete', 'manage'] as const) {
+                expect(ability.can(action, { type: 'Job', orgId: ORG_A }), action).toBe(false)
+            }
+        })
+
+        test("a service-key machine reaches no other org's job, and no org-less one", () => {
+            const ability = defineAbilitiesFor(machine())
+            expect(ability.can('update', { type: 'Job', orgId: ORG_B })).toBe(false)
+            expect(ability.can('read', { type: 'Job', orgId: ORG_B })).toBe(false)
+            expect(ability.can('update', { type: 'Job', orgId: null })).toBe(false)
+        })
+
+        test("the job grant is keel's service keys' alone: an app's machine gets no job power", () => {
+            const ability = defineAbilitiesFor(machine('fixture-intake'))
+            for (const action of ACTIONS) {
+                expect(ability.can(action, { type: 'Job', orgId: ORG_A }), action).toBe(false)
+            }
+        })
+
+        test('every other base subject is denied every action, even in its own org', () => {
+            const types = [
+                'Membership',
+                'Org',
+                'User',
+                'JobSchedule',
+                'WebhookEndpoint',
+                'WebhookDelivery',
+                'InboundEmail',
+                'Notification',
+                'NotificationPref',
+                'AgreementAcceptance',
+            ] as const
+            for (const kind of ['service-key', 'fixture-intake'] as const) {
+                const ability = defineAbilitiesFor(machine(kind))
+                for (const type of types) {
+                    for (const action of ACTIONS) {
+                        expect(ability.can(action, { type, orgId: ORG_A }), `${kind} ${action} ${type}`).toBe(false)
+                    }
+                }
+            }
+        })
+
+        test('a machine has no self: a self-only subject owned by its own principal id is still denied', () => {
+            const robot = machine()
+            const ability = defineAbilitiesFor(robot)
+            for (const type of ['User', 'Notification', 'NotificationPref', 'AgreementAcceptance'] as const) {
+                for (const action of ACTIONS) {
+                    expect(ability.can(action, { type, ownerId: robot.principalId }), `${action} ${type}`).toBe(false)
+                }
+            }
+        })
+
+        test('the staff superpower cannot be smuggled onto a machine', () => {
+            // A MachineActor has no manageAll field, so only a cast can put one there; the machine table
+            // never reads it. The same grant on a PERSON allows everything (the manageAll suite above).
+            const smuggled = { ...machine(), manageAll: true, role: 'admin' } as MachineActor
+            const ability = defineAbilitiesFor(smuggled)
+            expect(ability.can('manage', { type: 'Membership', orgId: ORG_B })).toBe(false)
+            expect(ability.can('create', { type: 'Job', orgId: ORG_A })).toBe(false)
+        })
+
+        test("app subjects go to the seam's machine rules, never to the person rules", () => {
+            // The fixture's PERSON rule lets any non-restricted member update or delete a docket; its
+            // MACHINE rule lets only a `fixture-intake` machine create one. So each answer below shows
+            // which table was asked.
+            const intake = defineAbilitiesFor(machine('fixture-intake'))
+            expect(intake.can('create', { type: 'Docket', orgId: ORG_A })).toBe(true)
+            expect(intake.can('create', { type: 'Docket', orgId: ORG_B })).toBe(false)
+            for (const action of ['read', 'update', 'delete', 'manage'] as const) {
+                expect(intake.can(action, { type: 'Docket', orgId: ORG_A }), action).toBe(false)
+            }
+            const serviceKey = defineAbilitiesFor(machine())
+            expect(serviceKey.can('create', { type: 'Docket', orgId: ORG_A })).toBe(false)
+        })
+
+        test('cannot is the negation of can for a machine too', () => {
+            const ability = defineAbilitiesFor(machine())
+            expect(ability.cannot('update', { type: 'Job', orgId: ORG_A })).toBe(false)
+            expect(ability.cannot('create', { type: 'Job', orgId: ORG_A })).toBe(true)
+        })
+    })
+
+    test('principalIdOf records a person by user id and a machine by its kind-qualified id', () => {
+        expect(principalIdOf(actor({ role: 'member', userId: 'user-1' }))).toBe('user-1')
+        expect(principalIdOf(machine('fixture-intake', { principalId: 'fixture-intake:crane' }))).toBe(
+            'fixture-intake:crane',
+        )
     })
 })

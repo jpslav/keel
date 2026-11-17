@@ -2,6 +2,8 @@ import type { DbPort } from '../ports/db'
 
 /** One active (non-revoked) service key, joined to the org and tenant it authenticates a caller for. */
 export interface ActiveServiceKey {
+    /** The key's own row id: which key verified a call (its credential id on the actor). */
+    keyId: string
     publicKeyPem: string
     tenantId: string
     tenantSlug: string
@@ -27,6 +29,7 @@ export async function activeKeysForOrgSlug(db: DbPort, orgSlug: string): Promise
         .innerJoin('organizations', 'organizations.id', 'service_keys.org_id')
         .innerJoin('tenants', 'tenants.id', 'service_keys.tenant_id')
         .select([
+            'service_keys.id as key_id',
             'service_keys.public_key_pem as public_key_pem',
             'service_keys.tenant_id as tenant_id',
             'tenants.slug as tenant_slug',
@@ -37,6 +40,7 @@ export async function activeKeysForOrgSlug(db: DbPort, orgSlug: string): Promise
         .where('service_keys.revoked_at', 'is', null)
         .execute()
     return rows.map((r) => ({
+        keyId: r.key_id,
         publicKeyPem: r.public_key_pem,
         tenantId: r.tenant_id,
         tenantSlug: r.tenant_slug,

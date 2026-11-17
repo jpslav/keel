@@ -10,14 +10,20 @@ import type { Role } from 'keel/core/roles'
 const ORG_A = 'org-a'
 const ORG_B = 'org-b'
 
-function actor(overrides: Partial<AbilityActor> & { role: Role }): AbilityActor {
+/**
+ * A person actor; a SESSION unless the test says otherwise, since that is what the person rules assume.
+ * It takes any fields and CASTS, so a test can also build the shapes the type forbids (a possibly-true
+ * `manageAll` with no session credential) and prove the run time refuses them as well.
+ */
+function actor(overrides: { role: Role; [field: string]: unknown }): AbilityActor {
     return {
+        credential: { kind: 'session', id: null },
         userId: 'user-1',
         restricted: false,
         activeOrgId: ORG_A,
         manageAll: false,
         ...overrides,
-    }
+    } as AbilityActor
 }
 
 describe('app ability rules (via defineAbilitiesFor)', () => {
@@ -172,6 +178,34 @@ describe('app ability rules (via defineAbilitiesFor)', () => {
         test('manageAll short-circuits requests too', () => {
             const god = defineAbilitiesFor(actor({ role: 'restricted', restricted: true, manageAll: true }))
             expect(god.can('update', { type: 'Escalation', requesterOrgId: ORG_B, responderOrgId: 'org-c' })).toBe(true)
+        })
+    })
+
+    describe('machine actors (appMachineAbilityRules is the off switch here)', () => {
+        // The desk's one machine caller is a counterparty's service key. It may report status on its own
+        // team's jobs (the framework's machine table) and nothing in the app — not even in its own team,
+        // where any member could act.
+        const counterparty = {
+            kind: 'machine',
+            credential: { kind: 'service-key', id: 'key-frontline' },
+            principalId: 'service-key:frontline',
+            activeOrgId: ORG_A,
+        } as const
+
+        test('is denied every ticket, attachment and escalation action, in its own team', () => {
+            const ability = defineAbilitiesFor(counterparty)
+            for (const action of ['create', 'read', 'update', 'delete', 'manage'] as const) {
+                expect(ability.can(action, { type: 'Ticket', orgId: ORG_A }), `${action} Ticket`).toBe(false)
+                expect(ability.can(action, { type: 'Attachment', orgId: ORG_A }), `${action} Attachment`).toBe(false)
+                const escalation = { type: 'Escalation', requesterOrgId: ORG_A, responderOrgId: ORG_A } as const
+                expect(ability.can(action, escalation), `${action} Escalation`).toBe(false)
+            }
+        })
+
+        test("may report status on its own team's job, as the service API needs, and on no other team's", () => {
+            const ability = defineAbilitiesFor(counterparty)
+            expect(ability.can('update', { type: 'Job', orgId: ORG_A })).toBe(true)
+            expect(ability.can('update', { type: 'Job', orgId: ORG_B })).toBe(false)
         })
     })
 })

@@ -132,13 +132,12 @@ interface Exemption {
     mustMatch: RegExp
 }
 
+// No `service/` entry, deliberately. A service caller used to be exempt here as "org-scoped by
+// construction"; it is now a MACHINE actor (keel/core/abilities `MachineActor`) and its mutations call
+// authorize(...) like any other route, so the per-action check replaced the blanket one (ADR-0012
+// addendum, 2026-11-16). The fixture's service/jobs/route.ts is that machine route. What the old entry
+// ALSO guaranteed (that a service route verifies its caller) is kept, below.
 const EXEMPT_PREFIXES: Record<string, Exemption> = {
-    'service/': {
-        reason:
-            'service callers are org-scoped by construction (the verifying key row IS an org); gated by ' +
-            'withServiceCaller (ServiceIdentity — see the decision-log service-auth entry)',
-        mustMatch: /withServiceCaller\s*[(<]/,
-    },
     'webhooks/': {
         reason:
             'authenticated by a machine caller, not a user session — a shared webhook secret ' +
@@ -192,6 +191,34 @@ const EXEMPT_FILES: Record<string, Exemption> = {
             'authenticated by the server-signed HMAC upload-target fields (like the webhook secret), NOT a user ' +
             'session; the upload TARGET was already authorized by the app route that minted it',
         mustMatch: /if\s*\(\s*!isSimulated\s*\)/,
+    },
+}
+
+/**
+ * What the failure says to a route whose caller is not a session, because that is where an author is
+ * most likely to look for an exemption, and since 2026-11-16 there is none to find: `service/` routes
+ * used to be exempt, and an adopter's old one fails here on taking the update.
+ */
+const NON_SESSION_HINT =
+    'A caller that is not a session authorizes its actor with the three-argument form, ' +
+    'authorize(actor, action, subject): a service key via abilityActorFromService (withServiceCaller passes it as ' +
+    'ctx.actor), a machine the app verifies via machineActor, or a person holding a non-session credential (a ' +
+    'personal API token) via abilityActorFromCredential. The `service/` exemption was retired (ADR-0012 addendum, 2026-11-16).'
+
+/**
+ * Gates a mutating route under a prefix must carry IN ADDITION to authorize(...). Authorizing an actor
+ * means something only if the actor came from a verified credential: `authorize(` alone is satisfied
+ * just as well by a `{ kind: 'machine', credential: { kind: 'service-key' } … }` literal built from the
+ * request. So a service route must also verify its caller through the wrapper that BUILDS that actor.
+ * Matched by relative path in every root, like the exemptions, and backed by a fixture route.
+ */
+const REQUIRED_ALONGSIDE: Record<string, Exemption> = {
+    'service/': {
+        reason:
+            'a service route verifies its caller with withServiceCaller, which builds the machine actor ' +
+            '(ctx.actor) the route should authorize. The gate proves the wrapper is present, not that the ' +
+            'actor authorized is the one it built (ADR-0012: a gate proves the KIND of route)',
+        mustMatch: /withServiceCaller\s*[(<]/,
     },
 }
 
@@ -263,7 +290,8 @@ describe('every mutating API route is authorized', () => {
 
     it('the fixture tree still carries a route for every invariant this scan asserts', () => {
         // Named explicitly so a rename inside the fixture cannot quietly retire an invariant: an
-        // authorized product mutation, a framework membership mutation, and one route per gated
+        // authorized product mutation, a framework membership mutation, a MACHINE mutation (a service
+        // caller, authorized with its machine actor rather than exempted), and one route per gated
         // prefix. The exemption-staleness cases below cover the EXEMPT_FILES half.
         for (const rel of [
             'dockets/route.ts',
@@ -297,10 +325,18 @@ describe('every mutating API route is authorized', () => {
                         `contain it — the exemption's justification does not hold here; add the gate or call authorize(...)`,
                 ).toBe(true)
             } else {
+                const required = Object.entries(REQUIRED_ALONGSIDE).find(([prefix]) => file.rel.startsWith(prefix))
+                if (required) {
+                    expect(
+                        required[1].mustMatch.test(stripComments(file.content)),
+                        `${file.root}: ${file.rel} must also contain ${required[1].mustMatch}: ${required[1].reason}`,
+                    ).toBe(true)
+                }
                 expect(
                     CALLS_AUTHORIZE.test(stripComments(file.content)),
                     `${file.rel} exports a mutating handler but neither calls authorize(...) nor is in the exemption map. ` +
-                        `Add an authorize(...) call, or (only if genuinely not a per-actor product mutation) a justified exemption.`,
+                        `Add an authorize(...) call, or (only if genuinely not a per-actor product mutation) a justified exemption. ` +
+                        NON_SESSION_HINT,
                 ).toBe(true)
             }
         })
@@ -327,6 +363,15 @@ describe('every mutating API route is authorized', () => {
             expect(
                 fixtureRels.has(rel),
                 `exemption for ${rel} is stale — packages/keel/test-fixture/api has no mutating route at that path`,
+            ).toBe(true)
+        }
+    })
+
+    it('has no stale required-alongside gates (each covers a mutating route in the fixture tree)', () => {
+        for (const prefix of Object.keys(REQUIRED_ALONGSIDE)) {
+            expect(
+                [...fixtureRels].some((rel) => rel.startsWith(prefix)),
+                `required gate ${prefix} covers no mutating route in packages/keel/test-fixture/api`,
             ).toBe(true)
         }
     })

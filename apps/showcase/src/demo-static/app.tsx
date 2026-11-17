@@ -22,6 +22,7 @@ import { go } from 'keel/demo-static/hash-route'
 import { DemoShell } from 'keel/demo-static/shell'
 import { useDemoWorld } from 'keel/demo-static/world'
 import { defineAbilitiesFor } from 'keel/core/abilities'
+import { isRestricted } from 'keel/core/roles'
 import { keysetPageInMemory, parseKeysetCursor } from 'keel/core/keyset'
 import type { Locale } from 'keel/core/locale'
 import { AttachmentsCard, type AttachmentItem } from '../components/attachments-card'
@@ -201,7 +202,8 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
             const ability = defineAbilitiesFor({
                 userId: sender.id,
                 role: membership.role,
-                restricted: sender.restricted,
+                // The server's sender reads its standing through the auth port, which applies this rule.
+                restricted: isRestricted(sender.restricted, membership.role),
                 activeOrgId: org.slug,
                 manageAll: false,
             })
@@ -322,9 +324,11 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
         // Same pure ability the real server runs — restricted people get a read-only TicketsCard here
         // too (ADR-0006 parity).
         const ability = defineAbilitiesFor({
+            // The static shell's signed-in person IS a session, and only a stated session wields manage-all.
+            credential: { kind: 'session', id: null },
             userId: person.id,
             role: world.roleInOrg(person, activeOrgSlug),
-            restricted: person.restricted,
+            restricted: isRestricted(person.restricted, world.roleInOrg(person, activeOrgSlug)),
             activeOrgId: activeOrgSlug,
             // Staff seam: acting AS the desk-ops org activates manage-all, exactly like
             // abilityActorFromUser derives it server-side — genuine parity, no degrade.
@@ -426,7 +430,7 @@ export function StaticDemoApp({ locale, onLocaleChange }: { locale: Locale; onLo
                 user={{
                     name: world.name,
                     role: world.roleInOrg(person, activeOrgSlug),
-                    restricted: person.restricted,
+                    restricted: isRestricted(person.restricted, world.roleInOrg(person, activeOrgSlug)),
                 }}
                 onAsk={async (question, onDelta) => {
                     world.logEvent('assistant_asked', { tenant: tenant.slug })
