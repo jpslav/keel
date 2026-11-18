@@ -1,5 +1,10 @@
 # keel — a multi-tenant application template
 
+> **This repository has moved.** keel continues as **SSSB** at
+> [github.com/safeinsights/sssb](https://github.com/safeinsights/sssb), maintained by SafeInsights, with this
+> repository's full history. This copy is archived and read-only, so its links keep working. PR numbers here
+> (`#54`) are `jpslav/keel#54` there.
+
 A production-shaped Next.js foundation you fork and build a product on: ports-and-adapters architecture,
 Postgres row-level-security tenancy, and a local development loop that runs the whole world on your laptop
 with no docker, no credentials, and no network.
